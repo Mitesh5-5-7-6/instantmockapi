@@ -1,0 +1,26 @@
+{
+  "name": "@instantmockapi/mock-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "lint": "echo \"lint placeholder\"",
+    "test": "vitest run",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@instantmockapi/shared": "workspace:*",
+    "@instantmockapi/config": "workspace:*",
+    "@instantmockapi/db": "workspace:*",
+    "@instantmockapi/auth": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "tsx": "^4.19.0",
+    "vitest": "^3.2.0",
+    "rimraf": "^6.0.0"
+  }
+}

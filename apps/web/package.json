@@ -1,0 +1,20 @@
+{
+  "name": "@instantmockapi/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "echo \"web build placeholder\"",
+    "dev": "echo \"web dev placeholder\"",
+    "typecheck": "echo \"web typecheck placeholder\"",
+    "lint": "echo \"web lint placeholder\"",
+    "test": "echo \"web test placeholder\"",
+    "clean": "echo \"web clean placeholder\""
+  },
+  "dependencies": {
+    "@instantmockapi/shared": "workspace:*",
+    "@instantmockapi/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@instantmockapi/ips",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "lint": "echo \"lint placeholder\"",
+    "test": "vitest run",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@instantmockapi/shared": "workspace:*"
+  },
+  "devDependencies": { "typescript": "^5.8.0", "vitest": "^3.2.0", "rimraf": "^6.0.0" }
+}

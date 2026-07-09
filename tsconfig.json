@@ -1,0 +1,26 @@
+{
+  "extends": "./tooling/tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@instantmockapi/shared": ["packages/shared/src/index.ts"],
+      "@instantmockapi/config": ["packages/config/src/index.ts"],
+      "@instantmockapi/ips": ["packages/ips/src/index.ts"],
+      "@instantmockapi/parsers": ["packages/parsers/src/index.ts"],
+      "@instantmockapi/queue": ["packages/queue/src/index.ts"],
+      "@instantmockapi/registry": ["packages/registry/src/index.ts"],
+      "@instantmockapi/db": ["packages/db/src/index.ts"],
+      "@instantmockapi/auth": ["packages/auth/src/index.ts"],
+      "@instantmockapi/ui": ["packages/ui/src/index.ts"],
+      "@instantmockapi/generator-schema": ["packages/generators/schema/src/index.ts"],
+      "@instantmockapi/generator-validation": ["packages/generators/validation/src/index.ts"],
+      "@instantmockapi/generator-types": ["packages/generators/types/src/index.ts"],
+      "@instantmockapi/generator-mock-data": ["packages/generators/mock-data/src/index.ts"],
+      "@instantmockapi/generator-docs": ["packages/generators/docs/src/index.ts"],
+      "@instantmockapi/generator-hosting": ["packages/generators/hosting/src/index.ts"],
+      "@instantmockapi/generator-export": ["packages/generators/export/src/index.ts"],
+      "@instantmockapi/generator-stretch": ["packages/generators/stretch/src/index.ts"]
+    }
+  },
+  "exclude": ["node_modules", "**/dist"]
+}

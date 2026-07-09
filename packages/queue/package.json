@@ -1,0 +1,33 @@
+{
+    "scripts":  {
+                    "test":  "vitest run",
+                    "clean":  "rimraf dist",
+                    "build":  "tsc --project tsconfig.json",
+                    "typecheck":  "tsc --noEmit --project tsconfig.json",
+                    "lint":  "echo \"lint placeholder\""
+                },
+    "type":  "module",
+    "types":  "./dist/index.d.ts",
+    "version":  "0.1.0",
+    "devDependencies":  {
+                            "typescript":  "^5.8.0",
+                            "rimraf":  "^6.0.0",
+                            "vitest":  "^3.2.0"
+                        },
+    "name":  "@instantmockapi/queue",
+    "private":  true,
+    "exports":  {
+                    ".":  {
+                              "types":  "./dist/index.d.ts",
+                              "import":  "./dist/index.js"
+                          }
+                },
+    "main":  "./dist/index.js",
+    "dependencies":  {
+                         "@instantmockapi/shared":  "workspace:*",
+                         "@instantmockapi/config":  "workspace:*",
+                         "@instantmockapi/ips":     "workspace:*",
+                         "bullmq": "^5.41.3",
+                         "ioredis": "^5.5.0"
+                     }
+}
