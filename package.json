@@ -12,19 +12,27 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint && pnpm depcruise",
+    "lint": "eslint . && pnpm depcruise",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "clean": "turbo run clean",
-    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "depcruise": "depcruise --config .dependency-cruiser.cjs apps packages"
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,mjs,cjs,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,mjs,cjs,json,md,yml,yaml}\"",
+    "depcruise": "depcruise --config .dependency-cruiser.cjs apps packages",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.1",
     "@commitlint/config-conventional": "^21.2.0",
+    "@eslint/js": "^9.19.0",
     "@types/node": "^26.1.1",
     "dependency-cruiser": "^18.0.0",
-    "turbo": "^2.10.4"
+    "eslint": "^9.19.0",
+    "eslint-config-prettier": "^10.0.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.6",
+    "prettier": "^3.4.2",
+    "turbo": "^2.10.4",
+    "typescript-eslint": "^8.22.0"
   }
 }

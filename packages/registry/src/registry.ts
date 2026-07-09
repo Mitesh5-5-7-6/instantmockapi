@@ -1,10 +1,5 @@
 import { Types } from 'mongoose';
-import {
-  Artifact,
-  IArtifact,
-  ArtifactType,
-  ArtifactStatus,
-} from '@instantmockapi/db';
+import { Artifact, IArtifact, ArtifactType, ArtifactStatus } from '@instantmockapi/db';
 import { logger, AppError, Result, ok, err } from '@instantmockapi/shared';
 // Define valid status transitions in the state machine (doc 04 §F12, doc 07 §2)
 const VALID_TRANSITIONS: Record<ArtifactStatus, ArtifactStatus[]> = {
@@ -19,7 +14,7 @@ const VALID_TRANSITIONS: Record<ArtifactStatus, ArtifactStatus[]> = {
 export async function createOrResetArtifactRecord(
   projectId: string,
   artifactType: ArtifactType,
-  version: number
+  version: number,
 ): Promise<Result<IArtifact, AppError>> {
   try {
     const pId = new Types.ObjectId(projectId);
@@ -35,7 +30,7 @@ export async function createOrResetArtifactRecord(
           storageRef: null,
         },
       },
-      { new: true, upsert: true }
+      { new: true, upsert: true },
     );
     logger.debug(`Artifact registry record created/reset`, {
       projectId,
@@ -45,12 +40,16 @@ export async function createOrResetArtifactRecord(
     });
     return ok(artifact);
   } catch (error: any) {
-    logger.error('Failed to create artifact record', { error: error.message, projectId, artifactType });
+    logger.error('Failed to create artifact record', {
+      error: error.message,
+      projectId,
+      artifactType,
+    });
     return err(
       new AppError({
         code: 'INTERNAL_ERROR',
         message: 'Failed to create artifact record',
-      })
+      }),
     );
   }
 }
@@ -66,7 +65,7 @@ export async function transitionArtifactStatus(
     storageRef?: string | null;
     errorMessage?: string | null;
     workerId?: string | null;
-  } = {}
+  } = {},
 ): Promise<Result<IArtifact, AppError>> {
   try {
     const pId = new Types.ObjectId(projectId);
@@ -82,7 +81,7 @@ export async function transitionArtifactStatus(
         new AppError({
           code: 'NOT_FOUND',
           message: `Artifact ${artifactType} version ${version} not found for project ${projectId}`,
-        })
+        }),
       );
     }
     const currentStatus = artifact.status;
@@ -95,7 +94,7 @@ export async function transitionArtifactStatus(
         new AppError({
           code: 'VALIDATION_ERROR',
           message: msg,
-        })
+        }),
       );
     }
     // 3. Perform update based on status
@@ -121,14 +120,14 @@ export async function transitionArtifactStatus(
     const updated = await Artifact.findOneAndUpdate(
       { projectId: pId, artifactType, version },
       { $set: updateFields },
-      { new: true }
+      { new: true },
     );
     if (!updated) {
       return err(
         new AppError({
           code: 'INTERNAL_ERROR',
           message: 'Failed to update artifact record',
-        })
+        }),
       );
     }
     logger.info(`Artifact transitioned successfully`, {
@@ -140,12 +139,16 @@ export async function transitionArtifactStatus(
     });
     return ok(updated);
   } catch (error: any) {
-    logger.error('Failed to transition artifact status', { error: error.message, projectId, artifactType });
+    logger.error('Failed to transition artifact status', {
+      error: error.message,
+      projectId,
+      artifactType,
+    });
     return err(
       new AppError({
         code: 'INTERNAL_ERROR',
         message: 'Failed to transition status',
-      })
+      }),
     );
   }
 }
@@ -154,19 +157,23 @@ export async function transitionArtifactStatus(
  */
 export async function getArtifactsForVersion(
   projectId: string,
-  version: number
+  version: number,
 ): Promise<Result<IArtifact[], AppError>> {
   try {
     const pId = new Types.ObjectId(projectId);
     const artifacts = await Artifact.find({ projectId: pId, version });
     return ok(artifacts);
   } catch (error: any) {
-    logger.error('Failed to fetch artifacts for version', { error: error.message, projectId, version });
+    logger.error('Failed to fetch artifacts for version', {
+      error: error.message,
+      projectId,
+      version,
+    });
     return err(
       new AppError({
         code: 'INTERNAL_ERROR',
         message: 'Failed to fetch artifacts',
-      })
+      }),
     );
   }
 }
@@ -176,19 +183,24 @@ export async function getArtifactsForVersion(
 export async function getArtifactRecord(
   projectId: string,
   artifactType: ArtifactType,
-  version: number
+  version: number,
 ): Promise<Result<IArtifact | null, AppError>> {
   try {
     const pId = new Types.ObjectId(projectId);
     const artifact = await Artifact.findOne({ projectId: pId, artifactType, version });
     return ok(artifact);
   } catch (error: any) {
-    logger.error('Failed to fetch artifact record', { error: error.message, projectId, artifactType, version });
+    logger.error('Failed to fetch artifact record', {
+      error: error.message,
+      projectId,
+      artifactType,
+      version,
+    });
     return err(
       new AppError({
         code: 'INTERNAL_ERROR',
         message: 'Failed to fetch artifact record',
-      })
+      }),
     );
   }
 }

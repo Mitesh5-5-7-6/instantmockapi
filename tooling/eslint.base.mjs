@@ -1,0 +1,52 @@
+// Shared ESLint flat config for the monorepo (doc 17 §8).
+// Consumed by the root eslint.config.mjs. TypeScript-aware rules that catch the
+// smells our review flagged: no-explicit-any, no-case-declarations, unused vars.
+import js from '@eslint/js';
+import tseslint from 'typescript-eslint';
+import prettier from 'eslint-config-prettier';
+
+export default tseslint.config(
+  // Ignore build output and non-source dirs everywhere.
+  {
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/.turbo/**',
+      '**/.next/**',
+      '**/coverage/**',
+      '**/*.tsbuildinfo',
+    ],
+  },
+
+  // Base JS + recommended TypeScript rules (non-type-checked: fast, no per-package
+  // project wiring needed). Upgrade to recommendedTypeChecked later for type-aware lint.
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
+
+  // Project-wide rule tuning.
+  {
+    rules: {
+      // Catch `catch (e: any)` and other explicit-any usage (doc 17 §4).
+      '@typescript-eslint/no-explicit-any': 'warn',
+      // Allow intentionally-unused args/vars when prefixed with underscore
+      // (matches the existing `_projectName` convention in the parsers).
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
+      // `no-case-declarations` ships enabled via js.configs.recommended — it flags
+      // the `case 'enum': const … ` pattern in the Zod/Yup generators.
+    },
+  },
+
+  // Tests may be looser.
+  {
+    files: ['**/*.test.ts', '**/__tests__/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
+
+  // Disable stylistic rules that conflict with Prettier (Prettier owns formatting).
+  prettier,
+);
