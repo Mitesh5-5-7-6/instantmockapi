@@ -87,7 +87,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Check formatting
-        run: pnpm turbo run format:check
+        run: pnpm format:check
 
   lint:
     name: Lint
