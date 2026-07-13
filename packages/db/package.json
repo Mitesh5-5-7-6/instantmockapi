@@ -1,32 +1,32 @@
 {
-    "scripts": {
-        "test": "vitest run",
-        "clean": "rimraf dist",
-        "build": "tsc --project tsconfig.json",
-        "typecheck": "tsc --noEmit --project tsconfig.json",
-        "lint": "echo \"lint placeholder\""
-    },
-    "type": "module",
-    "types": "./dist/index.d.ts",
-    "version": "0.1.0",
-    "devDependencies": {
-        "rimraf": "^6.0.0",
-        "typescript": "^5.8.0",
-        "vitest": "^3.2.0"
-    },
-    "name": "@instantmockapi/db",
-    "private": true,
-    "exports": {
-        ".": {
-            "types": "./dist/index.d.ts",
-            "import": "./dist/index.js"
-        }
-    },
-    "main": "./dist/index.js",
-    "dependencies": {
-        "@instantmockapi/shared": "workspace:*",
-        "@instantmockapi/ips": "workspace:*",
-        "@instantmockapi/config": "workspace:*",
-        "mongoose": "^9.7.4"
+  "scripts": {
+    "test": "vitest run",
+    "clean": "rimraf dist",
+    "build": "tsc --project tsconfig.json",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "lint": "echo \"lint placeholder\""
+  },
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "version": "0.1.0",
+  "devDependencies": {
+    "rimraf": "^6.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  },
+  "name": "@instantmockapi/db",
+  "private": true,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
+  },
+  "main": "./dist/index.js",
+  "dependencies": {
+    "@instantmockapi/shared": "workspace:*",
+    "@instantmockapi/ips": "workspace:*",
+    "@instantmockapi/config": "workspace:*",
+    "mongoose": "^9.7.4"
+  }
 }

@@ -6,7 +6,13 @@
  */
 
 import { AppError, type ErrorDetail, type Result, ok, err } from '@instantmockapi/shared';
-import type { InternalProjectSchema, Entity, Field, FieldType, ValidationRules } from '@instantmockapi/ips';
+import type {
+  InternalProjectSchema,
+  Entity,
+  Field,
+  FieldType,
+  ValidationRules,
+} from '@instantmockapi/ips';
 
 // ISO-8601 Date regex: Matches YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss.sssZ etc.
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{3})?(Z|[+-]\d{2}:?\d{2})?)?$/;
@@ -113,7 +119,7 @@ function inferField(key: string, value: unknown, path: string, ctx: ParserCtx): 
   const meta = {};
   let type: FieldType = 'string';
   let required = true;
-  let validation: ValidationRules = {};
+  const validation: ValidationRules = {};
   let children: Field[] = [];
   let defaultValue: unknown = null;
 
@@ -235,7 +241,7 @@ function mergeObjects(arr: unknown[], path: string, ctx: ParserCtx): Field[] {
 
     // Pick first as template, merge properties
     const baseField = inferredFields[0]!;
-    
+
     // If any record had this missing, make it optional
     if (info.values.length < arr.length || inferredFields.some((f) => !f.required)) {
       baseField.required = false;
@@ -254,7 +260,9 @@ function mergeObjects(arr: unknown[], path: string, ctx: ParserCtx): Field[] {
 
     // If type is object, recursively merge child objects
     if (baseField.type === 'object') {
-      const childObjects = info.values.filter((v): v is Record<string, unknown> => typeof v === 'object' && v !== null);
+      const childObjects = info.values.filter(
+        (v): v is Record<string, unknown> => typeof v === 'object' && v !== null,
+      );
       baseField.children = mergeObjects(childObjects, `${path}.*`, ctx);
     }
     // If type is array of objects, recursively merge grandchildren
@@ -279,5 +287,12 @@ function isEmailKey(key: string): boolean {
 
 function isUrlKey(key: string): boolean {
   const k = key.toLowerCase();
-  return k === 'url' || k === 'website' || k === 'link' || k.endsWith('url') || k.endsWith('website') || k.endsWith('link');
+  return (
+    k === 'url' ||
+    k === 'website' ||
+    k === 'link' ||
+    k.endsWith('url') ||
+    k.endsWith('website') ||
+    k.endsWith('link')
+  );
 }

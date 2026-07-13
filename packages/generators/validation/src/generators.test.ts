@@ -107,7 +107,9 @@ describe('Zod Generator — Golden-File Tests', () => {
     expect(code).toContain("import { z } from 'zod';");
     expect(code).toContain('export const CustomerSchema = z.object({');
     expect(code).toContain('primaryDetail: z.object({');
-    expect(code).toContain("name: z.string().min(3, { message: \"Name must be at least 3 characters\" })");
+    expect(code).toContain(
+      'name: z.string().min(3, { message: "Name must be at least 3 characters" })',
+    );
     expect(code).toContain('email: z.string().email() /* unique */');
     expect(code).toContain('addresses: z.array(z.object({');
     expect(code).toContain('type: z.enum(["home", "work"]).default("home")');
@@ -135,7 +137,9 @@ describe('Zod Generator — Golden-File Tests', () => {
     });
 
     it('should generate string field with min/max/message/default', () => {
-      expect(code).toContain('title: z.string().min(5, { message: "Title must be 5-200 chars" }).max(200, { message: "Title must be 5-200 chars" }).default("")');
+      expect(code).toContain(
+        'title: z.string().min(5, { message: "Title must be 5-200 chars" }).max(200, { message: "Title must be 5-200 chars" }).default("")',
+      );
     });
 
     it('should generate string field with regex and unique comment', () => {
@@ -246,7 +250,9 @@ describe('Yup Generator — Golden-File Tests', () => {
     expect(code).toContain("import * as yup from 'yup';");
     expect(code).toContain('export const CustomerSchema = yup.object({');
     expect(code).toContain('primaryDetail: yup.object({');
-    expect(code).toContain('name: yup.string().min(3, "Name must be at least 3 characters").required("Name must be at least 3 characters")');
+    expect(code).toContain(
+      'name: yup.string().min(3, "Name must be at least 3 characters").required("Name must be at least 3 characters")',
+    );
     expect(code).toContain('email: yup.string().email().required() /* unique */');
     expect(code).toContain('export type Customer = yup.InferType<typeof CustomerSchema>;');
   });
@@ -271,7 +277,9 @@ describe('Yup Generator — Golden-File Tests', () => {
     });
 
     it('should generate string with min/max/message', () => {
-      expect(code).toContain('title: yup.string().min(5, "Title must be 5-200 chars").max(200, "Title must be 5-200 chars")');
+      expect(code).toContain(
+        'title: yup.string().min(5, "Title must be 5-200 chars").max(200, "Title must be 5-200 chars")',
+      );
     });
 
     it('should generate string with regex match and unique', () => {

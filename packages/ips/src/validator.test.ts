@@ -69,7 +69,11 @@ describe('IPS Validator', () => {
     const res = validateIPS(invalid);
     expect(res.ok).toBe(false);
     if (!res.ok) {
-      expect(res.error.details.some((d) => d.path === 'entities[1].name' && d.issue.includes('Duplicate'))).toBe(true);
+      expect(
+        res.error.details.some(
+          (d) => d.path === 'entities[1].name' && d.issue.includes('Duplicate'),
+        ),
+      ).toBe(true);
     }
   });
 
@@ -105,7 +109,11 @@ describe('IPS Validator', () => {
     const res = validateIPS(invalid);
     expect(res.ok).toBe(false);
     if (!res.ok) {
-      expect(res.error.details.some((d) => d.path === 'entities[0].fields[1].name' && d.issue.includes('Duplicate'))).toBe(true);
+      expect(
+        res.error.details.some(
+          (d) => d.path === 'entities[0].fields[1].name' && d.issue.includes('Duplicate'),
+        ),
+      ).toBe(true);
     }
   });
 
@@ -132,7 +140,11 @@ describe('IPS Validator', () => {
     const res = validateIPS(invalid);
     expect(res.ok).toBe(false);
     if (!res.ok) {
-      expect(res.error.details.some((d) => d.path === 'entities[0].fields[0].name' && d.issue.includes('invalid'))).toBe(true);
+      expect(
+        res.error.details.some(
+          (d) => d.path === 'entities[0].fields[0].name' && d.issue.includes('invalid'),
+        ),
+      ).toBe(true);
     }
   });
 

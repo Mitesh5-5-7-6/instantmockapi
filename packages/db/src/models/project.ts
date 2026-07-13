@@ -75,7 +75,7 @@ const projectSchema = new Schema<IProject>(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Indexes

@@ -181,8 +181,15 @@ describe('JSON Schema Generator — Golden-File Tests', () => {
     it('should include all required fields in the required array', () => {
       const requiredFields = schema.required;
       const expectedRequired = [
-        'id', 'title', 'slug', 'viewCount', 'published',
-        'createdAt', 'authorEmail', 'status', 'metadata',
+        'id',
+        'title',
+        'slug',
+        'viewCount',
+        'published',
+        'createdAt',
+        'authorEmail',
+        'status',
+        'metadata',
       ];
       for (const field of expectedRequired) {
         expect(requiredFields).toContain(field);

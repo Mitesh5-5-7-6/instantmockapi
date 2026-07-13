@@ -88,12 +88,12 @@ function getFieldTypeName(
     case 'date':
       return 'string'; // Represented as ISO-8601 string on wire (doc 04 §F6)
 
-    case 'enum':
+    case 'enum': {
       const values = field.validation.enum ?? [];
       if (values.length === 0) return 'string';
       return values.map((v) => JSON.stringify(v)).join(' | ');
-
-    case 'object':
+    }
+    case 'object': {
       const subInterfaceName = `${parentName}${capitalize(field.name)}`;
       const subFields = field.children.map((child) =>
         renderFieldLine(subInterfaceName, child, definitions),
@@ -103,7 +103,7 @@ function getFieldTypeName(
         fields: subFields,
       });
       return subInterfaceName;
-
+    }
     case 'array':
       if (field.children.length > 0) {
         const itemField = field.children[0]!;

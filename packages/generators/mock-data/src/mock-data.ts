@@ -27,7 +27,7 @@ export function generateMockData(
   const recordCount = ips.generationConfig.mockRecords ?? 25;
 
   for (const entity of ips.entities) {
-    const records: Record<string, any>[] = [];
+    const records: Record<string, string>[] = [];
     for (let i = 0; i < recordCount; i++) {
       records.push(generateRecord(entity.fields, faker));
     }
@@ -37,8 +37,8 @@ export function generateMockData(
   return result;
 }
 
-function generateRecord(fields: Field[], faker: Faker): Record<string, any> {
-  const record: Record<string, any> = {};
+function generateRecord(fields: Field[], faker: Faker): Record<string, string> {
+  const record: Record<string, string> = {};
 
   for (const field of fields) {
     record[field.name] = generateFieldValue(field, faker);
@@ -56,9 +56,9 @@ function generateFieldValue(field: Field, faker: Faker): any {
   const rules = field.validation;
 
   switch (field.type) {
-    case 'string':
-      // Check field name pattern matching for richer mock data
+    case 'string': {
       const name = field.name.toLowerCase();
+
       if (name.includes('firstname')) return faker.person.firstName();
       if (name.includes('lastname')) return faker.person.lastName();
       if (name.includes('fullname') || name === 'name') return faker.person.fullName();
@@ -67,30 +67,45 @@ function generateFieldValue(field: Field, faker: Faker): any {
       if (name.includes('city')) return faker.location.city();
       if (name.includes('country')) return faker.location.country();
       if (name.includes('zip') || name.includes('postal')) return faker.location.zipCode();
-      if (name.includes('street') || name.includes('address')) return faker.location.streetAddress();
+      if (name.includes('street') || name.includes('address')) {
+        return faker.location.streetAddress();
+      }
 
       const minLen = rules.min ?? rules.length ?? 5;
       const maxLen = rules.max ?? rules.length ?? 20;
+
       let text = faker.lorem.sentence();
+
       if (text.length > maxLen) {
         text = text.slice(0, maxLen);
       }
+
       if (text.length < minLen) {
         text = text.padEnd(minLen, 'a');
       }
-      return text;
 
+      return text;
+    }
     case 'number':
-    case 'decimal':
+    case 'decimal': {
       const minNum = rules.min ?? 0;
       const maxNum = rules.max ?? 10000;
-      return faker.number.float({ min: minNum, max: maxNum, multipleOf: 0.01 });
 
-    case 'integer':
+      return faker.number.float({
+        min: minNum,
+        max: maxNum,
+        multipleOf: 0.01,
+      });
+    }
+    case 'integer': {
       const minInt = rules.min ?? 0;
       const maxInt = rules.max ?? 10000;
-      return faker.number.int({ min: minInt, max: maxInt });
 
+      return faker.number.int({
+        min: minInt,
+        max: maxInt,
+      });
+    }
     case 'boolean':
       return faker.datatype.boolean();
 
@@ -106,28 +121,38 @@ function generateFieldValue(field: Field, faker: Faker): any {
     case 'uuid':
       return faker.string.uuid();
 
-    case 'enum':
+    case 'enum': {
       const values = rules.enum ?? [];
-      if (values.length === 0) return '';
-      return faker.helpers.arrayElement(values);
 
+      if (values.length === 0) {
+        return '';
+      }
+
+      return faker.helpers.arrayElement(values);
+    }
     case 'object':
       return generateRecord(field.children, faker);
 
-    case 'array':
+    case 'array': {
       const minArr = rules.arrayLength?.min ?? 1;
       const maxArr = rules.arrayLength?.max ?? 3;
-      const count = faker.number.int({ min: minArr, max: maxArr });
-      
-      const arrayItems: any[] = [];
+      const count = faker.number.int({
+        min: minArr,
+        max: maxArr,
+      });
+
+      const arrayItems: string[] = [];
+
       if (field.children.length > 0) {
         const itemField = field.children[0]!;
+
         for (let i = 0; i < count; i++) {
           arrayItems.push(generateFieldValue(itemField, faker));
         }
       }
-      return arrayItems;
 
+      return arrayItems;
+    }
     default:
       return null;
   }

@@ -19,26 +19,29 @@ export interface IJob extends Document {
   completedAt: Date | null;
 }
 
-const jobWorkerSchema = new Schema<IJobWorker>({
-  worker: {
-    type: String,
-    required: true,
+const jobWorkerSchema = new Schema<IJobWorker>(
+  {
+    worker: {
+      type: String,
+      required: true,
+    },
+    artifactType: {
+      type: String,
+      required: true,
+    },
+    status: {
+      type: String,
+      required: true,
+      enum: ['queued', 'running', 'completed', 'failed'],
+      default: 'queued',
+    },
+    error: {
+      type: String,
+      default: null,
+    },
   },
-  artifactType: {
-    type: String,
-    required: true,
-  },
-  status: {
-    type: String,
-    required: true,
-    enum: ['queued', 'running', 'completed', 'failed'],
-    default: 'queued',
-  },
-  error: {
-    type: String,
-    default: null,
-  },
-}, { _id: false });
+  { _id: false },
+);
 
 const jobSchema = new Schema<IJob>(
   {
@@ -83,7 +86,7 @@ const jobSchema = new Schema<IJob>(
   },
   {
     timestamps: { createdAt: true, updatedAt: true },
-  }
+  },
 );
 
 // Indexes

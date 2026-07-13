@@ -1,5 +1,5 @@
 /** @type {import('dependency-cruiser').IConfiguration} */
-module.exports = {
+const config = {
   forbidden: [
     {
       name: 'no-circular',
@@ -7,97 +7,103 @@ module.exports = {
       comment: 'Circular dependencies are not allowed in the monorepo.',
       from: {},
       to: {
-        circular: true
-      }
+        circular: true,
+      },
     },
     {
       name: 'no-orphans',
       severity: 'warn',
       comment: 'This file has no relations with other files in the source tree.',
       from: {
-        orphan: true
+        orphan: true,
       },
-      to: {}
+      to: {},
     },
     {
       name: 'no-packages-importing-apps',
       severity: 'error',
-      comment: 'Shared packages must never import from apps. Dependency direction must be downward only.',
+      comment:
+        'Shared packages must never import from apps. Dependency direction must be downward only.',
       from: {
-        path: '^packages/([^/]+)/src/.+'
+        path: '^packages/([^/]+)/src/.+',
       },
       to: {
-        path: '^apps/'
-      }
+        path: '^apps/',
+      },
     },
     {
       name: 'generators-must-be-pure',
       severity: 'error',
-      comment: 'Generators must be pure and can only import shared, ips, or config. No I/O, database, queue, registry or auth imports allowed.',
+      comment:
+        'Generators must be pure and can only import shared, ips, or config. No I/O, database, queue, registry or auth imports allowed.',
       from: {
-        path: '^packages/generators/([^/]+)/src/.+'
+        path: '^packages/generators/([^/]+)/src/.+',
       },
       to: {
         path: '^packages/([^/]+)',
-        pathNot: '^packages/(shared|ips|config)'
-      }
+        pathNot: '^packages/(shared|ips|config)',
+      },
     },
     {
       name: 'ips-must-be-independent',
       severity: 'error',
       comment: 'The IPS package represents the core data contract and must only import shared.',
       from: {
-        path: '^packages/ips/src/.+'
+        path: '^packages/ips/src/.+',
       },
       to: {
         path: '^packages/([^/]+)',
-        pathNot: '^packages/(shared)'
-      }
+        pathNot: '^packages/shared',
+      },
     },
     {
       name: 'parsers-must-be-pure',
       severity: 'error',
-      comment: 'Parsers must only import shared or ips. They should not import queue, db, registry, or apps.',
+      comment:
+        'Parsers must only import shared or ips. They should not import queue, db, registry, or apps.',
       from: {
-        path: '^packages/parsers/src/.+'
+        path: '^packages/parsers/src/.+',
       },
       to: {
         path: '^packages/([^/]+)',
-        pathNot: '^packages/(shared|ips)'
-      }
+        pathNot: '^packages/(shared|ips)',
+      },
     },
     {
       name: 'web-must-not-import-server',
       severity: 'error',
-      comment: 'The web app (apps/web) must not import server packages like db, queue, registry, auth, or generators. It must only communicate via HTTP API.',
+      comment:
+        'The web app (apps/web) must not import server packages like db, queue, registry, auth, or generators. It must only communicate via HTTP API.',
       from: {
-        path: '^apps/web/src/.+'
+        path: '^apps/web/src/.+',
       },
       to: {
         path: '^(packages|apps)/([^/]+)',
-        pathNot: '^(packages/shared|packages/ui)'
-      }
-    }
+        pathNot: '^(packages/shared|packages/ui)',
+      },
+    },
   ],
   options: {
     doNotFollow: {
-      path: 'node_modules'
+      path: 'node_modules',
     },
     exclude: {
-      path: 'dist'
+      path: 'dist',
     },
     tsPreCompilationDeps: true,
     tsConfig: {
-      fileName: 'tsconfig.json'
+      fileName: 'tsconfig.json',
     },
     enhancedResolveOptions: {
       exportsFields: ['exports'],
-      conditionNames: ['import', 'require', 'node', 'default']
+      conditionNames: ['import', 'require', 'node', 'default'],
     },
     reporterOptions: {
       text: {
-        highlightFocused: true
-      }
-    }
-  }
+        highlightFocused: true,
+      },
+    },
+  },
 };
+
+export default config;

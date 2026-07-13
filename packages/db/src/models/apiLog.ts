@@ -35,7 +35,7 @@ const apiLogSchema = new Schema<IApiLog>(
   },
   {
     timestamps: false, // only 'at' is used for TTL
-  }
+  },
 );
 
 // TTL Index - expire after 30 days

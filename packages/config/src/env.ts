@@ -78,7 +78,7 @@ function envInt(key: string, fallback: number): number {
  */
 export function loadEnvConfig(): EnvConfig {
   return {
-    nodeEnv: (envStr('NODE_ENV', 'development') as EnvConfig['nodeEnv']),
+    nodeEnv: envStr('NODE_ENV', 'development') as EnvConfig['nodeEnv'],
     apiPort: envInt('API_PORT', 4000),
     mockRuntimePort: envInt('MOCK_RUNTIME_PORT', 4001),
     webPort: envInt('WEB_PORT', 3000),

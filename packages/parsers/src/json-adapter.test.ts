@@ -104,7 +104,7 @@ describe('JSON Parser Adapter', () => {
       const entity = res.value.entities[0]!;
       const contacts = entity.fields.find((f) => f.name === 'contacts')!;
       expect(contacts.type).toBe('array');
-      
+
       // The schema inside contacts must merge both elements -> name, phone, email
       expect(contacts.children.length).toBe(3);
 

@@ -77,7 +77,7 @@ const artifactSchema = new Schema<IArtifact>(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Indexes

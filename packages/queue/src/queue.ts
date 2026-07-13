@@ -86,7 +86,7 @@ export async function closeQueue(): Promise<void> {
 export function generateIdempotencyKey(
   projectId: string,
   version: number,
-  config: GenerationConfig
+  config: GenerationConfig,
 ): string {
   const hash = crypto.createHash('sha256');
   hash.update(projectId);
@@ -104,7 +104,7 @@ export async function enqueueGenerationJob(
   version: number,
   type: 'full' | 'partial',
   requestedArtifacts: string[],
-  idempotencyKey: string
+  idempotencyKey: string,
 ): Promise<Job<GenerationJobPayload>> {
   const queue = getJobQueue();
   const payload: GenerationJobPayload = {

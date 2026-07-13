@@ -1,5 +1,6 @@
 {
   "name": "instant-mock-api",
+  "type": "module",
   "version": "0.1.0",
   "private": true,
   "description": "Backend Development Studio — turn API requirements into a complete backend toolkit in under 3 minutes",

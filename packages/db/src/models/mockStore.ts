@@ -21,13 +21,13 @@ const mockStoreSchema = new Schema<IMockStore>(
       trim: true,
     },
     records: {
-      type: [Schema.Types.Mixed] as any,
+      type: [Schema.Types.Mixed] as unknown as typeof Schema.Types.Mixed,
       default: [],
     },
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Indexes

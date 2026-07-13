@@ -97,20 +97,20 @@ function renderField(field: Field, indent: number): string {
       base = `z.string().uuid(${noMsgOpt})`;
       break;
 
-    case 'enum':
+    case 'enum': {
       const enumValues = rules.enum ?? [];
       const formattedEnum = enumValues.map((v) => JSON.stringify(v)).join(', ');
       base = `z.enum([${formattedEnum}])`;
       break;
-
-    case 'object':
+    }
+    case 'object': {
       const objIndent = '  '.repeat(indent);
       const innerFields = field.children.map((child) => {
         return `${objIndent}  ${child.name}: ${renderField(child, indent + 1)}`;
       });
       base = `z.object({\n${innerFields.join(',\n')}\n${objIndent}})`;
       break;
-
+    }
     case 'array':
       if (field.children.length > 0) {
         const itemField = field.children[0]!;

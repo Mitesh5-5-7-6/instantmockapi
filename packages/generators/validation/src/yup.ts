@@ -97,20 +97,20 @@ function renderField(field: Field, indent: number): string {
       base = `yup.string().uuid(${onlyMsgArg})`;
       break;
 
-    case 'enum':
+    case 'enum': {
       const enumValues = rules.enum ?? [];
       const formattedEnum = enumValues.map((v) => JSON.stringify(v)).join(', ');
       base = `yup.string().oneOf([${formattedEnum}]${msgArg})`;
       break;
-
-    case 'object':
+    }
+    case 'object': {
       const objIndent = '  '.repeat(indent);
       const innerFields = field.children.map((child) => {
         return `${objIndent}  ${child.name}: ${renderField(child, indent + 1)}`;
       });
       base = `yup.object({\n${innerFields.join(',\n')}\n${objIndent}})`;
       break;
-
+    }
     case 'array':
       if (field.children.length > 0) {
         const itemField = field.children[0]!;

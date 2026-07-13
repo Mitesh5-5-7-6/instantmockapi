@@ -36,10 +36,7 @@ export async function expireProjectInDB(projectId: string): Promise<void> {
   logger.debug(`Deleted all apiLogs for project ${projectId}`);
 
   // 3. Mark all registry artifacts for this project as failed/un-stored (storageRef = null)
-  await Artifact.updateMany(
-    { projectId: pId },
-    { $set: { storageRef: null } }
-  );
+  await Artifact.updateMany({ projectId: pId }, { $set: { storageRef: null } });
   logger.debug(`Nulled all artifact storage references for project ${projectId}`);
 
   // 4. Update the project status to expired and clear hosted details
@@ -51,7 +48,7 @@ export async function expireProjectInDB(projectId: string): Promise<void> {
         'hosted.url': null,
         'hosted.expiresAt': null,
       },
-    }
+    },
   );
   logger.info(`Successfully expired project ${projectId} in database`);
 }

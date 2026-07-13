@@ -31,7 +31,7 @@ const versionSchema = new Schema<IVersion>(
   },
   {
     timestamps: { createdAt: true, updatedAt: false }, // snapshot is immutable
-  }
+  },
 );
 
 // Indexes

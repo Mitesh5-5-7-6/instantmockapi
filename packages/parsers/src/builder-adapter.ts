@@ -5,7 +5,12 @@
  */
 
 import { type Result, ok, err } from '@instantmockapi/shared';
-import { validateIPS, type InternalProjectSchema, type Entity, type GenerationConfig } from '@instantmockapi/ips';
+import {
+  validateIPS,
+  type InternalProjectSchema,
+  type Entity,
+  type GenerationConfig,
+} from '@instantmockapi/ips';
 
 /**
  * Creates and validates an IPS draft from the Visual Schema Builder inputs.

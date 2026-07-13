@@ -37,10 +37,7 @@ interface ValidationCtx {
  * Returns a Result with void on success, or an AppError containing details of all
  * failures on validation/depth limits (doc 04 §F3, doc 13 §3).
  */
-export function validateIPS(
-  ips: unknown,
-  maxDepth = 10,
-): Result<InternalProjectSchema, AppError> {
+export function validateIPS(ips: unknown, maxDepth = 10): Result<InternalProjectSchema, AppError> {
   const ctx: ValidationCtx = {
     errors: [],
     maxDepth,
@@ -271,10 +268,16 @@ function validateField(
       ctx.errors.push({ path: `${path}.validation.length`, issue: 'length must be a number' });
     }
     if (rules.regex !== undefined && rules.regex !== null && typeof rules.regex !== 'string') {
-      ctx.errors.push({ path: `${path}.validation.regex`, issue: 'regex must be a string or null' });
+      ctx.errors.push({
+        path: `${path}.validation.regex`,
+        issue: 'regex must be a string or null',
+      });
     }
     if (rules.enum !== undefined && rules.enum !== null && !Array.isArray(rules.enum)) {
-      ctx.errors.push({ path: `${path}.validation.enum`, issue: 'enum must be an array of strings or null' });
+      ctx.errors.push({
+        path: `${path}.validation.enum`,
+        issue: 'enum must be an array of strings or null',
+      });
     }
     if (rules.email !== undefined && typeof rules.email !== 'boolean') {
       ctx.errors.push({ path: `${path}.validation.email`, issue: 'email must be a boolean' });

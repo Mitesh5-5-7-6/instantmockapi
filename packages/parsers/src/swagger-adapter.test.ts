@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { Field } from '@instantmockapi/ips';
 import { parseSwaggerSpec } from './swagger-adapter.js';
 
 const PROJECT_ID = 'proj_test';
@@ -9,6 +10,10 @@ function expectOk<T>(result: { ok: boolean; value?: T; error?: unknown }): T {
     throw new Error(`Expected ok, got error: ${JSON.stringify(result.error)}`);
   }
   return result.value as T;
+}
+
+function fieldMap(fields: Field[]) {
+  return Object.fromEntries(fields.map((f) => [f.name, f])) as Record<string, Field>;
 }
 
 describe('parseSwaggerSpec — OpenAPI 3.x', () => {
@@ -60,53 +65,53 @@ describe('parseSwaggerSpec — OpenAPI 3.x', () => {
   it('maps string formats to IPS field types and sets format validation flags', () => {
     const ips = expectOk(parseSwaggerSpec(PROJECT_ID, 'Test', openApi3));
     const customer = ips.entities.find((e) => e.name === 'Customer')!;
-    const byName = Object.fromEntries(customer.fields.map((f) => [f.name, f]));
-    expect(byName.id.type).toBe('uuid');
-    expect(byName.id.validation.uuid).toBe(true);
-    expect(byName.email.type).toBe('email');
-    expect(byName.email.validation.email).toBe(true);
-    expect(byName.email.validation.max).toBe(100);
-    expect(byName.website.type).toBe('url');
-    expect(byName.website.validation.url).toBe(true);
+    const byName = fieldMap(customer.fields);
+    const idField = byName['id']!;
+    expect(idField.type).toBe('uuid');
+    expect(idField.validation.uuid).toBe(true);
+    const emailField = byName['email']!;
+    expect(emailField.type).toBe('email');
+    expect(emailField.validation.email).toBe(true);
+    expect(emailField.validation.max).toBe(100);
+    const websiteField = byName['website']!;
+    expect(websiteField.type).toBe('url');
+    expect(websiteField.validation.url).toBe(true);
   });
 
   it('maps numeric ranges and enums', () => {
     const ips = expectOk(parseSwaggerSpec(PROJECT_ID, 'Test', openApi3));
-    const byName = Object.fromEntries(
-      ips.entities.find((e) => e.name === 'Customer')!.fields.map((f) => [f.name, f]),
-    );
-    expect(byName.age.type).toBe('integer');
-    expect(byName.age.validation.min).toBe(0);
-    expect(byName.age.validation.max).toBe(120);
-    expect(byName.status.type).toBe('enum');
-    expect(byName.status.validation.enum).toEqual(['active', 'inactive']);
+    const byName = fieldMap(ips.entities.find((e) => e.name === 'Customer')!.fields);
+    const ageField = byName['age']!;
+    expect(ageField.type).toBe('integer');
+    expect(ageField.validation.min).toBe(0);
+    expect(ageField.validation.max).toBe(120);
+    const statusField = byName['status']!;
+    expect(statusField.type).toBe('enum');
+    expect(statusField.validation.enum).toEqual(['active', 'inactive']);
   });
 
   it('propagates required[] onto fields', () => {
     const ips = expectOk(parseSwaggerSpec(PROJECT_ID, 'Test', openApi3));
-    const byName = Object.fromEntries(
-      ips.entities.find((e) => e.name === 'Customer')!.fields.map((f) => [f.name, f]),
-    );
-    expect(byName.email.required).toBe(true);
-    expect(byName.age.required).toBe(false);
+    const byName = fieldMap(ips.entities.find((e) => e.name === 'Customer')!.fields);
+    expect(byName['email']!.required).toBe(true);
+    expect(byName['age']!.required).toBe(false);
   });
 
   it('represents an array-of-objects as a single item field (canonical convention) and inlines $ref', () => {
     const ips = expectOk(parseSwaggerSpec(PROJECT_ID, 'Test', openApi3));
-    const byName = Object.fromEntries(
-      ips.entities.find((e) => e.name === 'Customer')!.fields.map((f) => [f.name, f]),
-    );
-    const addresses = byName.addresses;
+    const byName = fieldMap(ips.entities.find((e) => e.name === 'Customer')!.fields);
+    const addresses = byName['addresses']!;
     expect(addresses.type).toBe('array');
     expect(addresses.validation.arrayLength?.min).toBe(1);
     // children must hold exactly one item field
     expect(addresses.children).toHaveLength(1);
     const item = addresses.children[0];
-    expect(item.type).toBe('object');
+    expect(item).toBeDefined();
+    expect(item!.type).toBe('object');
     // $ref-resolved Address fields
-    const itemByName = Object.fromEntries(item.children.map((f) => [f.name, f]));
-    expect(itemByName.city.required).toBe(true);
-    expect(itemByName.zip.validation.regex).toBe('^[0-9]{5}$');
+    const itemByName = fieldMap(item!.children);
+    expect(itemByName['city']!.required).toBe(true);
+    expect(itemByName['zip']!.validation.regex).toBe('^[0-9]{5}$');
   });
 });
 
@@ -131,11 +136,11 @@ describe('parseSwaggerSpec — Swagger 2.0', () => {
     const ips = expectOk(parseSwaggerSpec(PROJECT_ID, 'Test', swagger2));
     const product = ips.entities.find((e) => e.name === 'Product');
     expect(product).toBeDefined();
-    const byName = Object.fromEntries(product!.fields.map((f) => [f.name, f]));
-    expect(byName.name.type).toBe('string');
-    expect(byName.name.required).toBe(true);
-    expect(byName.price.type).toBe('decimal');
-    expect(byName.inStock.type).toBe('boolean');
+    const byName = fieldMap(product!.fields);
+    expect(byName['name']!.type).toBe('string');
+    expect(byName['name']!.required).toBe(true);
+    expect(byName['price']!.type).toBe('decimal');
+    expect(byName['inStock']!.type).toBe('boolean');
   });
 });
 
@@ -161,9 +166,9 @@ describe('parseSwaggerSpec — YAML input', () => {
     const ips = expectOk(parseSwaggerSpec(PROJECT_ID, 'Test', yamlSpec));
     const note = ips.entities.find((e) => e.name === 'Note');
     expect(note).toBeDefined();
-    const byName = Object.fromEntries(note!.fields.map((f) => [f.name, f]));
-    expect(byName.title.required).toBe(true);
-    expect(byName.pinned.type).toBe('boolean');
+    const byName = fieldMap(note!.fields);
+    expect(byName['title']!.required).toBe(true);
+    expect(byName['pinned']!.type).toBe('boolean');
   });
 });
 

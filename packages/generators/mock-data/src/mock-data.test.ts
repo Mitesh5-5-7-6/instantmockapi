@@ -61,7 +61,9 @@ describe('Mock Data Generator — Golden-File Tests', () => {
     expect(records.length).toBe(5);
 
     const firstRecord = records[0];
-    expect(firstRecord.orderId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    expect(firstRecord.orderId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
     expect(firstRecord.quantity).toBeGreaterThanOrEqual(1);
     expect(firstRecord.quantity).toBeLessThanOrEqual(10);
     expect(firstRecord.customerEmail).toContain('@');
@@ -106,7 +108,9 @@ describe('Mock Data Generator — Golden-File Tests', () => {
       const record = records[0];
 
       it('should generate valid uuid for id field', () => {
-        expect(record.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+        expect(record.id).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+        );
       });
 
       it('should generate string for title', () => {
