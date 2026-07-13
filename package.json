@@ -19,7 +19,7 @@
     "clean": "turbo run clean",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,mjs,cjs,json,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,mjs,cjs,json,md,yml,yaml}\"",
-    "depcruise": "depcruise --config .dependency-cruiser.cjs apps packages",
+    "depcruise": "depcruise --config .dependency-cruiser.mjs apps packages",
     "prepare": "husky"
   },
   "devDependencies": {

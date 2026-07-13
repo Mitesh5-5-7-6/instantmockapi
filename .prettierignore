@@ -6,6 +6,9 @@ dist
 coverage
 *.tsbuildinfo
 
+# Local tooling state
+.claude
+
 # Lockfiles — never reformat
 pnpm-lock.yaml
 
