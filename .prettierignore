@@ -1,0 +1,15 @@
+# Dependencies & build output
+node_modules
+dist
+.turbo
+.next
+coverage
+*.tsbuildinfo
+
+# Lockfiles — never reformat
+pnpm-lock.yaml
+
+# Hand-authored documentation — avoid reformat churn
+plan
+develop_plan
+docs
