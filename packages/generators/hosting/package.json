@@ -1,6 +1,6 @@
-﻿{
+{
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "clean": "rimraf dist",
     "build": "tsc --project tsconfig.json",
     "typecheck": "tsc --noEmit --project tsconfig.json",

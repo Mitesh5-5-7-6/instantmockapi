@@ -39,6 +39,23 @@ export default tseslint.config(
     },
   },
 
+  // CommonJS config files (e.g. .dependency-cruiser.cjs) use `module.exports`.
+  // The repo is `"type": "module"`, so a `.cjs` extension is what forces CommonJS —
+  // tell ESLint to parse these as scripts with the Node globals they rely on.
+  {
+    files: ['**/*.cjs'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: {
+        module: 'writable',
+        require: 'readonly',
+        __dirname: 'readonly',
+        __filename: 'readonly',
+        process: 'readonly',
+      },
+    },
+  },
+
   // Tests may be looser.
   {
     files: ['**/*.test.ts', '**/__tests__/**/*.ts'],

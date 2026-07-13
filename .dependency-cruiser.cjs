@@ -41,7 +41,8 @@ const config = {
       },
       to: {
         path: '^packages/([^/]+)',
-        pathNot: '^packages/(shared|ips|config)',
+        // A generator may import shared/ips/config and its own package's files.
+        pathNot: '^packages/(shared|ips|config|generators)',
       },
     },
     {
@@ -53,7 +54,8 @@ const config = {
       },
       to: {
         path: '^packages/([^/]+)',
-        pathNot: '^packages/shared',
+        // IPS may import shared and its own package's files.
+        pathNot: '^packages/(shared|ips)',
       },
     },
     {
@@ -66,7 +68,8 @@ const config = {
       },
       to: {
         path: '^packages/([^/]+)',
-        pathNot: '^packages/(shared|ips)',
+        // Parsers may import shared/ips and their own package's files.
+        pathNot: '^packages/(shared|ips|parsers)',
       },
     },
     {
