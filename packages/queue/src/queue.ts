@@ -49,7 +49,7 @@ export function getJobQueue(): Queue {
 
   const redis = getRedisConnection();
   const queueOptions: QueueOptions = {
-    connection: redis as any,
+    connection: redis,
     defaultJobOptions: {
       attempts: 3, // Retry policy (doc 07 §2)
       backoff: {

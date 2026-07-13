@@ -46,8 +46,8 @@ export function restoreIPSFromSnapshot(
   currentSchema: InternalProjectSchema,
   snapshot: {
     version: number;
-    ipsSnapshot: { entities: any };
-    configSnapshot: any;
+    ipsSnapshot: { entities: InternalProjectSchema['entities'] };
+    configSnapshot: InternalProjectSchema['generationConfig'];
   },
 ): InternalProjectSchema {
   const cloned = deepClone(currentSchema);

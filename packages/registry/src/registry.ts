@@ -1,6 +1,6 @@
 import { Types } from 'mongoose';
 import { Artifact, IArtifact, ArtifactType, ArtifactStatus } from '@instantmockapi/db';
-import { logger, AppError, Result, ok, err } from '@instantmockapi/shared';
+import { logger, AppError, Result, ok, err, getErrorMessage } from '@instantmockapi/shared';
 // Define valid status transitions in the state machine (doc 04 §F12, doc 07 §2)
 const VALID_TRANSITIONS: Record<ArtifactStatus, ArtifactStatus[]> = {
   pending: ['generating'],
@@ -39,9 +39,9 @@ export async function createOrResetArtifactRecord(
       status: 'pending',
     });
     return ok(artifact);
-  } catch (error: any) {
+  } catch (error) {
     logger.error('Failed to create artifact record', {
-      error: error.message,
+      error: getErrorMessage(error),
       projectId,
       artifactType,
     });
@@ -138,9 +138,9 @@ export async function transitionArtifactStatus(
       to: newStatus,
     });
     return ok(updated);
-  } catch (error: any) {
+  } catch (error) {
     logger.error('Failed to transition artifact status', {
-      error: error.message,
+      error: getErrorMessage(error),
       projectId,
       artifactType,
     });
@@ -163,9 +163,9 @@ export async function getArtifactsForVersion(
     const pId = new Types.ObjectId(projectId);
     const artifacts = await Artifact.find({ projectId: pId, version });
     return ok(artifacts);
-  } catch (error: any) {
+  } catch (error) {
     logger.error('Failed to fetch artifacts for version', {
-      error: error.message,
+      error: getErrorMessage(error),
       projectId,
       version,
     });
@@ -189,9 +189,9 @@ export async function getArtifactRecord(
     const pId = new Types.ObjectId(projectId);
     const artifact = await Artifact.findOne({ projectId: pId, artifactType, version });
     return ok(artifact);
-  } catch (error: any) {
+  } catch (error) {
     logger.error('Failed to fetch artifact record', {
-      error: error.message,
+      error: getErrorMessage(error),
       projectId,
       artifactType,
       version,

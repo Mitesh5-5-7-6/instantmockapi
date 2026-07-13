@@ -27,7 +27,7 @@ export function generateMockData(
   const recordCount = ips.generationConfig.mockRecords ?? 25;
 
   for (const entity of ips.entities) {
-    const records: Record<string, string>[] = [];
+    const records: Record<string, unknown>[] = [];
     for (let i = 0; i < recordCount; i++) {
       records.push(generateRecord(entity.fields, faker));
     }
@@ -37,8 +37,8 @@ export function generateMockData(
   return result;
 }
 
-function generateRecord(fields: Field[], faker: Faker): Record<string, string> {
-  const record: Record<string, string> = {};
+function generateRecord(fields: Field[], faker: Faker): Record<string, unknown> {
+  const record: Record<string, unknown> = {};
 
   for (const field of fields) {
     record[field.name] = generateFieldValue(field, faker);
@@ -47,7 +47,7 @@ function generateRecord(fields: Field[], faker: Faker): Record<string, string> {
   return record;
 }
 
-function generateFieldValue(field: Field, faker: Faker): any {
+function generateFieldValue(field: Field, faker: Faker): unknown {
   // Respect nullable/optional probability if not required
   if (!field.required && faker.number.float() < 0.1) {
     return field.default !== undefined ? field.default : null;
@@ -141,7 +141,7 @@ function generateFieldValue(field: Field, faker: Faker): any {
         max: maxArr,
       });
 
-      const arrayItems: string[] = [];
+      const arrayItems: unknown[] = [];
 
       if (field.children.length > 0) {
         const itemField = field.children[0]!;
