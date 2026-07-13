@@ -31,15 +31,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    outputs:
-      cache-hit: ${{ steps.turbo-cache.outputs.cache-hit }}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Enable Corepack
-        run: corepack enable
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -47,20 +44,8 @@ jobs:
           node-version-file: '.nvmrc'
           cache: 'pnpm'
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Cache Turbo
-        id: turbo-cache
-        uses: actions/cache@v4
-        with:
-          path: .turbo
-          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            turbo-${{ runner.os }}-
 
   format:
     name: Format Check
@@ -71,14 +56,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: corepack enable
+      - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
           cache: pnpm
-
-      - uses: pnpm/action-setup@v4
 
       - run: pnpm install --frozen-lockfile
 
@@ -94,14 +77,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: corepack enable
+      - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
           cache: pnpm
-
-      - uses: pnpm/action-setup@v4
 
       - run: pnpm install --frozen-lockfile
 
@@ -117,14 +98,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: corepack enable
+      - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
           cache: pnpm
-
-      - uses: pnpm/action-setup@v4
 
       - run: pnpm install --frozen-lockfile
 
@@ -140,14 +119,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: corepack enable
+      - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
           cache: pnpm
-
-      - uses: pnpm/action-setup@v4
 
       - run: pnpm install --frozen-lockfile
 
@@ -168,14 +145,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: corepack enable
+      - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
           cache: pnpm
-
-      - uses: pnpm/action-setup@v4
 
       - run: pnpm install --frozen-lockfile
 
