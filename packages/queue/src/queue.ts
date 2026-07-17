@@ -82,16 +82,24 @@ export async function closeQueue(): Promise<void> {
 /**
  * Computes a deterministic idempotency key for a job.
  * hash(projectId, version, config) -> doc 07 §2
+ *
+ * `requestedArtifacts` (order-insensitive) participates in the hash when
+ * provided, so a partial regenerate at the same version/config does not
+ * collide with — and get deduplicated into — an earlier full job.
  */
 export function generateIdempotencyKey(
   projectId: string,
   version: number,
   config: GenerationConfig,
+  requestedArtifacts?: string[],
 ): string {
   const hash = crypto.createHash('sha256');
   hash.update(projectId);
   hash.update(version.toString());
   hash.update(JSON.stringify(config));
+  if (requestedArtifacts && requestedArtifacts.length > 0) {
+    hash.update(JSON.stringify([...requestedArtifacts].sort()));
+  }
   return hash.digest('hex');
 }
 

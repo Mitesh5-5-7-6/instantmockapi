@@ -12,7 +12,8 @@
   "devDependencies": {
     "rimraf": "^6.0.0",
     "typescript": "^5.8.0",
-    "vitest": "^3.2.0"
+    "vitest": "^3.2.0",
+    "mongodb-memory-server": "^10.1.4"
   },
   "name": "@instantmockapi/db",
   "private": true,

@@ -128,6 +128,14 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # db/registry/api tests run against mongodb-memory-server; cache the
+      # downloaded mongod binary so CI doesn't re-fetch it every run
+      - name: Cache mongodb-memory-server binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}
+
       - name: Run Tests
         run: pnpm turbo run test
 

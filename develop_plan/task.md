@@ -28,12 +28,12 @@
 - [x] Golden-file tests for all generators
 
 ## Phase 4 — Backend Infrastructure
-- [ ] `packages/db` — MongoDB models + indexes
-- [ ] `packages/registry` — Artifact Registry
-- [ ] `packages/queue` — BullMQ job abstractions
-- [ ] `packages/auth` — JWT + AuthZ
-- [ ] `apps/api` — Core REST API (Fastify)
-- [ ] Tests: registry state machine, API contracts, idempotency
+- [x] `packages/db` — MongoDB models + indexes
+- [x] `packages/registry` — Artifact Registry
+- [x] `packages/queue` — BullMQ job abstractions
+- [x] `packages/auth` — JWT + AuthZ
+- [x] `apps/api` — Core REST API (Fastify)
+- [x] Tests: registry state machine, API contracts, idempotency
 
 ## Phase 5 — Worker Pipeline
 - [ ] Worker E — OpenAPI + Postman generator
