@@ -9,6 +9,7 @@
 import type { FastifyInstance } from 'fastify';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
+import { createMemoryStorage, type MemoryStorage } from '@instantmockapi/storage';
 import {
   ApiLog,
   Artifact,
@@ -23,6 +24,9 @@ import {
 import { buildServer, type BuildServerOptions } from '../server.js';
 
 export const testConfig: EnvConfig = { ...loadEnvConfig(), jwtSecret: 'api-test-secret' };
+
+/** Shared in-memory object storage; cleared by clearDb(). */
+export const testStorage: MemoryStorage = createMemoryStorage();
 
 let mongod: MongoMemoryServer | null = null;
 
@@ -40,13 +44,14 @@ export async function stopTestDb(): Promise<void> {
 }
 
 export async function clearDb(): Promise<void> {
+  testStorage.clear();
   await Promise.all(
     [User, Project, Version, Artifact, Job, MockStore, ApiLog].map((model) => model.deleteMany({})),
   );
 }
 
 export function buildTestServer(overrides: BuildServerOptions = {}): Promise<FastifyInstance> {
-  return buildServer({ config: testConfig, rateLimit: false, ...overrides });
+  return buildServer({ config: testConfig, rateLimit: false, storage: testStorage, ...overrides });
 }
 
 export interface TestSession {

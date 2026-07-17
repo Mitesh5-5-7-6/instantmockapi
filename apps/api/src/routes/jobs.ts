@@ -156,6 +156,7 @@ export const jobRoutes: FastifyPluginAsync<JobRouteOptions> = async (app, option
         'partial',
         artifacts,
         retryKey,
+        String(job._id),
       );
 
       return reply.status(202).send({ jobId: String(job._id), status: job.status });

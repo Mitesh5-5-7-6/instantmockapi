@@ -75,6 +75,9 @@ const projectSchema = new Schema<IProject>(
   },
   {
     timestamps: true,
+    // IPS fields legitimately carry empty objects (validation: {}, meta: {});
+    // minimize would strip them and break generators consuming the IPS
+    minimize: false,
   },
 );
 

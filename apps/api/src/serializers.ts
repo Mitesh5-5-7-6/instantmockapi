@@ -37,12 +37,23 @@ export function toProjectDetail(project: IProject) {
 }
 
 export function toJobView(job: IJob) {
+  // Progress aggregator (doc 10 §8): settled (completed|failed) / total selected
+  const total = job.workers.length;
+  const settled = job.workers.filter(
+    (w) => w.status === 'completed' || w.status === 'failed',
+  ).length;
+
   return {
     id: String(job._id),
     projectId: String(job.projectId),
     version: job.version,
     type: job.type,
     status: job.status,
+    progress: {
+      settled,
+      total,
+      percent: total > 0 ? Math.round((settled / total) * 100) : 0,
+    },
     requestedArtifacts: job.requestedArtifacts,
     workers: job.workers.map((w) => ({
       worker: w.worker,

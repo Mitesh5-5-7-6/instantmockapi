@@ -20,6 +20,7 @@
     "@instantmockapi/queue": "workspace:*",
     "@instantmockapi/auth": "workspace:*",
     "@instantmockapi/parsers": "workspace:*",
+    "@instantmockapi/storage": "workspace:*",
     "fastify": "^5.2.0",
     "@fastify/rate-limit": "^10.2.1"
   },

@@ -25,6 +25,7 @@
   "main": "./dist/index.js",
   "dependencies": {
     "@instantmockapi/shared": "workspace:*",
-    "@instantmockapi/ips": "workspace:*"
+    "@instantmockapi/ips": "workspace:*",
+    "jszip": "^3.10.1"
   }
 }

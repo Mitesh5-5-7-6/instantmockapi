@@ -73,6 +73,23 @@ describe('GET /v1/jobs/:jobId', () => {
     });
     expect(body.workers.length).toBeGreaterThan(0);
     expect(body.workers[0]).toMatchObject({ worker: expect.any(String), status: 'queued' });
+    // Progress aggregator (doc 10 §8): nothing settled yet
+    expect(body.progress).toEqual({ settled: 0, total: body.workers.length, percent: 0 });
+  });
+
+  it('reports progress as workers settle', async () => {
+    await Job.updateOne(
+      { _id: jobId, 'workers.worker': 'B' },
+      { $set: { 'workers.$.status': 'completed' } },
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/jobs/${jobId}`,
+      headers: authHeader(session.accessToken),
+    });
+    const body = res.json();
+    expect(body.progress.settled).toBe(1);
+    expect(body.progress.percent).toBeGreaterThan(0);
   });
 
   it("returns 404 for another user's job and for unknown ids", async () => {

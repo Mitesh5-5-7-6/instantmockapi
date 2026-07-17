@@ -1,19 +1,23 @@
 /**
  * Artifact routes (doc 08 §5): registry listing, single record, download,
- * and full export. Download/export serve the registry's storageRef — content
- * streaming from object storage is wired when Worker G lands (Phase 5).
+ * and full export. Downloads are server-mediated through object storage —
+ * storageRefs never become public URLs (doc 13 §6). Multi-file artifacts
+ * download as a `{ files }` JSON bundle; single-file artifacts (openapi,
+ * postman, hosting config, export zip) download as the raw file.
  */
 
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { ARTIFACT_TYPES, type ArtifactType } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
 import type { IArtifact, IProject } from '@instantmockapi/db';
 import { getArtifactRecord, getArtifactsForVersion } from '@instantmockapi/registry';
+import { decodeBundle, isBundleKey, type StorageClient } from '@instantmockapi/storage';
 import { loadOwnedProject, notFound } from '../access.js';
 import { toArtifactView } from '../serializers.js';
 
 export interface ArtifactRouteOptions {
   config: EnvConfig;
+  storage: StorageClient;
 }
 
 const versionQuerySchema = {
@@ -38,7 +42,38 @@ async function loadCompletedArtifact(
   return artifact;
 }
 
-export const artifactRoutes: FastifyPluginAsync<ArtifactRouteOptions> = async (app) => {
+/** Serve an artifact's stored content: raw file or `{ files }` bundle JSON. */
+async function sendArtifactContent(
+  reply: FastifyReply,
+  storage: StorageClient,
+  artifact: IArtifact,
+): Promise<FastifyReply> {
+  const storageRef = artifact.storageRef as string;
+  const object = await storage.get(storageRef);
+  if (!object) {
+    throw notFound(`Stored ${artifact.artifactType} content`);
+  }
+
+  if (isBundleKey(storageRef)) {
+    const bundle = decodeBundle(object.body);
+    return reply.type('application/json').send({
+      artifactType: artifact.artifactType,
+      version: artifact.version,
+      files: bundle.files,
+    });
+  }
+
+  const filename = storageRef.split('/').pop() ?? artifact.artifactType;
+  return reply
+    .type(object.contentType)
+    .header('content-disposition', `attachment; filename="${filename}"`)
+    .send(Buffer.from(object.body));
+}
+
+export const artifactRoutes: FastifyPluginAsync<ArtifactRouteOptions> = async (
+  app,
+  { storage },
+) => {
   app.addHook('onRequest', app.authenticate);
 
   app.get(
@@ -112,12 +147,7 @@ export const artifactRoutes: FastifyPluginAsync<ArtifactRouteOptions> = async (a
       const version = query.version ?? project.currentVersion;
 
       const artifact = await loadCompletedArtifact(project, type, version);
-      return reply.send({
-        artifactType: artifact.artifactType,
-        version: artifact.version,
-        storageRef: artifact.storageRef,
-        note: 'Content streaming from object storage arrives with the worker pipeline (Phase 5)',
-      });
+      return sendArtifactContent(reply, storage, artifact);
     },
   );
 
@@ -131,12 +161,7 @@ export const artifactRoutes: FastifyPluginAsync<ArtifactRouteOptions> = async (a
       const version = query.version ?? project.currentVersion;
 
       const artifact = await loadCompletedArtifact(project, 'export_zip', version);
-      return reply.send({
-        artifactType: artifact.artifactType,
-        version: artifact.version,
-        storageRef: artifact.storageRef,
-        note: 'Content streaming from object storage arrives with the worker pipeline (Phase 5)',
-      });
+      return sendArtifactContent(reply, storage, artifact);
     },
   );
 };

@@ -1,3 +1,4 @@
-﻿// @instantmockapi/generator-export -- Worker G: ZIP bundling
-// Stub: Phase 3+ will populate this generator.
-export {};
+﻿// @instantmockapi/generator-export — Worker G: in-memory ZIP bundle of
+// produced artifacts + README noting the IPS version (doc 09 §4).
+
+export { generateExportZip, generateExportReadme } from './export.js';

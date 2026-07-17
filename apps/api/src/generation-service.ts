@@ -98,7 +98,14 @@ export async function createGenerationJob(params: {
     throw error;
   }
 
-  await enqueueGenerationJob(projectId, version, type, requestedArtifacts, idempotencyKey);
+  await enqueueGenerationJob(
+    projectId,
+    version,
+    type,
+    requestedArtifacts,
+    idempotencyKey,
+    String(job._id),
+  );
 
   project.status = 'generating';
   project.generationConfig = generationConfig;

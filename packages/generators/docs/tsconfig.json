@@ -6,7 +6,7 @@
   },
   "include": [
     "src"
-  ],
+, "../export/export.test.ts", "../export/export.ts"  ],
   "exclude": [
     "node_modules",
     "dist",

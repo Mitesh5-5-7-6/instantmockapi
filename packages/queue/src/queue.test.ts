@@ -30,7 +30,18 @@ vi.mock('bullmq', () => {
     }
     async close() {}
   }
-  return { Queue };
+  class Worker {
+    constructor(
+      public name: string,
+      public processor: unknown,
+      public opts: unknown,
+    ) {}
+    on() {
+      return this;
+    }
+    async close() {}
+  }
+  return { Queue, Worker };
 });
 
 vi.mock('ioredis', () => {

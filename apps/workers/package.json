@@ -7,7 +7,7 @@
     "build": "tsc --project tsconfig.json",
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json",
-    "lint": "echo \"lint placeholder\"",
+    "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
     "clean": "rimraf dist"
   },
@@ -24,12 +24,15 @@
     "@instantmockapi/generator-mock-data": "workspace:*",
     "@instantmockapi/generator-docs": "workspace:*",
     "@instantmockapi/generator-hosting": "workspace:*",
-    "@instantmockapi/generator-export": "workspace:*"
+    "@instantmockapi/generator-export": "workspace:*",
+    "@instantmockapi/storage": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.8.0",
     "tsx": "^4.19.0",
     "vitest": "^3.2.0",
-    "rimraf": "^6.0.0"
+    "rimraf": "^6.0.0",
+    "mongodb-memory-server": "^10.1.4",
+    "jszip": "^3.10.1"
   }
 }

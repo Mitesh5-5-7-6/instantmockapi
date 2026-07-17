@@ -1,4 +1,4 @@
-import { Queue, QueueOptions, Job } from 'bullmq';
+import { Queue, QueueOptions, Job, Worker, type WorkerOptions } from 'bullmq';
 import Redis from 'ioredis';
 import crypto from 'crypto';
 import { logger } from '@instantmockapi/shared';
@@ -10,12 +10,14 @@ export interface GenerationJobPayload {
   version: number;
   type: 'full' | 'partial';
   requestedArtifacts: string[];
+  /** Mongo `jobs` document id — lets the worker update job/worker statuses. */
+  jobId?: string;
 }
 
 let redisInstance: Redis | null = null;
 let jobQueueInstance: Queue | null = null;
 
-const QUEUE_NAME = 'generation-jobs';
+export const QUEUE_NAME = 'generation-jobs';
 
 /**
  * Returns a shared connection to Redis.
@@ -113,6 +115,7 @@ export async function enqueueGenerationJob(
   type: 'full' | 'partial',
   requestedArtifacts: string[],
   idempotencyKey: string,
+  jobId?: string,
 ): Promise<Job<GenerationJobPayload>> {
   const queue = getJobQueue();
   const payload: GenerationJobPayload = {
@@ -120,6 +123,7 @@ export async function enqueueGenerationJob(
     version,
     type,
     requestedArtifacts,
+    ...(jobId !== undefined ? { jobId } : {}),
   };
 
   logger.info('Enqueuing generation job', {
@@ -135,4 +139,34 @@ export async function enqueueGenerationJob(
   });
 
   return job;
+}
+
+/**
+ * Consumer side: a BullMQ Worker bound to the generation queue.
+ * `apps/workers` supplies the handler; concurrency is the per-replica infra
+ * limit (doc 10 §5), independent of plan concurrency.
+ */
+export function createGenerationWorker(
+  handler: (payload: GenerationJobPayload) => Promise<void>,
+  options: { concurrency?: number } = {},
+): Worker<GenerationJobPayload> {
+  const workerOptions: WorkerOptions = {
+    connection: getRedisConnection(),
+    concurrency: options.concurrency ?? 2,
+  };
+
+  const worker = new Worker<GenerationJobPayload>(
+    QUEUE_NAME,
+    async (job) => {
+      logger.info('Generation job picked up', { jobId: job.id, projectId: job.data.projectId });
+      await handler(job.data);
+    },
+    workerOptions,
+  );
+
+  worker.on('failed', (job, error) => {
+    logger.error('Generation job failed', { jobId: job?.id, error: error.message });
+  });
+
+  return worker;
 }

@@ -62,7 +62,7 @@ describe('Zod Generator — Golden-File Tests', () => {
                     type: 'enum',
                     required: true,
                     default: 'home',
-                    validation: { enum: ['home', 'work'] },
+                    validation: { enum: ['home', 'work', 'other'] },
                     meta: {},
                     children: [],
                   },

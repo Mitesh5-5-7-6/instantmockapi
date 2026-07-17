@@ -31,6 +31,8 @@ const versionSchema = new Schema<IVersion>(
   },
   {
     timestamps: { createdAt: true, updatedAt: false }, // snapshot is immutable
+    // Keep empty objects in IPS snapshots (validation: {}, meta: {})
+    minimize: false,
   },
 );
 

@@ -13,6 +13,7 @@ vi.mock('@instantmockapi/queue', async (importOriginal) => {
 
 import type { FastifyInstance } from 'fastify';
 import { Artifact } from '@instantmockapi/db';
+import { artifactKey, bundleKey, encodeBundle } from '@instantmockapi/storage';
 import {
   authHeader,
   buildTestServer,
@@ -21,6 +22,7 @@ import {
   login,
   startTestDb,
   stopTestDb,
+  testStorage,
   type TestSession,
 } from '../testing/harness.js';
 
@@ -107,25 +109,45 @@ describe('download & export', () => {
     expect(res.json().error.code).toBe('NOT_FOUND');
   });
 
-  it('serves the storageRef once the artifact is completed', async () => {
+  it('serves multi-file artifacts as a { files } bundle once completed', async () => {
+    const key = bundleKey(projectId, 1, 'zod');
+    await testStorage.put(
+      key,
+      encodeBundle({ 'blogpost.zod.ts': 'export const BlogPostSchema = {};' }),
+      'application/json',
+    );
     await Artifact.updateOne(
       { projectId, version: 1, artifactType: 'zod' },
-      { $set: { status: 'completed', storageRef: 's3://artifacts/zod.ts' } },
+      { $set: { status: 'completed', storageRef: key } },
     );
+
     const res = await app.inject({
       method: 'GET',
       url: `/v1/projects/${projectId}/artifacts/zod/download`,
       headers: authHeader(session.accessToken),
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({
+    expect(res.json()).toEqual({
       artifactType: 'zod',
       version: 1,
-      storageRef: 's3://artifacts/zod.ts',
+      files: { 'blogpost.zod.ts': 'export const BlogPostSchema = {};' },
     });
   });
 
-  it('export resolves the export_zip artifact', async () => {
+  it('returns 404 when the record is completed but the stored object is gone', async () => {
+    await Artifact.updateOne(
+      { projectId, version: 1, artifactType: 'zod' },
+      { $set: { status: 'completed', storageRef: bundleKey(projectId, 1, 'zod') } },
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${projectId}/artifacts/zod/download`,
+      headers: authHeader(session.accessToken),
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('export streams the raw ZIP with an attachment header', async () => {
     const missing = await app.inject({
       method: 'GET',
       url: `/v1/projects/${projectId}/export`,
@@ -133,17 +155,22 @@ describe('download & export', () => {
     });
     expect(missing.statusCode).toBe(404);
 
+    const key = artifactKey(projectId, 1, 'export_zip', 'export_zip.zip');
+    await testStorage.put(key, new TextEncoder().encode('PK-fake-zip'), 'application/zip');
     await Artifact.updateOne(
       { projectId, version: 1, artifactType: 'export_zip' },
-      { $set: { status: 'completed', storageRef: 's3://artifacts/bundle.zip' } },
+      { $set: { status: 'completed', storageRef: key } },
     );
+
     const res = await app.inject({
       method: 'GET',
       url: `/v1/projects/${projectId}/export`,
       headers: authHeader(session.accessToken),
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().storageRef).toBe('s3://artifacts/bundle.zip');
+    expect(res.headers['content-type']).toBe('application/zip');
+    expect(res.headers['content-disposition']).toBe('attachment; filename="export_zip.zip"');
+    expect(res.body).toBe('PK-fake-zip');
   });
 });
 

@@ -9,6 +9,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import { authPlugin } from '@instantmockapi/auth';
+import { createS3Storage, type StorageClient } from '@instantmockapi/storage';
 import { registerErrorHandling } from './error-handler.js';
 import { authRoutes } from './routes/auth.js';
 import { projectRoutes } from './routes/projects.js';
@@ -24,10 +25,13 @@ export interface BuildServerOptions {
   rateLimit?: { max?: number; timeWindowMs?: number } | false;
   /** SSE stream tuning (tests shrink the poll interval). */
   sse?: { pollIntervalMs?: number; maxDurationMs?: number };
+  /** Object storage for artifact downloads; defaults to S3 from env config. */
+  storage?: StorageClient;
 }
 
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
   const config = options.config ?? loadEnvConfig();
+  const storage = options.storage ?? createS3Storage(config);
 
   const app = Fastify({
     logger: false,
@@ -55,7 +59,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await app.register(projectRoutes, { prefix: '/v1', config });
   await app.register(generationRoutes, { prefix: '/v1', config });
   await app.register(jobRoutes, { prefix: '/v1', config, sse: options.sse });
-  await app.register(artifactRoutes, { prefix: '/v1', config });
+  await app.register(artifactRoutes, { prefix: '/v1', config, storage });
   await app.register(versionRoutes, { prefix: '/v1', config });
 
   return app;
