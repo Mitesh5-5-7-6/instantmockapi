@@ -32,6 +32,9 @@ importers:
       eslint-config-prettier:
         specifier: ^10.0.1
         version: 10.1.8(eslint@9.39.5(jiti@2.6.1))
+      globals:
+        specifier: ^17.7.0
+        version: 17.7.0
       husky:
         specifier: ^9.1.7
         version: 9.1.7
@@ -105,6 +108,9 @@ importers:
 
   apps/mock-runtime:
     dependencies:
+      '@fastify/rate-limit':
+        specifier: ^10.2.1
+        version: 10.3.0
       '@instantmockapi/auth':
         specifier: workspace:*
         version: link:../../packages/auth
@@ -114,10 +120,28 @@ importers:
       '@instantmockapi/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@instantmockapi/generator-hosting':
+        specifier: workspace:*
+        version: link:../../packages/generators/hosting
+      '@instantmockapi/registry':
+        specifier: workspace:*
+        version: link:../../packages/registry
       '@instantmockapi/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@instantmockapi/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
+      fastify:
+        specifier: ^5.2.0
+        version: 5.10.0
+      ioredis:
+        specifier: 5.10.1
+        version: 5.10.1
     devDependencies:
+      mongodb-memory-server:
+        specifier: ^10.1.4
+        version: 10.4.3
       rimraf:
         specifier: ^6.0.0
         version: 6.1.3
@@ -2110,6 +2134,10 @@ packages:
 
   globals@14.0.0:
     resolution: {integrity: sha512-oahGvuMGQlPw/ivIYBjVSrWAfWLBeku5tpPE2fOPLi+WHffIWbuh2tCjhyQhTBPMf5E9jDEH4FOmTYgYwbKwtQ==}
+    engines: {node: '>=18'}
+
+  globals@17.7.0:
+    resolution: {integrity: sha512-Czmyns5dUsq4seFBR/Kdydhmo8y9kC79hiSkPn0YcGtNnYWnrgt0vjrSjx9tspoDGWm2CMarffRuLjM4xUz8xg==}
     engines: {node: '>=18'}
 
   graceful-fs@4.2.11:
@@ -4545,6 +4573,8 @@ snapshots:
       ini: 6.0.0
 
   globals@14.0.0: {}
+
+  globals@17.7.0: {}
 
   graceful-fs@4.2.11: {}
 
