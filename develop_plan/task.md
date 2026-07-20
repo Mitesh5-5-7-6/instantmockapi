@@ -36,13 +36,13 @@
 - [x] Tests: registry state machine, API contracts, idempotency
 
 ## Phase 5 — Worker Pipeline
-- [ ] Worker E — OpenAPI + Postman generator
-- [ ] Worker F — Hosting config generator
-- [ ] Worker G — Export/ZIP generator
-- [ ] Object storage integration (S3)
-- [ ] `apps/workers` — Job orchestration + DAG scheduler
-- [ ] SSE progress streaming
-- [ ] Tests: DAG ordering, retry, selective generation, full pipeline
+- [x] Worker E — OpenAPI + Postman generator
+- [x] Worker F — Hosting config generator
+- [x] Worker G — Export/ZIP generator
+- [x] Object storage integration (S3)
+- [x] `apps/workers` — Job orchestration + DAG scheduler
+- [x] SSE progress streaming
+- [x] Tests: DAG ordering, retry, selective generation, full pipeline
 
 ## Phase 6 — Frontend
 - [ ] `packages/ui` — Design system + shared components

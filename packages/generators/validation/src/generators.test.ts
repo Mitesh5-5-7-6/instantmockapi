@@ -112,7 +112,7 @@ describe('Zod Generator — Golden-File Tests', () => {
     );
     expect(code).toContain('email: z.string().email() /* unique */');
     expect(code).toContain('addresses: z.array(z.object({');
-    expect(code).toContain('type: z.enum(["home", "work"]).default("home")');
+    expect(code).toContain('type: z.enum(["home", "work", "other"]).default("home")');
     expect(code).toContain('export type Customer = z.infer<typeof CustomerSchema>;');
   });
 

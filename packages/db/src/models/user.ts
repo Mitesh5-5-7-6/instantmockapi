@@ -34,7 +34,8 @@ const userSchema = new Schema<IUser>(
   },
 );
 
-// Indexes
-userSchema.index({ email: 1 }, { unique: true });
+// The unique email index comes from `unique: true` on the path definition —
+// declaring it again via schema.index() would create a duplicate definition
+// that makes index syncing nondeterministic.
 
 export const User = model<IUser>('User', userSchema);

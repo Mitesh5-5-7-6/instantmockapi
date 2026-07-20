@@ -89,8 +89,7 @@ const jobSchema = new Schema<IJob>(
   },
 );
 
-// Indexes
+// Indexes (idempotencyKey's unique index comes from its path definition)
 jobSchema.index({ projectId: 1, createdAt: -1 });
-jobSchema.index({ idempotencyKey: 1 }, { unique: true });
 
 export const Job = model<IJob>('Job', jobSchema);

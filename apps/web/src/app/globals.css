@@ -1,0 +1,27 @@
+/* Minimal baseline. The real design system (packages/ui tokens from the
+   MockForge design) replaces this once the design import is available. */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  background: #0e1116;
+  color: #e6e8eb;
+}
+
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+button {
+  cursor: pointer;
+}

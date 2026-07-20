@@ -82,7 +82,8 @@ const config = {
       },
       to: {
         path: '^(packages|apps)/([^/]+)',
-        pathNot: '^(packages/shared|packages/ui)',
+        // The web app may import shared/ui and its own files — nothing server-side.
+        pathNot: '^(packages/shared|packages/ui|apps/web)',
       },
     },
   ],
@@ -91,7 +92,7 @@ const config = {
       path: 'node_modules',
     },
     exclude: {
-      path: 'dist',
+      path: ['dist', String.raw`\.next`, '.test-tmp'],
     },
     tsPreCompilationDeps: true,
     tsConfig: {

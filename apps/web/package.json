@@ -3,18 +3,27 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "echo \"web build placeholder\"",
-    "dev": "echo \"web dev placeholder\"",
-    "typecheck": "echo \"web typecheck placeholder\"",
-    "lint": "echo \"web lint placeholder\"",
+    "build": "next build",
+    "dev": "next dev --port 3000",
+    "start": "next start",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "lint": "echo \"lint placeholder\"",
     "test": "echo \"web test placeholder\"",
-    "clean": "echo \"web clean placeholder\""
+    "clean": "rimraf .next"
   },
   "dependencies": {
     "@instantmockapi/shared": "workspace:*",
-    "@instantmockapi/ui": "workspace:*"
+    "@instantmockapi/ui": "workspace:*",
+    "@tanstack/react-query": "^5.62.0",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/node": "^22.0.0",
+    "rimraf": "^6.0.0"
   }
 }

@@ -9,4 +9,4 @@ export {
   enqueueGenerationJob,
   createGenerationWorker,
   type GenerationJobPayload,
-} from './queue';
+} from './queue.js';
