@@ -142,6 +142,31 @@ describe('auth contract', () => {
   });
 });
 
+describe('CORS (web app is a separate origin)', () => {
+  it('answers preflight with the allowed origin and methods', async () => {
+    const res = await app.inject({
+      method: 'OPTIONS',
+      url: '/v1/projects',
+      headers: {
+        origin: 'http://localhost:3000',
+        'access-control-request-method': 'POST',
+      },
+    });
+    expect(res.statusCode).toBeLessThan(300);
+    expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3000');
+    expect(res.headers['access-control-allow-methods']).toContain('POST');
+  });
+
+  it('stamps allow-origin on actual responses', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/healthz',
+      headers: { origin: 'http://localhost:3000' },
+    });
+    expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3000');
+  });
+});
+
 describe('error envelope', () => {
   it('unknown routes return a 404 envelope', async () => {
     const res = await app.inject({ method: 'GET', url: '/v1/nope' });

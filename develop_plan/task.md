@@ -45,17 +45,21 @@
 - [x] Tests: DAG ordering, retry, selective generation, full pipeline
 
 ## Phase 6 — Frontend
-- [ ] `packages/ui` — Design system + shared components
-- [ ] S1 Dashboard
-- [ ] S2 Input (Paste JSON + Manual Schema Builder + Swagger)
-- [ ] S3 Configure
-- [ ] S4 Review
-- [ ] S5 Progress
-- [ ] S6 Project Page
-- [ ] S7 Expired State
-- [ ] S8 Settings & Billing
-- [ ] S9 Templates
-- [ ] Client data layer (TanStack Query + SSE)
+- [x] `packages/ui` — Design system + shared components _(ValidationPopover, Toast, Drawer still pending)_
+- [x] S1 Dashboard
+- [x] S2 Input (Paste JSON + Manual Schema Builder + Swagger) _(builder is flat fields — nesting + per-field validation popover pending)_
+- [x] S3 Configure
+- [x] S4 Review
+- [x] S5 Progress
+- [x] S6 Project Page
+- [x] S7 Expired State
+- [x] S8 Settings & Billing _(billing wiring post-V1; plan display only)_
+- [x] S9 Templates
+- [x] Client data layer (TanStack Query + SSE)
+
+> Visual note: implemented from `plan/12-design-system.md` tokens (blueprint indigo/cyan).
+> The MockForge design link (claude.ai artifact 07fcb8bc…) fails to load server-side;
+> once the file is available, re-skinning = swapping tokens in `packages/ui/styles.css`.
 
 ## Phase 7 — Mock Runtime (parallel with Phase 6)
 - [ ] `apps/mock-runtime` — Fastify CRUD server

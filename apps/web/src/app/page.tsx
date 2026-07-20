@@ -1,175 +1,115 @@
 'use client';
 
 /**
- * Working shell for the dashboard (S1) wired to the real data layer:
- * dev login, project list, create-from-JSON, generate, live job progress.
- * Visual design is intentionally bare — the MockForge design (Phase 6
- * design import) restyles these flows without changing the data layer.
+ * S1 · Dashboard (doc 11): project card grid with status chips, countdowns,
+ * per-status actions, empty state, and loading skeletons.
  */
 
-import { useState } from 'react';
-import {
-  useCreateProject,
-  useGenerate,
-  useJob,
-  useJobStream,
-  useLogin,
-  useLogout,
-  useMe,
-  useProjects,
-} from '../lib/hooks';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { Button, Card, CountdownBadge, EmptyState, StatusChip } from '@instantmockapi/ui';
+import { useDeleteProject, useProjects } from '../lib/hooks';
+import type { ProjectSummary } from '../lib/api-types';
 
-function LoginForm() {
-  const login = useLogin();
-  const [email, setEmail] = useState('');
-  return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (email) {
-          login.mutate(email);
-        }
-      }}
-    >
-      <h1>InstantMockAPI</h1>
-      <p>Sign in with your email to continue.</p>
-      <input
-        type="email"
-        value={email}
-        placeholder="you@example.com"
-        onChange={(event) => setEmail(event.target.value)}
-      />
-      <button type="submit" disabled={login.isPending}>
-        {login.isPending ? 'Signing in…' : 'Sign in'}
-      </button>
-      {login.isError ? <p role="alert">{login.error.message}</p> : null}
-    </form>
-  );
-}
-
-function JobProgress({ jobId }: { jobId: string }) {
-  useJobStream(jobId);
-  const job = useJob(jobId);
-  if (!job.data) {
-    return <p>Starting…</p>;
+function projectAction(project: ProjectSummary): { label: string; href: string } {
+  switch (project.status) {
+    case 'draft':
+      return { label: 'Continue setup', href: `/projects/${project.id}` };
+    case 'generating':
+      return { label: 'View progress', href: `/projects/${project.id}` };
+    case 'expired':
+      return { label: 'Generate again', href: `/projects/${project.id}` };
+    default:
+      return { label: 'Open', href: `/projects/${project.id}` };
   }
-  return (
-    <div>
-      <p>
-        Job {job.data.status} — {job.data.progress.percent}% ({job.data.progress.settled}/
-        {job.data.progress.total})
-      </p>
-      <ul>
-        {job.data.workers.map((worker) => (
-          <li key={worker.artifactType}>
-            {worker.artifactType}: {worker.status}
-            {worker.error ? ` — ${worker.error}` : ''}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
 }
 
-function ProjectRow({ id, name, status }: { id: string; name: string; status: string }) {
-  const generate = useGenerate(id);
-  const [jobId, setJobId] = useState<string | null>(null);
-  return (
-    <li>
-      <strong>{name}</strong> — {status}{' '}
-      <button
-        onClick={() => generate.mutate(undefined, { onSuccess: (job) => setJobId(job.jobId) })}
-        disabled={generate.isPending}
-      >
-        Generate
-      </button>
-      {jobId ? <JobProgress jobId={jobId} /> : null}
-    </li>
-  );
-}
-
-const SAMPLE_JSON = JSON.stringify(
-  { customer: { name: 'Ada Lovelace', email: 'ada@example.com', age: 36 } },
-  null,
-  2,
-);
-
-function Dashboard() {
-  const me = useMe();
-  const logout = useLogout();
-  const projects = useProjects({ sort: '-updatedAt' });
-  const createProject = useCreateProject();
-  const [name, setName] = useState('');
-  const [rawJson, setRawJson] = useState(SAMPLE_JSON);
-
-  if (me.isError) {
-    return <LoginForm />;
-  }
+function ProjectCard({ project }: { project: ProjectSummary }) {
+  const router = useRouter();
+  const deleteProject = useDeleteProject();
+  const action = projectAction(project);
 
   return (
-    <div>
-      <header style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <h1>Dashboard</h1>
-        <div>
-          {me.data ? `${me.data.email} (${me.data.plan})` : ''}{' '}
-          <button onClick={() => logout.mutate()}>Sign out</button>
-        </div>
-      </header>
-
-      <section>
-        <h2>New project from JSON</h2>
-        <input
-          value={name}
-          placeholder="Project name"
-          onChange={(event) => setName(event.target.value)}
-        />
-        <textarea
-          rows={6}
-          style={{ width: '100%' }}
-          value={rawJson}
-          onChange={(event) => setRawJson(event.target.value)}
-        />
-        <button
-          disabled={createProject.isPending || !name}
+    <Card interactive className="ui-stack">
+      <div className="ui-row ui-row--between">
+        <h3>{project.name}</h3>
+        <StatusChip status={project.status} />
+      </div>
+      <div className="ui-meta ui-mono">
+        v{project.currentVersion} · {project.inputType}
+        {project.hosted.expiresAt ? (
+          <>
+            {' · '}
+            <CountdownBadge expiresAt={project.hosted.expiresAt} />
+          </>
+        ) : null}
+      </div>
+      <div className="ui-row">
+        <Button size="sm" onClick={() => router.push(action.href)}>
+          {action.label}
+        </Button>
+        <Button
+          size="sm"
+          variant="danger"
+          disabled={deleteProject.isPending}
           onClick={() => {
-            try {
-              createProject.mutate({
-                name,
-                inputSource: { type: 'json', raw: JSON.parse(rawJson) },
-              });
-            } catch {
-              // leave invalid JSON to the API's PARSE_ERROR envelope
-              createProject.mutate({ name, inputSource: { type: 'json', raw: rawJson } });
+            if (window.confirm(`Delete "${project.name}" and everything it generated?`)) {
+              deleteProject.mutate(project.id);
             }
           }}
         >
-          Create project
-        </button>
-        {createProject.isError ? <p role="alert">{createProject.error.message}</p> : null}
-      </section>
-
-      <section>
-        <h2>Projects {projects.data ? `(${projects.data.meta.total})` : ''}</h2>
-        {projects.isLoading ? <p>Loading…</p> : null}
-        <ul>
-          {projects.data?.data.map((project) => (
-            <ProjectRow
-              key={project.id}
-              id={project.id}
-              name={project.name}
-              status={project.status}
-            />
-          ))}
-        </ul>
-      </section>
-    </div>
+          Delete
+        </Button>
+      </div>
+    </Card>
   );
 }
 
-export default function HomePage() {
+export default function DashboardPage() {
+  const projects = useProjects({ sort: '-updatedAt' });
+
   return (
-    <main>
-      <Dashboard />
-    </main>
+    <div className="ui-stack" style={{ gap: 'var(--space-8)' }}>
+      <div className="ui-row ui-row--between">
+        <h1>Dashboard</h1>
+        <Link href="/new">
+          <Button>New Project</Button>
+        </Link>
+      </div>
+
+      {projects.isLoading ? (
+        <div className="ui-grid-cards">
+          <div className="ui-skeleton" />
+          <div className="ui-skeleton" />
+          <div className="ui-skeleton" />
+        </div>
+      ) : null}
+
+      {projects.isError ? (
+        <EmptyState title="Couldn't load projects">
+          <p className="ui-error">{projects.error.message}</p>
+          <Button variant="secondary" onClick={() => void projects.refetch()}>
+            Retry
+          </Button>
+        </EmptyState>
+      ) : null}
+
+      {projects.data && projects.data.data.length === 0 ? (
+        <EmptyState title="No projects yet">
+          <p>Paste a JSON sample or build a schema — get a working mock API in minutes.</p>
+          <Link href="/new">
+            <Button>Create your first project</Button>
+          </Link>
+        </EmptyState>
+      ) : null}
+
+      {projects.data && projects.data.data.length > 0 ? (
+        <div className="ui-grid-cards">
+          {projects.data.data.map((project) => (
+            <ProjectCard key={project.id} project={project} />
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }

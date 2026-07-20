@@ -149,3 +149,106 @@ export function useArtifacts(projectId: string | null, version?: number) {
     enabled: projectId !== null,
   });
 }
+
+export function useRegenerate(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (artifacts: string[]) =>
+      apiFetch<{ jobId: string; status: string }>(`/v1/projects/${projectId}/regenerate`, {
+        method: 'POST',
+        body: { artifacts },
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['artifacts', projectId] });
+      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+    },
+  });
+}
+
+export function useGenerateAgain(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<{ jobId: string; status: string }>(`/v1/projects/${projectId}/generate-again`, {
+        method: 'POST',
+        body: {},
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
+export function useRetryWorker(jobId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (worker: string) =>
+      apiFetch<{ jobId: string; status: string }>(`/v1/jobs/${jobId}/workers/${worker}/retry`, {
+        method: 'POST',
+      }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['job', jobId] }),
+  });
+}
+
+export function useDeleteProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (projectId: string) =>
+      apiFetch<void>(`/v1/projects/${projectId}`, { method: 'DELETE' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
+  });
+}
+
+export interface VersionView {
+  id: string;
+  projectId: string;
+  version: number;
+  createdAt: string;
+}
+
+export function useVersions(projectId: string | null) {
+  return useQuery({
+    queryKey: ['versions', projectId],
+    queryFn: () => apiFetch<ListEnvelope<VersionView>>(`/v1/projects/${projectId}/versions`),
+    enabled: projectId !== null,
+  });
+}
+
+export function useRestoreVersion(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (version: number) =>
+      apiFetch<ProjectDetail>(`/v1/projects/${projectId}/versions/${version}/restore`, {
+        method: 'POST',
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+      void queryClient.invalidateQueries({ queryKey: ['versions', projectId] });
+    },
+  });
+}
+
+/** Download an artifact through the authorized API (doc 13 §6) and save it. */
+export async function downloadArtifact(projectId: string, artifactType: string): Promise<void> {
+  const { apiBaseUrl, loadTokens } = await import('./api-client');
+  const tokens = loadTokens();
+  const response = await fetch(
+    `${apiBaseUrl()}/v1/projects/${projectId}/artifacts/${artifactType}/download`,
+    { headers: tokens ? { authorization: `Bearer ${tokens.accessToken}` } : {} },
+  );
+  if (!response.ok) {
+    throw new Error(`Download failed (${response.status})`);
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const match = /filename="([^"]+)"/.exec(disposition);
+  const filename = match?.[1] ?? `${artifactType}.json`;
+
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}

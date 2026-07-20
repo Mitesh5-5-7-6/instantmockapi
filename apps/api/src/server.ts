@@ -6,6 +6,7 @@
  */
 
 import Fastify, { type FastifyInstance } from 'fastify';
+import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import { authPlugin } from '@instantmockapi/auth';
@@ -39,6 +40,14 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   });
 
   registerErrorHandling(app);
+
+  // The web app is a separate origin (doc 05: web talks HTTP only). Dev
+  // defaults to the local web port; production sets WEB_ORIGIN explicitly.
+  await app.register(cors, {
+    origin: process.env['WEB_ORIGIN'] ?? `http://localhost:${config.webPort}`,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+  });
+
   await app.register(authPlugin, { config });
 
   if (options.rateLimit !== false) {

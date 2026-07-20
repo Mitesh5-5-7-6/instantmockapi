@@ -1,27 +1,33 @@
 {
-  "scripts": {
-    "test": "vitest run --passWithNoTests",
-    "clean": "rimraf dist",
-    "build": "tsc --project tsconfig.json",
-    "typecheck": "tsc --noEmit --project tsconfig.json",
-    "lint": "echo \"lint placeholder\""
-  },
-  "type": "module",
-  "types": "./dist/index.d.ts",
-  "version": "0.1.0",
-  "devDependencies": {
-    "typescript": "^5.8.0",
-    "rimraf": "^6.0.0",
-    "vitest": "^3.2.0"
-  },
   "name": "@instantmockapi/ui",
+  "version": "0.1.0",
   "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./styles.css": "./styles.css"
   },
-  "main": "./dist/index.js",
-  "dependencies": {}
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "lint": "echo \"lint placeholder\"",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "rimraf": "^6.0.0",
+    "vitest": "^3.2.0",
+    "react": "^19.0.0",
+    "@types/react": "^19.0.0"
+  }
 }

@@ -12,23 +12,24 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
-    "@instantmockapi/shared": "workspace:*",
-    "@instantmockapi/config": "workspace:*",
-    "@instantmockapi/ips": "workspace:*",
-    "@instantmockapi/db": "workspace:*",
-    "@instantmockapi/registry": "workspace:*",
-    "@instantmockapi/queue": "workspace:*",
+    "@fastify/cors": "^11.3.0",
+    "@fastify/rate-limit": "^10.2.1",
     "@instantmockapi/auth": "workspace:*",
+    "@instantmockapi/config": "workspace:*",
+    "@instantmockapi/db": "workspace:*",
+    "@instantmockapi/ips": "workspace:*",
     "@instantmockapi/parsers": "workspace:*",
+    "@instantmockapi/queue": "workspace:*",
+    "@instantmockapi/registry": "workspace:*",
+    "@instantmockapi/shared": "workspace:*",
     "@instantmockapi/storage": "workspace:*",
-    "fastify": "^5.2.0",
-    "@fastify/rate-limit": "^10.2.1"
+    "fastify": "^5.2.0"
   },
   "devDependencies": {
-    "typescript": "^5.8.0",
-    "tsx": "^4.19.0",
-    "vitest": "^3.2.0",
+    "mongodb-memory-server": "^10.1.4",
     "rimraf": "^6.0.0",
-    "mongodb-memory-server": "^10.1.4"
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
   }
 }

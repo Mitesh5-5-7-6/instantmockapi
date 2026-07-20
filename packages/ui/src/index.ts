@@ -1,3 +1,29 @@
-﻿// @instantmockapi/ui -- Shared React components + design tokens
-// Stub: Phase 2+ will populate this package.
-export {};
+// @instantmockapi/ui — design tokens (styles.css) + shared React components (doc 12).
+
+export {
+  Button,
+  type ButtonProps,
+  type ButtonVariant,
+  StatusChip,
+  type StatusChipProps,
+  Card,
+  type CardProps,
+  Input,
+  Select,
+  Textarea,
+  Checkbox,
+  type CheckboxProps,
+  Field,
+  CodeBlock,
+  Modal,
+  type ModalProps,
+  ProgressBar,
+  WorkerRow,
+  type WorkerRowProps,
+  CountdownBadge,
+  formatRemaining,
+  EmptyState,
+  SchemaTree,
+  type SchemaTreeEntity,
+  type SchemaTreeField,
+} from './components.js';
