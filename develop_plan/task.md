@@ -62,9 +62,9 @@
 > once the file is available, re-skinning = swapping tokens in `packages/ui/styles.css`.
 
 ## Phase 7 — Mock Runtime (parallel with Phase 6)
-- [ ] `apps/mock-runtime` — Fastify CRUD server
-- [ ] Redis caching for hosted config/data
-- [ ] Tests: CRUD, 405/422, tenant isolation, pagination, expiry
+- [x] `apps/mock-runtime` — Fastify CRUD server
+- [x] Redis caching for hosted config/data
+- [x] Tests: CRUD, 405/422, tenant isolation, pagination, expiry
 
 ## Phase 8 — Integration & Launch
 - [ ] Expiry system (cleanup + reminder workers)
