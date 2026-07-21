@@ -5,7 +5,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { AppError, type ArtifactType } from '@instantmockapi/shared';
+import { AppError, unwrap, type ArtifactType } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
 import { loadOwnedProject } from '../access.js';
 import {
@@ -30,16 +30,13 @@ export const generationRoutes: FastifyPluginAsync<GenerationRouteOptions> = asyn
     const project = await loadOwnedProject(id, request.authUser?.sub ?? '');
 
     const body = (request.body ?? {}) as { generationConfig?: unknown };
-    const cfg = validateGenerationConfig(body.generationConfig ?? project.generationConfig, config);
-    if (!cfg.ok) {
-      throw cfg.error;
-    }
+    const cfg = unwrap(validateGenerationConfig(body.generationConfig ?? project.generationConfig, config));
 
     const job = await createGenerationJob({
       project,
       type: 'full',
-      requestedArtifacts: deriveRequestedArtifacts(cfg.value),
-      generationConfig: cfg.value,
+      requestedArtifacts: deriveRequestedArtifacts(cfg),
+      generationConfig: cfg,
       plan: request.authUser?.plan ?? 'free',
     });
     return reply.status(202).send({ jobId: job.jobId, status: job.status });
@@ -69,16 +66,13 @@ export const generationRoutes: FastifyPluginAsync<GenerationRouteOptions> = asyn
       const { artifacts } = request.body as { artifacts: ArtifactType[] };
       const project = await loadOwnedProject(id, request.authUser?.sub ?? '');
 
-      const cfg = validateGenerationConfig(project.generationConfig, config);
-      if (!cfg.ok) {
-        throw cfg.error;
-      }
+      const cfg = unwrap(validateGenerationConfig(project.generationConfig, config));
 
       const job = await createGenerationJob({
         project,
         type: 'partial',
         requestedArtifacts: artifacts,
-        generationConfig: cfg.value,
+        generationConfig: cfg,
         plan: request.authUser?.plan ?? 'free',
       });
       return reply.status(202).send({ jobId: job.jobId, status: job.status });
@@ -96,10 +90,7 @@ export const generationRoutes: FastifyPluginAsync<GenerationRouteOptions> = asyn
       });
     }
 
-    const cfg = validateGenerationConfig(project.generationConfig, config);
-    if (!cfg.ok) {
-      throw cfg.error;
-    }
+    const cfg = unwrap(validateGenerationConfig(project.generationConfig, config));
 
     // Re-run from the kept shell: a fresh version so artifacts and the
     // idempotency key never collide with the expired generation (doc 07 §6)
@@ -109,8 +100,8 @@ export const generationRoutes: FastifyPluginAsync<GenerationRouteOptions> = asyn
     const job = await createGenerationJob({
       project,
       type: 'full',
-      requestedArtifacts: deriveRequestedArtifacts(cfg.value),
-      generationConfig: cfg.value,
+      requestedArtifacts: deriveRequestedArtifacts(cfg),
+      generationConfig: cfg,
       plan: request.authUser?.plan ?? 'free',
     });
     return reply.status(202).send({ jobId: job.jobId, status: job.status });

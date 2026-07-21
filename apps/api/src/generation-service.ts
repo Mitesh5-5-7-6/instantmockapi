@@ -7,7 +7,7 @@
  * existing job instead of creating a new one.
  */
 
-import { logger, type ArtifactType, type JobType, type PlanTier } from '@instantmockapi/shared';
+import { logger, unwrap, type ArtifactType, type JobType, type PlanTier } from '@instantmockapi/shared';
 import { canCreateJob } from '@instantmockapi/config';
 import { Job, Project, Version, type IProject } from '@instantmockapi/db';
 import { createOrResetArtifactRecord } from '@instantmockapi/registry';
@@ -71,9 +71,7 @@ export async function createGenerationJob(params: {
   // Registry rows reset to pending for every requested artifact
   for (const artifactType of requestedArtifacts) {
     const reset = await createOrResetArtifactRecord(projectId, artifactType, version);
-    if (!reset.ok) {
-      throw reset.error;
-    }
+    unwrap(reset);
   }
 
   let job;
