@@ -85,14 +85,14 @@ export function parseInputSource(
       });
   }
 
-  if (!result.ok) {
+  if (result.ok === false) {
     throw result.error instanceof AppError
       ? result.error
       : new AppError({ code: 'PARSE_ERROR', message: result.error.message });
   }
 
   const validated = validateIPS(result.value, env.maxNestingDepth);
-  if (!validated.ok) {
+  if (validated.ok === false) {
     throw validated.error;
   }
   return validated.value;
