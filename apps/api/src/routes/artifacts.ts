@@ -7,7 +7,7 @@
  */
 
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
-import { ARTIFACT_TYPES, type ArtifactType } from '@instantmockapi/shared';
+import { ARTIFACT_TYPES, unwrap, type ArtifactType } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
 import type { IArtifact, IProject } from '@instantmockapi/db';
 import { getArtifactRecord, getArtifactsForVersion } from '@instantmockapi/registry';
@@ -31,11 +31,7 @@ async function loadCompletedArtifact(
   artifactType: ArtifactType,
   version: number,
 ): Promise<IArtifact> {
-  const record = await getArtifactRecord(String(project._id), artifactType, version);
-  if (!record.ok) {
-    throw record.error;
-  }
-  const artifact = record.value;
+  const artifact = unwrap(await getArtifactRecord(String(project._id), artifactType, version));
   if (!artifact || artifact.status !== 'completed' || !artifact.storageRef) {
     throw notFound(`Generated ${artifactType} artifact`);
   }
@@ -85,11 +81,8 @@ export const artifactRoutes: FastifyPluginAsync<ArtifactRouteOptions> = async (
       const project = await loadOwnedProject(id, request.authUser?.sub ?? '');
       const version = query.version ?? project.currentVersion;
 
-      const artifacts = await getArtifactsForVersion(String(project._id), version);
-      if (!artifacts.ok) {
-        throw artifacts.error;
-      }
-      return reply.send({ data: artifacts.value.map(toArtifactView), meta: { version } });
+      const artifacts = unwrap(await getArtifactsForVersion(String(project._id), version));
+      return reply.send({ data: artifacts.map(toArtifactView), meta: { version } });
     },
   );
 
@@ -114,14 +107,11 @@ export const artifactRoutes: FastifyPluginAsync<ArtifactRouteOptions> = async (
       const project = await loadOwnedProject(id, request.authUser?.sub ?? '');
       const version = query.version ?? project.currentVersion;
 
-      const record = await getArtifactRecord(String(project._id), type, version);
-      if (!record.ok) {
-        throw record.error;
-      }
-      if (!record.value) {
+      const record = unwrap(await getArtifactRecord(String(project._id), type, version));
+      if (!record) {
         throw notFound('Artifact');
       }
-      return reply.send(toArtifactView(record.value));
+      return reply.send(toArtifactView(record));
     },
   );
 
