@@ -9,6 +9,7 @@ import {
   AppError,
   WORKER_ARTIFACT_MAP,
   WORKER_IDS,
+  unwrap,
   type ArtifactType,
   type WorkerId,
 } from '@instantmockapi/shared';
@@ -136,14 +137,9 @@ export const jobRoutes: FastifyPluginAsync<JobRouteOptions> = async (app, option
         WORKER_ARTIFACT_MAP[worker].includes(artifact as ArtifactType),
       ) as ArtifactType[];
       for (const artifactType of artifacts) {
-        const reset = await createOrResetArtifactRecord(
-          String(job.projectId),
-          artifactType,
-          job.version,
+        unwrap(
+          await createOrResetArtifactRecord(String(job.projectId), artifactType, job.version)
         );
-        if (!reset.ok) {
-          throw reset.error;
-        }
       }
       await job.save();
 

@@ -7,7 +7,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { AppError } from '@instantmockapi/shared';
+import { AppError, unwrap } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
 import { User } from '@instantmockapi/db';
 import {
@@ -79,14 +79,11 @@ export const authRoutes: FastifyPluginAsync<AuthRouteOptions> = async (app, { co
     },
     async (request, reply) => {
       const { refreshToken } = request.body as { refreshToken: string };
-      const claims = await verifyRefreshToken(refreshToken, config);
-      if (!claims.ok) {
-        throw claims.error;
-      }
-      if (!isObjectIdHex(claims.value.sub)) {
+      const claims = unwrap(await verifyRefreshToken(refreshToken, config));
+      if (!isObjectIdHex(claims.sub)) {
         throw new AppError({ code: 'UNAUTHORIZED', message: 'Invalid or expired token' });
       }
-      const user = await User.findById(claims.value.sub);
+      const user = await User.findById(claims.sub);
       if (!user) {
         throw new AppError({ code: 'UNAUTHORIZED', message: 'Invalid or expired token' });
       }
