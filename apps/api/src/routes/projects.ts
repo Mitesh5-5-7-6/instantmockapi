@@ -4,7 +4,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { AppError, PROJECT_STATUSES, type InputSourceType } from '@instantmockapi/shared';
+import { AppError, PROJECT_STATUSES, unwrap, type InputSourceType } from '@instantmockapi/shared';
 import { getPlanConfig, type EnvConfig } from '@instantmockapi/config';
 import { Project, hardDeleteProject } from '@instantmockapi/db';
 import { validateIPS } from '@instantmockapi/ips';
@@ -174,22 +174,13 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
 
       let schemaChanged = false;
       if (body.generationConfig) {
-        const cfg = validateGenerationConfig(body.generationConfig, config);
-        if (!cfg.ok) {
-          throw cfg.error;
-        }
-        project.generationConfig = cfg.value;
+        project.generationConfig = unwrap(validateGenerationConfig(body.generationConfig, config));
         schemaChanged = true;
       }
       if (body.ips) {
-        const validated = validateIPS(
-          { ...body.ips, projectId: String(project._id) },
-          config.maxNestingDepth,
+        project.ips = unwrap(
+          validateIPS({ ...body.ips, projectId: String(project._id) }, config.maxNestingDepth),
         );
-        if (!validated.ok) {
-          throw validated.error;
-        }
-        project.ips = validated.value;
         schemaChanged = true;
       }
 
