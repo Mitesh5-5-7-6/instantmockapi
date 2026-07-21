@@ -5,7 +5,7 @@
  * same NOT_FOUND AppError so responses never leak whether a resource exists.
  */
 
-import { AppError } from '@instantmockapi/shared';
+import { AppError, unwrap } from '@instantmockapi/shared';
 import { assertOwnership } from '@instantmockapi/auth';
 import { Job, Project, type IJob, type IProject } from '@instantmockapi/db';
 
@@ -29,9 +29,7 @@ export async function loadOwnedProject(projectId: string, tokenSub: string): Pro
     throw notFound('Project');
   }
   const owned = assertOwnership(project.ownerId, tokenSub, 'Project');
-  if (!owned.ok) {
-    throw owned.error;
-  }
+  unwrap(owned);
   return project;
 }
 
@@ -52,8 +50,6 @@ export async function loadOwnedJob(
     throw notFound('Job');
   }
   const owned = assertOwnership(project.ownerId, tokenSub, 'Job');
-  if (!owned.ok) {
-    throw owned.error;
-  }
+  unwrap(owned);
   return { job, project };
 }
