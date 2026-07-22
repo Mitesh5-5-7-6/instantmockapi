@@ -133,7 +133,24 @@ export async function enqueueGenerationJob(
     idempotencyKey,
   });
 
-  // Use the idempotencyKey as the job ID in BullMQ to enforce deduplication/idempotency
+  // The idempotencyKey doubles as the BullMQ job id to enforce dedup. But
+  // `queue.add` is a silent no-op when that id already exists in ANY state --
+  // and `removeOnFail: false` keeps failed jobs forever. Without this sweep a
+  // single failure permanently blocks every future job for the same
+  // project+version+config: the API still returns 202 and Mongo still says
+  // "queued", but nothing is ever handed to a worker.
+  const existing = await queue.getJob(idempotencyKey);
+  if (existing) {
+    const state = await existing.getState();
+    if (state === 'failed' || state === 'completed') {
+      logger.info('Clearing settled job to allow re-enqueue', { idempotencyKey, state });
+      await existing.remove();
+    } else {
+      logger.info('Generation job already in flight; reusing', { idempotencyKey, state });
+      return existing as Job<GenerationJobPayload>;
+    }
+  }
+
   const job = await queue.add(QUEUE_NAME, payload, {
     jobId: idempotencyKey,
   });
