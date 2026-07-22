@@ -4,14 +4,14 @@
 import { logger, getErrorMessage } from '@instantmockapi/shared';
 import { connectDB, disconnectDB } from '@instantmockapi/db';
 import { closeQueue, createGenerationWorker } from '@instantmockapi/queue';
-import { createS3Storage } from '@instantmockapi/storage';
+import { createStorage } from '@instantmockapi/storage';
 import { processGenerationJob } from './processor.js';
 
 const WORKER_CONCURRENCY = Number.parseInt(process.env['WORKER_CONCURRENCY'] ?? '2', 10);
 
 async function main(): Promise<void> {
   await connectDB();
-  const storage = createS3Storage();
+  const storage = createStorage();
 
   const worker = createGenerationWorker((payload) => processGenerationJob(payload, { storage }), {
     concurrency: Number.isNaN(WORKER_CONCURRENCY) ? 2 : WORKER_CONCURRENCY,

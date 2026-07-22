@@ -2,6 +2,10 @@
 
 export { connectDB, disconnectDB } from './connection.js';
 
+// Re-exported so other packages share this exact mongoose instance (and thus
+// the connection opened by connectDB) rather than resolving their own copy.
+export { default as mongoose } from 'mongoose';
+
 // Export Models
 export { User, type IUser } from './models/user.js';
 export { Project, type IProject } from './models/project.js';
