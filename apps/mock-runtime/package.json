@@ -20,6 +20,7 @@
     "@instantmockapi/storage": "workspace:*",
     "@instantmockapi/generator-hosting": "workspace:*",
     "fastify": "^5.2.0",
+    "@fastify/cors": "^11.3.0",
     "@fastify/rate-limit": "^10.2.1",
     "ioredis": "^5.5.0"
   },

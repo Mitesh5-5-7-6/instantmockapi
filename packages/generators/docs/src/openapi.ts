@@ -1,5 +1,5 @@
 /**
- * OpenAPI 3.0 generator (Worker E, doc 09 §4).
+ * OpenAPI 3.1 generator (Worker E, doc 09 §4).
  *
  * Documents ONLY the selected methods (doc 08 §9 conventions for the hosted
  * mock API); example bodies come from Worker D's example records so docs and
@@ -165,7 +165,7 @@ export function generateOpenAPI(
   }
 
   const spec: OpenAPISchemaNode = {
-    openapi: '3.0.3',
+    openapi: '3.1.0',
     info: {
       title: `InstantMockAPI — project ${ips.projectId}`,
       version: `v${ips.version}`,

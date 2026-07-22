@@ -65,6 +65,10 @@ export interface EnvConfig {
 
   /** GridFS bucket name used when storageDriver is 'mongo' */
   readonly storageMongoBucket: string;
+
+  /** Public base URL of the hosted mock runtime (…/p). Hosted API URLs are
+   * built as `${hostedBaseUrl}/${projectId}`. Override per-deployment. */
+  readonly hostedBaseUrl: string;
 }
 
 function envStr(key: string, fallback: string): string {
@@ -106,5 +110,6 @@ export function loadEnvConfig(): EnvConfig {
     logLevel: envStr('LOG_LEVEL', 'info'),
     storageDriver: envStr('STORAGE_DRIVER', 'mongo'),
     storageMongoBucket: envStr('STORAGE_MONGO_BUCKET', 'artifacts'),
+    hostedBaseUrl: envStr('HOSTED_BASE_URL', 'https://api.instantmockapi.dev/p'),
   };
 }

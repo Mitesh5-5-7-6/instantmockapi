@@ -140,6 +140,65 @@ export function CodeBlock({ code, maxHeight }: { code: string; maxHeight?: numbe
   );
 }
 
+/* ── CodeViewer ── */
+
+/**
+ * Multi-file code viewer: file tabs (when a bundle has >1 file), a filename
+ * label, and the active file's contents in a copy-enabled CodeBlock. Single-
+ * file artifacts collapse to a label + one block. Syntax highlighting is out
+ * of scope for V1 — monospace + one-tap copy per doc 11 §11.
+ */
+export function CodeViewer({
+  files,
+  onDownload,
+  downloadLabel = 'Download',
+}: {
+  files: Record<string, string> | undefined;
+  onDownload?: () => void;
+  downloadLabel?: string;
+}) {
+  const names = files ? Object.keys(files) : [];
+  const [active, setActive] = useState(names[0] ?? '');
+  const key = names.join('|');
+  useEffect(() => {
+    setActive(names[0] ?? '');
+  }, [key]);
+
+  if (!files || names.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="ui-stack" style={{ gap: 'var(--space-3)' }}>
+      <div className="ui-row ui-row--between" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+        {names.length > 1 ? (
+          <div className="ui-row" style={{ flexWrap: 'wrap', gap: 'var(--space-1)' }}>
+            {names.map((name) => (
+              <Button
+                key={name}
+                variant={name === active ? 'secondary' : 'ghost'}
+                size="sm"
+                aria-selected={name === active}
+                onClick={() => setActive(name)}
+              >
+                {name}
+              </Button>
+            ))}
+          </div>
+        ) : (
+          <span className="ui-mono ui-meta">{names[0]}</span>
+        )}
+        {onDownload ? (
+          <Button variant="secondary" size="sm" onClick={onDownload}>
+            {downloadLabel}
+          </Button>
+        ) : null}
+      </div>
+      <CodeBlock code={active ? (files[active] ?? '') : ''} maxHeight={520} />
+    </div>
+  );
+}
+
 /* ── Modal ── */
 
 export interface ModalProps {

@@ -51,7 +51,9 @@ export interface ProcessorDeps {
   retry?: { attempts: number; delayMs: number };
 }
 
-const HOSTED_BASE_URL = 'https://api.instantmockapi.dev/p';
+// Public base URL of the hosted mock runtime; overridable per-deployment so
+// hosted URLs resolve to the actual runtime host (e.g. localhost in dev).
+const HOSTED_BASE_URL = process.env['HOSTED_BASE_URL'] ?? 'https://api.instantmockapi.dev/p';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

@@ -111,6 +111,9 @@ importers:
 
   apps/mock-runtime:
     dependencies:
+      '@fastify/cors':
+        specifier: ^11.3.0
+        version: 11.3.0
       '@fastify/rate-limit':
         specifier: ^10.2.1
         version: 10.3.0

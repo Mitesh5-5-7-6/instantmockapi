@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, loadTokens, saveTokens, subscribeJobStream } from './api-client';
 import type {
   ApiUser,
+  ArtifactContent,
   ArtifactView,
   AuthTokens,
   GenerationConfig,
@@ -117,6 +118,13 @@ export function useJob(jobId: string | null) {
     queryKey: ['job', jobId],
     queryFn: () => apiFetch<JobView>(`/v1/jobs/${jobId}`),
     enabled: jobId !== null,
+    // The SSE stream (useJobStream) gives instant updates, but the API caps
+    // each connection at ~25s. Poll as a safety net so a job that runs longer
+    // never appears frozen; stop once it settles (completed / failed_partial).
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'queued' || status === 'running' ? 2_000 : false;
+    },
   });
 }
 
@@ -131,10 +139,31 @@ export function useJobStream(jobId: string | null): void {
     if (!jobId) {
       return;
     }
-    const abort = subscribeJobStream(jobId, (snapshot) => {
-      queryClient.setQueryData(['job', jobId], snapshot);
-    });
-    return abort;
+    let cancelled = false;
+    let abort: (() => void) | null = null;
+    const connect = (): void => {
+      if (cancelled) {
+        return;
+      }
+      abort = subscribeJobStream(
+        jobId,
+        (snapshot) => queryClient.setQueryData(['job', jobId], snapshot),
+        () => {
+          // The API caps each SSE connection at ~25s. Reconnect while the job
+          // is still unsettled so progress keeps flowing in real time; stop
+          // once it reaches a terminal state.
+          const status = queryClient.getQueryData<JobView>(['job', jobId])?.status;
+          if (!cancelled && (status === 'queued' || status === 'running')) {
+            setTimeout(connect, 500);
+          }
+        },
+      );
+    };
+    connect();
+    return () => {
+      cancelled = true;
+      abort?.();
+    };
   }, [jobId, queryClient]);
 }
 
@@ -147,6 +176,22 @@ export function useArtifacts(projectId: string | null, version?: number) {
         `/v1/projects/${projectId}/artifacts${qs}`,
       ),
     enabled: projectId !== null,
+  });
+}
+
+/** Lazily fetch an artifact's decoded content for the code viewer. Stays idle
+ * until an artifactType is set (the viewer opens). */
+export function useArtifactContent(
+  projectId: string | null,
+  artifactType: string | null,
+  version?: number,
+) {
+  const qs = version !== undefined ? `?version=${version}` : '';
+  return useQuery({
+    queryKey: ['artifact-content', projectId, artifactType, version ?? 'current'],
+    queryFn: () =>
+      apiFetch<ArtifactContent>(`/v1/projects/${projectId}/artifacts/${artifactType}/content${qs}`),
+    enabled: projectId !== null && artifactType !== null,
   });
 }
 
