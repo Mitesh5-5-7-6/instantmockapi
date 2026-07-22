@@ -59,6 +59,12 @@ export interface EnvConfig {
 
   /** Log level */
   readonly logLevel: string;
+
+  /** Artifact storage backend: 'mongo' (GridFS) or 's3' (object storage) */
+  readonly storageDriver: string;
+
+  /** GridFS bucket name used when storageDriver is 'mongo' */
+  readonly storageMongoBucket: string;
 }
 
 function envStr(key: string, fallback: string): string {
@@ -98,5 +104,7 @@ export function loadEnvConfig(): EnvConfig {
     maxRequestBodySize: envInt('MAX_REQUEST_BODY_SIZE', 1_048_576), // 1MB
     maxPaginationLimit: envInt('MAX_PAGINATION_LIMIT', 100),
     logLevel: envStr('LOG_LEVEL', 'info'),
+    storageDriver: envStr('STORAGE_DRIVER', 'mongo'),
+    storageMongoBucket: envStr('STORAGE_MONGO_BUCKET', 'artifacts'),
   };
 }

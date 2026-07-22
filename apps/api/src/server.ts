@@ -10,7 +10,7 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import { authPlugin } from '@instantmockapi/auth';
-import { createS3Storage, type StorageClient } from '@instantmockapi/storage';
+import { createStorage, type StorageClient } from '@instantmockapi/storage';
 import { registerErrorHandling } from './error-handler.js';
 import { authRoutes } from './routes/auth.js';
 import { projectRoutes } from './routes/projects.js';
@@ -32,7 +32,7 @@ export interface BuildServerOptions {
 
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
   const config = options.config ?? loadEnvConfig();
-  const storage = options.storage ?? createS3Storage(config);
+  const storage = options.storage ?? createStorage(config);
 
   const app = Fastify({
     logger: false,
