@@ -50,11 +50,16 @@ export const jobRoutes: FastifyPluginAsync<JobRouteOptions> = async (app, option
     const { jobId } = request.params as { jobId: string };
     const { job } = await loadOwnedJob(jobId, request.authUser?.sub ?? '');
 
+    const staged = reply.getHeaders() as Record<string, string>;
+    delete staged['content-length'];
+
     reply.hijack();
     reply.raw.writeHead(200, {
+      ...staged,
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
       connection: 'keep-alive',
+      'x-accel-buffering': 'no',
     });
 
     const send = (snapshot: IJob) => {
@@ -137,9 +142,7 @@ export const jobRoutes: FastifyPluginAsync<JobRouteOptions> = async (app, option
         WORKER_ARTIFACT_MAP[worker].includes(artifact as ArtifactType),
       ) as ArtifactType[];
       for (const artifactType of artifacts) {
-        unwrap(
-          await createOrResetArtifactRecord(String(job.projectId), artifactType, job.version)
-        );
+        unwrap(await createOrResetArtifactRecord(String(job.projectId), artifactType, job.version));
       }
       await job.save();
 
