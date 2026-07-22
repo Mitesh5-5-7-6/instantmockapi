@@ -67,7 +67,11 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await app.register(authRoutes, { prefix: '/v1', config });
   await app.register(projectRoutes, { prefix: '/v1', config });
   await app.register(generationRoutes, { prefix: '/v1', config });
-  await app.register(jobRoutes, { prefix: '/v1', config, sse: options.sse });
+  await app.register(jobRoutes, {
+    prefix: '/v1',
+    config,
+    sse: { maxDurationMs: 25_000, pollIntervalMs: 2000 },
+  });
   await app.register(artifactRoutes, { prefix: '/v1', config, storage });
   await app.register(versionRoutes, { prefix: '/v1', config });
 

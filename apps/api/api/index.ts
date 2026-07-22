@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { connectDB } from '@instantmockapi/db';
 import { buildServer } from '../src/server.js';
 
-export const config = { maxDuration: 30 };
+export const config = { maxDuration: 60 };
 
 let appPromise: Promise<FastifyInstance> | null = null;
 
