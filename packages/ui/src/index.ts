@@ -15,6 +15,7 @@ export {
   type CheckboxProps,
   Field,
   CodeBlock,
+  CodeViewer,
   Modal,
   type ModalProps,
   ProgressBar,

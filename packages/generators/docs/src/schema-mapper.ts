@@ -1,6 +1,8 @@
 /**
- * IPS field model → OpenAPI 3.0 schema objects.
- * Mirrors Worker A's rule translation, targeting the OpenAPI schema dialect.
+ * IPS field model → OpenAPI 3.1 schema objects.
+ * Mirrors Worker A's rule translation, targeting the OpenAPI 3.1 schema dialect
+ * (aligned with JSON Schema 2020-12 — optional fields use a `["type","null"]`
+ * type array, since 3.1 removes the `nullable` keyword).
  */
 
 import type { Entity, Field } from '@instantmockapi/ips';
@@ -122,8 +124,10 @@ function fieldSchema(field: Field): OpenAPISchemaNode {
   if (field.default !== undefined && field.default !== null) {
     s['default'] = field.default;
   }
-  if (!field.required) {
-    s['nullable'] = true;
+  // OpenAPI 3.1 drops `nullable`; express optionality as a null union instead.
+  // Every branch above sets a string `type`, so this guard is always taken.
+  if (!field.required && typeof s['type'] === 'string') {
+    s['type'] = [s['type'], 'null'];
   }
 
   return s;

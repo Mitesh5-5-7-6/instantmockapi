@@ -5,6 +5,7 @@
  */
 
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { getErrorMessage, logger, AppError } from '@instantmockapi/shared';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
@@ -59,6 +60,11 @@ export async function buildMockRuntime(options: BuildRuntimeOptions): Promise<Fa
   app.setNotFoundHandler((_request, reply) => {
     void reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'Not found' } });
   });
+
+  // The hosted mock API is public and browser-facing — the web playground and
+  // any consumer app call it cross-origin. It carries no cookies/credentials,
+  // so reflect any origin. (Rate limiting below still bounds abuse.)
+  await app.register(cors, { origin: true });
 
   if (options.rateLimit !== false) {
     // Per-PROJECT rate limit (doc 13 §5): a public mock URL must not become

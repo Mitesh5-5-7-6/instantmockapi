@@ -77,6 +77,12 @@ export interface ArtifactView {
   storageRef: string | null;
 }
 
+export interface ArtifactContent {
+  artifactType: string;
+  version: number;
+  files: Record<string, string>;
+}
+
 export interface ListMeta {
   page: number;
   limit: number;

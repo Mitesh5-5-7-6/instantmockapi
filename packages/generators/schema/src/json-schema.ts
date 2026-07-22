@@ -1,7 +1,7 @@
 /**
  * JSON Schema generator (Worker A).
  *
- * Translates IPS entities, nested types, and validation rules into standard JSON Schema draft-07 (doc 04 §F5, doc 09 §4).
+ * Translates IPS entities, nested types, and validation rules into standard JSON Schema draft 2020-12 (doc 04 §F5, doc 09 §4).
  */
 
 import type { InternalProjectSchema, Entity, Field } from '@instantmockapi/ips';
@@ -12,7 +12,7 @@ interface JSONSchemaNode {
 }
 
 /**
- * Generates JSON Schema draft-07 JSON files from an IPS schema.
+ * Generates JSON Schema draft 2020-12 JSON files from an IPS schema.
  * Returns a dictionary containing file name and the generated JSON Schema content.
  */
 export function generateJSONSchema(ips: InternalProjectSchema): Record<string, string> {
@@ -38,7 +38,7 @@ function generateSchemaForEntity(entity: Entity): JSONSchemaNode {
   }
 
   const schema: JSONSchemaNode = {
-    $schema: 'http://json-schema.org/draft-07/schema#',
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
     title: entity.name,
     type: 'object',
     properties,

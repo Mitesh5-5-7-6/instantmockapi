@@ -7,7 +7,7 @@
  */
 
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
-import { ARTIFACT_TYPES, unwrap, type ArtifactType } from '@instantmockapi/shared';
+import { ARTIFACT_TYPES, AppError, unwrap, type ArtifactType } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
 import type { IArtifact, IProject } from '@instantmockapi/db';
 import { getArtifactRecord, getArtifactsForVersion } from '@instantmockapi/registry';
@@ -25,6 +25,9 @@ const versionQuerySchema = {
   additionalProperties: false,
   properties: { version: { type: 'integer', minimum: 1 } },
 } as const;
+
+/** Binary artifacts have no meaningful inline text view — download only. */
+const BINARY_ARTIFACTS = new Set<ArtifactType>(['export_zip']);
 
 async function loadCompletedArtifact(
   project: IProject,
@@ -138,6 +141,56 @@ export const artifactRoutes: FastifyPluginAsync<ArtifactRouteOptions> = async (
 
       const artifact = await loadCompletedArtifact(project, type, version);
       return sendArtifactContent(reply, storage, artifact);
+    },
+  );
+
+  // Inline content for the code-viewer (doc 08 §5). Normalizes single-file and
+  // multi-file (bundle) artifacts into one `{ files }` shape so the client
+  // renders them uniformly; unlike /download it never sets content-disposition.
+  app.get(
+    '/projects/:id/artifacts/:type/content',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id', 'type'],
+          properties: {
+            id: { type: 'string' },
+            type: { type: 'string', enum: [...ARTIFACT_TYPES] },
+          },
+        },
+        querystring: versionQuerySchema,
+      },
+    },
+    async (request, reply) => {
+      const { id, type } = request.params as { id: string; type: ArtifactType };
+      const query = request.query as { version?: number };
+      const project = await loadOwnedProject(id, request.authUser?.sub ?? '');
+      const version = query.version ?? project.currentVersion;
+
+      if (BINARY_ARTIFACTS.has(type)) {
+        throw new AppError({
+          code: 'VALIDATION_ERROR',
+          message: `${type} is a binary bundle; use the download endpoint`,
+        });
+      }
+
+      const artifact = await loadCompletedArtifact(project, type, version);
+      const storageRef = artifact.storageRef as string;
+      const object = await storage.get(storageRef);
+      if (!object) {
+        throw notFound(`Stored ${type} content`);
+      }
+
+      let files: Record<string, string>;
+      if (isBundleKey(storageRef)) {
+        files = decodeBundle(object.body).files;
+      } else {
+        const filename = storageRef.split('/').pop() ?? type;
+        files = { [filename]: new TextDecoder().decode(object.body) };
+      }
+
+      return reply.send({ artifactType: type, version: artifact.version, files });
     },
   );
 

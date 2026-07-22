@@ -13,6 +13,7 @@ import {
   Button,
   Card,
   CodeBlock,
+  CodeViewer,
   CountdownBadge,
   EmptyState,
   Modal,
@@ -22,6 +23,7 @@ import {
 } from '@instantmockapi/ui';
 import {
   downloadArtifact,
+  useArtifactContent,
   useArtifacts,
   useGenerate,
   useGenerateAgain,
@@ -30,6 +32,7 @@ import {
   useRestoreVersion,
   useVersions,
 } from '../../../lib/hooks';
+import { HostedPlayground } from '../../../components/hosted-playground';
 
 const REGENERATABLE = [
   'json_schema',
@@ -42,6 +45,9 @@ const REGENERATABLE = [
   'hosted_api',
   'export_zip',
 ];
+
+// Binary bundle — no inline text view (download only).
+const NON_VIEWABLE = ['export_zip'];
 
 export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -57,6 +63,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const [selected, setSelected] = useState<string[]>(['zod']);
   const [schemaOpen, setSchemaOpen] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [viewType, setViewType] = useState<string | null>(null);
+  const content = useArtifactContent(id, viewType, artifacts.data?.meta.version);
 
   if (project.isLoading) {
     return <div className="ui-skeleton" style={{ minHeight: 320 }} />;
@@ -73,6 +81,11 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
   const detail = project.data;
   const isExpired = detail.status === 'expired';
+  // Entity path = name.toLowerCase(), mirroring generator-hosting's
+  // generateHostingConfig so the playground hits the same routes the runtime serves.
+  const ipsEntities = ((detail.ips as { entities?: { name: string }[] })?.entities ?? []).map(
+    (entity) => ({ name: entity.name, path: entity.name.toLowerCase() }),
+  );
 
   return (
     <div className="ui-stack" style={{ gap: 'var(--space-6)' }}>
@@ -133,6 +146,24 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
               {detail.generationConfig.methods.length === 0 ? ' (select methods first)' : ''}.
             </p>
           )}
+          {detail.generationConfig.methods.length > 0 ? (
+            <div className="ui-row" style={{ gap: 'var(--space-1)' }}>
+              {detail.generationConfig.methods.map((verb) => (
+                <span key={verb} className="ui-mono ui-meta">
+                  {verb}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {detail.hosted.url &&
+          ipsEntities.length > 0 &&
+          detail.generationConfig.methods.length > 0 ? (
+            <HostedPlayground
+              baseUrl={detail.hosted.url}
+              entities={ipsEntities}
+              methods={detail.generationConfig.methods}
+            />
+          ) : null}
           <div className="ui-row">
             <Button
               disabled={generate.isPending}
@@ -185,6 +216,16 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                 <Button
                   variant="secondary"
                   size="sm"
+                  disabled={
+                    artifact.status !== 'completed' || NON_VIEWABLE.includes(artifact.artifactType)
+                  }
+                  onClick={() => setViewType(artifact.artifactType)}
+                >
+                  View
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   disabled={artifact.status !== 'completed'}
                   onClick={() => {
                     setDownloadError(null);
@@ -194,6 +235,18 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                   }}
                 >
                   Download
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={regenerate.isPending}
+                  onClick={() =>
+                    regenerate.mutate([artifact.artifactType], {
+                      onSuccess: (job) => router.push(`/projects/${id}/progress/${job.jobId}`),
+                    })
+                  }
+                >
+                  Regenerate
                 </Button>
               </div>
             </Card>
@@ -227,6 +280,30 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
       <Modal open={schemaOpen} onClose={() => setSchemaOpen(false)} title="Schema (IPS)">
         <SchemaTree entities={(detail.ips as { entities: SchemaTreeEntity[] }).entities ?? []} />
+      </Modal>
+
+      <Modal
+        open={viewType !== null}
+        onClose={() => setViewType(null)}
+        title={viewType ? `View ${viewType}` : 'View'}
+      >
+        {content.isLoading ? (
+          <div className="ui-skeleton" style={{ minHeight: 200 }} />
+        ) : content.isError ? (
+          <p className="ui-error">{content.error.message}</p>
+        ) : (
+          <CodeViewer
+            files={content.data?.files}
+            onDownload={() => {
+              setDownloadError(null);
+              if (viewType) {
+                downloadArtifact(id, viewType).catch((cause: Error) =>
+                  setDownloadError(cause.message),
+                );
+              }
+            }}
+          />
+        )}
       </Modal>
 
       <Modal open={regenOpen} onClose={() => setRegenOpen(false)} title="Regenerate artifacts">
