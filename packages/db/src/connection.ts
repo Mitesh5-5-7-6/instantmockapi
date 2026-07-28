@@ -1,9 +1,13 @@
 import dns from 'node:dns';
 import mongoose from 'mongoose';
-import { logger } from '@instantmockapi/shared';
+import { logger, getErrorMessage } from '@instantmockapi/shared';
 import { loadEnvConfig } from '@instantmockapi/config';
 
 let isConnected = false;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Some hosts leave Node's c-ares resolver pointed at 127.0.0.1 (or an IPv6
@@ -56,9 +60,33 @@ export async function connectDB(customUri?: string): Promise<typeof mongoose> {
     logger.warn('MongoDB disconnected');
   });
 
-  await mongoose.connect(uri);
-  isConnected = true;
-  return mongoose;
+  // Retry the INITIAL connection with backoff. A fresh Atlas IP-whitelist
+  // entry can take a minute+ to propagate, and transient DNS/network blips
+  // shouldn't kill a long-lived worker on boot. Each attempt fails fast
+  // (serverSelectionTimeoutMS) so the loop stays responsive; once connected,
+  // the driver's own topology monitor handles later reconnects.
+  const maxAttempts = Math.max(1, Number(process.env['DB_CONNECT_MAX_ATTEMPTS'] ?? '15'));
+  const baseDelayMs = Math.max(500, Number(process.env['DB_CONNECT_RETRY_MS'] ?? '3000'));
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await mongoose.connect(uri, { serverSelectionTimeoutMS: 8000 });
+      isConnected = true;
+      return mongoose;
+    } catch (error) {
+      lastError = error;
+      if (attempt >= maxAttempts) break;
+      const delay = Math.min(baseDelayMs * attempt, 15000);
+      logger.warn('MongoDB connection attempt failed; retrying', {
+        attempt,
+        maxAttempts,
+        retryInMs: delay,
+        error: getErrorMessage(error),
+      });
+      await sleep(delay);
+    }
+  }
+  throw lastError;
 }
 
 /**
