@@ -249,6 +249,7 @@ export interface VersionView {
   id: string;
   projectId: string;
   version: number;
+  note: string | null;
   createdAt: string;
 }
 
@@ -274,12 +275,19 @@ export function useRestoreVersion(projectId: string) {
   });
 }
 
-/** Download an artifact through the authorized API (doc 13 §6) and save it. */
-export async function downloadArtifact(projectId: string, artifactType: string): Promise<void> {
+/** Download an artifact through the authorized API (doc 13 §6) and save it.
+ * Pass `version` to target an artifact pinned below the current version
+ * (per-artifact skew after a partial regen); omit for the current version. */
+export async function downloadArtifact(
+  projectId: string,
+  artifactType: string,
+  version?: number,
+): Promise<void> {
   const { apiBaseUrl, loadTokens } = await import('./api-client');
   const tokens = loadTokens();
+  const qs = version !== undefined ? `?version=${version}` : '';
   const response = await fetch(
-    `${apiBaseUrl()}/v1/projects/${projectId}/artifacts/${artifactType}/download`,
+    `${apiBaseUrl()}/v1/projects/${projectId}/artifacts/${artifactType}/download${qs}`,
     { headers: tokens ? { authorization: `Bearer ${tokens.accessToken}` } : {} },
   );
   if (!response.ok) {

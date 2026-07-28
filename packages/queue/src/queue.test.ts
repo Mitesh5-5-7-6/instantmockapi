@@ -4,8 +4,18 @@ import type { GenerationConfig } from '@instantmockapi/ips';
 // In-memory stand-ins for BullMQ/Redis. `queue.add` mirrors BullMQ's jobId
 // semantics: adding with an existing jobId returns the existing job instead
 // of creating a new one — the mechanism our idempotency relies on.
+interface MockJob {
+  id: string;
+  name: string;
+  data: unknown;
+  opts: unknown;
+  _state: string;
+  getState(): Promise<string>;
+  remove(): Promise<void>;
+}
+
 const state = vi.hoisted(() => ({
-  jobs: new Map<string, { id: string; name: string; data: unknown; opts: unknown }>(),
+  jobs: new Map<string, MockJob>(),
   queueCtorOpts: [] as unknown[],
   redisCtorArgs: [] as unknown[],
 }));
@@ -18,15 +28,33 @@ vi.mock('bullmq', () => {
     ) {
       state.queueCtorOpts.push(opts);
     }
+    // Mirrors BullMQ: adding an existing jobId is a silent no-op returning the
+    // existing job — the sweep in enqueueGenerationJob must clear settled jobs
+    // first or a failed/completed job blocks all re-enqueues.
     async add(name: string, data: unknown, opts?: { jobId?: string }) {
       const jobId = opts?.jobId ?? `auto-${state.jobs.size + 1}`;
       const existing = state.jobs.get(jobId);
       if (existing) {
         return existing;
       }
-      const job = { id: jobId, name, data, opts };
+      const job: MockJob = {
+        id: jobId,
+        name,
+        data,
+        opts,
+        _state: 'waiting',
+        async getState() {
+          return this._state;
+        },
+        async remove() {
+          state.jobs.delete(this.id);
+        },
+      };
       state.jobs.set(jobId, job);
       return job;
+    }
+    async getJob(jobId: string) {
+      return state.jobs.get(jobId);
     }
     async close() {}
   }
@@ -136,6 +164,32 @@ describe('enqueueGenerationJob', () => {
     await enqueueGenerationJob(PROJECT_ID, 2, 'full', ['zod'], keyV2);
 
     expect(state.jobs.size).toBe(2);
+  });
+
+  it('sweeps a settled (failed/completed) job so re-enqueue is not blocked', async () => {
+    const key = generateIdempotencyKey(PROJECT_ID, 1, config);
+    const first = await enqueueGenerationJob(PROJECT_ID, 1, 'full', ['zod'], key);
+    // Simulate the prior attempt having failed and been retained (removeOnFail: false)
+    state.jobs.get(key)!._state = 'failed';
+
+    const second = await enqueueGenerationJob(PROJECT_ID, 1, 'full', ['zod'], key);
+
+    // The stale failed job was cleared and a brand-new job enqueued under the same id
+    expect(second).not.toBe(first);
+    expect(second.id).toBe(key);
+    expect(state.jobs.size).toBe(1);
+    expect(state.jobs.get(key)!._state).toBe('waiting');
+  });
+
+  it('reuses an in-flight job rather than sweeping it', async () => {
+    const key = generateIdempotencyKey(PROJECT_ID, 1, config);
+    const first = await enqueueGenerationJob(PROJECT_ID, 1, 'full', ['zod'], key);
+    // Still active — must NOT be swept
+    state.jobs.get(key)!._state = 'active';
+
+    const second = await enqueueGenerationJob(PROJECT_ID, 1, 'full', ['zod'], key);
+    expect(second).toBe(first);
+    expect(state.jobs.size).toBe(1);
   });
 });
 

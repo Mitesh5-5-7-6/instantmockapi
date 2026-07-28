@@ -85,6 +85,7 @@ export function toVersionView(version: IVersion) {
     id: String(version._id),
     projectId: String(version.projectId),
     version: version.version,
+    note: version.note ?? null,
     createdAt: version.createdAt,
   };
 }

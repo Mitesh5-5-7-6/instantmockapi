@@ -19,7 +19,7 @@ describe('generateOpenAPI (Worker E)', () => {
 
   it('emits a single openapi.json file', () => {
     expect(Object.keys(output)).toEqual(['openapi.json']);
-    expect(spec.openapi).toBe('3.0.3');
+    expect(spec.openapi).toBe('3.1.0');
   });
 
   it('stamps the project id and IPS version', () => {
@@ -45,8 +45,19 @@ describe('generateOpenAPI (Worker E)', () => {
     expect(schema.required).toContain('id');
     expect(schema.required).not.toContain('rating');
     expect(schema.properties.status.enum).toEqual(['draft', 'published', 'archived']);
-    expect(schema.properties.metadata.properties.keywords.type).toBe('array');
+    // OpenAPI 3.1: optional fields express nullability as a ["type","null"] union
+    // (the removed `nullable` keyword), so keywords (optional) is an array|null.
+    expect(schema.properties.metadata.properties.keywords.type).toEqual(['array', 'null']);
     expect(schema.properties.tags.items.properties.label.type).toBe('string');
+  });
+
+  it('uses the 3.1 null-union for optional fields instead of the removed `nullable`', () => {
+    const schema = spec.components.schemas.BlogPost;
+    // rating is optional → union type; required fields stay a plain string type
+    expect(schema.properties.rating.type).toEqual(['number', 'null']);
+    expect(schema.properties.rating.nullable).toBeUndefined();
+    expect(schema.properties.id.type).toBe('string');
+    expect(schema.properties.id.nullable).toBeUndefined();
   });
 
   it("embeds Worker D's example records as request/response examples", () => {

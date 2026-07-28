@@ -63,8 +63,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const [selected, setSelected] = useState<string[]>(['zod']);
   const [schemaOpen, setSchemaOpen] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const [viewType, setViewType] = useState<string | null>(null);
-  const content = useArtifactContent(id, viewType, artifacts.data?.meta.version);
+  const [view, setView] = useState<{ type: string; version: number } | null>(null);
+  const content = useArtifactContent(id, view?.type ?? null, view?.version);
 
   if (project.isLoading) {
     return <div className="ui-skeleton" style={{ minHeight: 320 }} />;
@@ -206,6 +206,12 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                   label={artifact.status === 'generating' ? 'generating' : artifact.status}
                 />
               </div>
+              <span className="ui-meta ui-mono">
+                v{artifact.version}
+                {artifact.generatedAt
+                  ? ` · ${new Date(artifact.generatedAt).toLocaleString()}`
+                  : ''}
+              </span>
               {artifact.errorMessage ? (
                 <span className="ui-error">{artifact.errorMessage}</span>
               ) : null}
@@ -219,7 +225,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                   disabled={
                     artifact.status !== 'completed' || NON_VIEWABLE.includes(artifact.artifactType)
                   }
-                  onClick={() => setViewType(artifact.artifactType)}
+                  onClick={() =>
+                    setView({ type: artifact.artifactType, version: artifact.version })
+                  }
                 >
                   View
                 </Button>
@@ -229,8 +237,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                   disabled={artifact.status !== 'completed'}
                   onClick={() => {
                     setDownloadError(null);
-                    downloadArtifact(id, artifact.artifactType).catch((cause: Error) =>
-                      setDownloadError(cause.message),
+                    downloadArtifact(id, artifact.artifactType, artifact.version).catch(
+                      (cause: Error) => setDownloadError(cause.message),
                     );
                   }}
                 >
@@ -261,6 +269,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             {versions.data.data.map((version) => (
               <div className="ui-row ui-row--between ui-worker-row" key={version.id}>
                 <span className="ui-mono">v{version.version}</span>
+                {version.note ? <span className="ui-meta">{version.note}</span> : null}
                 <span className="ui-meta">{new Date(version.createdAt).toLocaleString()}</span>
                 <Button
                   variant="ghost"
@@ -283,9 +292,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       </Modal>
 
       <Modal
-        open={viewType !== null}
-        onClose={() => setViewType(null)}
-        title={viewType ? `View ${viewType}` : 'View'}
+        open={view !== null}
+        onClose={() => setView(null)}
+        title={view ? `View ${view.type} · v${view.version}` : 'View'}
       >
         {content.isLoading ? (
           <div className="ui-skeleton" style={{ minHeight: 200 }} />
@@ -296,8 +305,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             files={content.data?.files}
             onDownload={() => {
               setDownloadError(null);
-              if (viewType) {
-                downloadArtifact(id, viewType).catch((cause: Error) =>
+              if (view) {
+                downloadArtifact(id, view.type, view.version).catch((cause: Error) =>
                   setDownloadError(cause.message),
                 );
               }

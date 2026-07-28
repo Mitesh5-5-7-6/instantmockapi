@@ -174,6 +174,76 @@ describe('download & export', () => {
   });
 });
 
+describe('GET /v1/projects/:id/artifacts/:type/content', () => {
+  it('returns a bundle as a { files } map once completed', async () => {
+    const key = bundleKey(projectId, 1, 'zod');
+    await testStorage.put(
+      key,
+      encodeBundle({ 'blogpost.zod.ts': 'export const BlogPostSchema = {};' }),
+      'application/json',
+    );
+    await Artifact.updateOne(
+      { projectId, version: 1, artifactType: 'zod' },
+      { $set: { status: 'completed', storageRef: key } },
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${projectId}/artifacts/zod/content`,
+      headers: authHeader(session.accessToken),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      artifactType: 'zod',
+      version: 1,
+      files: { 'blogpost.zod.ts': 'export const BlogPostSchema = {};' },
+    });
+    // Inline view must NOT force a download
+    expect(res.headers['content-disposition']).toBeUndefined();
+  });
+
+  it('returns a single-file artifact as a one-entry files map (no attachment)', async () => {
+    const key = artifactKey(projectId, 1, 'openapi', 'openapi.json');
+    await testStorage.put(key, new TextEncoder().encode('{"openapi":"3.1.0"}'), 'application/json');
+    await Artifact.updateOne(
+      { projectId, version: 1, artifactType: 'openapi' },
+      { $set: { status: 'completed', storageRef: key } },
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${projectId}/artifacts/openapi/content`,
+      headers: authHeader(session.accessToken),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      artifactType: 'openapi',
+      version: 1,
+      files: { 'openapi.json': '{"openapi":"3.1.0"}' },
+    });
+    expect(res.headers['content-disposition']).toBeUndefined();
+  });
+
+  it('rejects binary export_zip with 422 (download-only)', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${projectId}/artifacts/export_zip/content`,
+      headers: authHeader(session.accessToken),
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 404 while the artifact is not completed', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${projectId}/artifacts/zod/content`,
+      headers: authHeader(session.accessToken),
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
 describe('versions', () => {
   it('lists version history in the pagination envelope', async () => {
     const res = await app.inject({
@@ -184,7 +254,28 @@ describe('versions', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.meta).toMatchObject({ page: 1, limit: 20, total: 1 });
-    expect(body.data[0]).toMatchObject({ projectId, version: 1 });
+    // The full generate in beforeEach stamps the version note (doc 03 §7)
+    expect(body.data[0]).toMatchObject({ projectId, version: 1, note: 'Full generation' });
+  });
+
+  it('stamps a descriptive note per generation and returns it in history', async () => {
+    await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${projectId}/regenerate`,
+      headers: authHeader(session.accessToken),
+      payload: { artifacts: ['zod'] },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${projectId}/versions`,
+      headers: authHeader(session.accessToken),
+    });
+    const notesByVersion = new Map<number, string | null>(
+      res.json().data.map((v: { version: number; note: string | null }) => [v.version, v.note]),
+    );
+    expect(notesByVersion.get(1)).toBe('Full generation');
+    expect(notesByVersion.get(2)).toBe('Regenerated: zod');
   });
 
   it('restores a snapshot as a new version', async () => {

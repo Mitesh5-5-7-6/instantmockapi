@@ -154,7 +154,67 @@ describe('POST /v1/projects/:id/regenerate', () => {
     expect(res.json().error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('duplicate regenerate calls dedupe to the same job', async () => {
+  it('bumps the version and stamps a note snapshot (doc 07 §5)', async () => {
+    await generate(); // full at v1
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${projectId}/regenerate`,
+      headers: authHeader(session.accessToken),
+      payload: { artifacts: ['zod'] },
+    });
+    expect(res.statusCode).toBe(202);
+
+    const project = await Project.findById(projectId);
+    expect(project?.currentVersion).toBe(2);
+
+    const snapshot = await Version.findOne({ projectId, version: 2 });
+    expect(snapshot?.note).toBe('Regenerated: zod');
+
+    const job = await Job.findById(res.json().jobId);
+    expect(job?.version).toBe(2);
+  });
+
+  it('produces per-artifact version skew: only regenerated artifacts advance', async () => {
+    await generate(); // full at v1 → all artifacts at v1
+
+    await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${projectId}/regenerate`,
+      headers: authHeader(session.accessToken),
+      payload: { artifacts: ['zod'] },
+    });
+
+    // zod moved to v2; untouched types stay at v1
+    const zodV2 = await Artifact.findOne({ projectId, artifactType: 'zod', version: 2 });
+    expect(zodV2).not.toBeNull();
+    const typescriptV1 = await Artifact.findOne({
+      projectId,
+      artifactType: 'typescript',
+      version: 1,
+    });
+    expect(typescriptV1).not.toBeNull();
+    expect(
+      await Artifact.countDocuments({ projectId, artifactType: 'typescript', version: 2 }),
+    ).toBe(0);
+
+    // The registry list (no explicit version) shows the latest per type: zod@v2, typescript@v1
+    const list = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${projectId}/artifacts`,
+      headers: authHeader(session.accessToken),
+    });
+    const byType = new Map<string, number>(
+      list
+        .json()
+        .data.map((a: { artifactType: string; version: number }) => [a.artifactType, a.version]),
+    );
+    expect(byType.get('zod')).toBe(2);
+    expect(byType.get('typescript')).toBe(1);
+    expect(list.json().meta.version).toBe(2);
+  });
+
+  it('duplicate rapid regenerate calls each bump a fresh version (no in-place overwrite)', async () => {
     const first = await app.inject({
       method: 'POST',
       url: `/v1/projects/${projectId}/regenerate`,
@@ -167,7 +227,12 @@ describe('POST /v1/projects/:id/regenerate', () => {
       headers: authHeader(session.accessToken),
       payload: { artifacts: ['zod', 'typescript'] },
     });
-    expect(second.json().jobId).toBe(first.json().jobId);
+    // Every generation bumps (doc 07 §5), so sequential calls are distinct jobs
+    // at consecutive versions — not deduped.
+    expect(second.json().jobId).not.toBe(first.json().jobId);
+    const firstJob = await Job.findById(first.json().jobId);
+    const secondJob = await Job.findById(second.json().jobId);
+    expect(secondJob?.version).toBe((firstJob?.version ?? 0) + 1);
   });
 });
 
