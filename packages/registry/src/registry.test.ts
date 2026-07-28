@@ -6,6 +6,7 @@ import {
   createOrResetArtifactRecord,
   transitionArtifactStatus,
   getArtifactsForVersion,
+  getLatestArtifacts,
   getArtifactRecord,
 } from './registry.js';
 
@@ -202,6 +203,25 @@ describe('queries', () => {
     if (res.ok) {
       expect(res.value).toHaveLength(2);
       expect(res.value.every((a) => a.version === 1)).toBe(true);
+    }
+  });
+
+  it('getLatestArtifacts returns each type at its highest version (per-artifact skew)', async () => {
+    const projectId = newProjectId();
+    await createOrResetArtifactRecord(projectId, 'zod', 1);
+    await createOrResetArtifactRecord(projectId, 'yup', 1);
+    await createOrResetArtifactRecord(projectId, 'typescript', 1);
+    // A partial regen advances only zod to v2
+    await createOrResetArtifactRecord(projectId, 'zod', 2);
+
+    const res = await getLatestArtifacts(projectId);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      const byType = new Map(res.value.map((a) => [a.artifactType, a.version]));
+      expect(byType.size).toBe(3); // one row per type, deduped
+      expect(byType.get('zod')).toBe(2);
+      expect(byType.get('yup')).toBe(1);
+      expect(byType.get('typescript')).toBe(1);
     }
   });
 

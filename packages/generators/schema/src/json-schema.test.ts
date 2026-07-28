@@ -41,12 +41,12 @@ describe('JSON Schema Generator — Golden-File Tests', () => {
     },
   };
 
-  it('should generate draft-07 JSON schemas with correct structure', () => {
+  it('should generate draft 2020-12 JSON schemas with correct structure', () => {
     const outputs = generateJSONSchema(simpleIPS);
     const code = outputs['product.schema.json']!;
     const schema = JSON.parse(code);
 
-    expect(schema.$schema).toBe('http://json-schema.org/draft-07/schema#');
+    expect(schema.$schema).toBe('https://json-schema.org/draft/2020-12/schema');
     expect(schema.title).toBe('Product');
     expect(schema.type).toBe('object');
     expect(schema.properties.title.type).toBe('string');
@@ -69,8 +69,8 @@ describe('JSON Schema Generator — Golden-File Tests', () => {
     const outputs = generateJSONSchema(goldenFixtureIPS);
     const schema = JSON.parse(outputs['blogpost.schema.json']!);
 
-    it('should have draft-07 meta schema and correct title', () => {
-      expect(schema.$schema).toBe('http://json-schema.org/draft-07/schema#');
+    it('should have draft 2020-12 meta schema and correct title', () => {
+      expect(schema.$schema).toBe('https://json-schema.org/draft/2020-12/schema');
       expect(schema.title).toBe('BlogPost');
       expect(schema.type).toBe('object');
     });

@@ -10,7 +10,11 @@ import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { ARTIFACT_TYPES, AppError, unwrap, type ArtifactType } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
 import type { IArtifact, IProject } from '@instantmockapi/db';
-import { getArtifactRecord, getArtifactsForVersion } from '@instantmockapi/registry';
+import {
+  getArtifactRecord,
+  getArtifactsForVersion,
+  getLatestArtifacts,
+} from '@instantmockapi/registry';
 import { decodeBundle, isBundleKey, type StorageClient } from '@instantmockapi/storage';
 import { loadOwnedProject, notFound } from '../access.js';
 import { toArtifactView } from '../serializers.js';
@@ -82,9 +86,16 @@ export const artifactRoutes: FastifyPluginAsync<ArtifactRouteOptions> = async (
       const { id } = request.params as { id: string };
       const query = request.query as { version?: number };
       const project = await loadOwnedProject(id, request.authUser?.sub ?? '');
+
+      // No explicit version → the registry's true current state: each artifact
+      // type at its latest version (per-artifact skew, doc 07 §5). An explicit
+      // version pins the view to exactly that snapshot.
+      const artifacts =
+        query.version !== undefined
+          ? unwrap(await getArtifactsForVersion(String(project._id), query.version))
+          : unwrap(await getLatestArtifacts(String(project._id)));
       const version = query.version ?? project.currentVersion;
 
-      const artifacts = unwrap(await getArtifactsForVersion(String(project._id), version));
       return reply.send({ data: artifacts.map(toArtifactView), meta: { version } });
     },
   );

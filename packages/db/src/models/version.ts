@@ -6,6 +6,8 @@ export interface IVersion extends Document {
   version: number;
   ipsSnapshot: InternalProjectSchema;
   configSnapshot: GenerationConfig;
+  /** Human-readable reason this version was generated (doc 03 §7 history panel). */
+  note?: string | null;
   createdAt: Date;
 }
 
@@ -27,6 +29,10 @@ const versionSchema = new Schema<IVersion>(
     configSnapshot: {
       type: Schema.Types.Mixed,
       required: true,
+    },
+    note: {
+      type: String,
+      default: null,
     },
   },
   {

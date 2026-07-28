@@ -30,7 +30,9 @@ export const generationRoutes: FastifyPluginAsync<GenerationRouteOptions> = asyn
     const project = await loadOwnedProject(id, request.authUser?.sub ?? '');
 
     const body = (request.body ?? {}) as { generationConfig?: unknown };
-    const cfg = unwrap(validateGenerationConfig(body.generationConfig ?? project.generationConfig, config));
+    const cfg = unwrap(
+      validateGenerationConfig(body.generationConfig ?? project.generationConfig, config),
+    );
 
     const job = await createGenerationJob({
       project,
@@ -38,6 +40,7 @@ export const generationRoutes: FastifyPluginAsync<GenerationRouteOptions> = asyn
       requestedArtifacts: deriveRequestedArtifacts(cfg),
       generationConfig: cfg,
       plan: request.authUser?.plan ?? 'free',
+      note: 'Full generation',
     });
     return reply.status(202).send({ jobId: job.jobId, status: job.status });
   });
@@ -68,12 +71,20 @@ export const generationRoutes: FastifyPluginAsync<GenerationRouteOptions> = asyn
 
       const cfg = unwrap(validateGenerationConfig(project.generationConfig, config));
 
+      // Every generation (full or partial) bumps currentVersion and writes a
+      // fresh snapshot (doc 07 §5). A partial regen resets ONLY the requested
+      // artifacts at the new version; untouched artifacts keep their prior-
+      // version rows, producing per-artifact version skew ("Zod v3, Mock Data v2").
+      project.currentVersion += 1;
+      project.ips = { ...project.ips, version: project.currentVersion };
+
       const job = await createGenerationJob({
         project,
         type: 'partial',
         requestedArtifacts: artifacts,
         generationConfig: cfg,
         plan: request.authUser?.plan ?? 'free',
+        note: `Regenerated: ${artifacts.join(', ')}`,
       });
       return reply.status(202).send({ jobId: job.jobId, status: job.status });
     },
@@ -103,6 +114,7 @@ export const generationRoutes: FastifyPluginAsync<GenerationRouteOptions> = asyn
       requestedArtifacts: deriveRequestedArtifacts(cfg),
       generationConfig: cfg,
       plan: request.authUser?.plan ?? 'free',
+      note: 'Generated again after expiry',
     });
     return reply.status(202).send({ jobId: job.jobId, status: job.status });
   });

@@ -7,7 +7,13 @@
  * existing job instead of creating a new one.
  */
 
-import { logger, unwrap, type ArtifactType, type JobType, type PlanTier } from '@instantmockapi/shared';
+import {
+  logger,
+  unwrap,
+  type ArtifactType,
+  type JobType,
+  type PlanTier,
+} from '@instantmockapi/shared';
 import { canCreateJob } from '@instantmockapi/config';
 import { Job, Project, Version, type IProject } from '@instantmockapi/db';
 import { createOrResetArtifactRecord } from '@instantmockapi/registry';
@@ -27,8 +33,10 @@ export async function createGenerationJob(params: {
   requestedArtifacts: ArtifactType[];
   generationConfig: GenerationConfig;
   plan: PlanTier;
+  /** Recorded on the version snapshot (doc 03 §7): why this version exists. */
+  note?: string;
 }): Promise<CreatedJobRef> {
-  const { project, type, requestedArtifacts, generationConfig, plan } = params;
+  const { project, type, requestedArtifacts, generationConfig, plan, note } = params;
   const projectId = String(project._id);
   const version = project.currentVersion;
 
@@ -61,10 +69,18 @@ export async function createGenerationJob(params: {
     });
   }
 
-  // Immutable snapshot of what this version generates from (doc 07 §2)
+  // Immutable snapshot of what this version generates from (doc 07 §2).
+  // note is stamped on insert; partial regens/restores bump to a fresh version
+  // so this is a genuine insert and the note lands reliably.
   await Version.findOneAndUpdate(
     { projectId: project._id, version },
-    { $setOnInsert: { ipsSnapshot: project.ips, configSnapshot: generationConfig } },
+    {
+      $setOnInsert: {
+        ipsSnapshot: project.ips,
+        configSnapshot: generationConfig,
+        note: note ?? null,
+      },
+    },
     { upsert: true },
   );
 

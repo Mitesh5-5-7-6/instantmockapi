@@ -204,3 +204,39 @@ export async function getArtifactRecord(
     );
   }
 }
+
+/**
+ * Latest registry record per artifact type across ALL versions for a project.
+ *
+ * After a partial regeneration bumps the project version, only the regenerated
+ * artifacts advance; untouched ones stay at their prior version. This returns
+ * each type at its highest version so the registry view shows the true mix
+ * ("Zod v3, Mock Data v2", doc 07 §5) instead of only the current version.
+ */
+export async function getLatestArtifacts(
+  projectId: string,
+): Promise<Result<IArtifact[], AppError>> {
+  try {
+    const pId = new Types.ObjectId(projectId);
+    // Descending version so the first row seen per type is its latest.
+    const all = await Artifact.find({ projectId: pId }).sort({ version: -1 });
+    const latest = new Map<ArtifactType, IArtifact>();
+    for (const artifact of all) {
+      if (!latest.has(artifact.artifactType)) {
+        latest.set(artifact.artifactType, artifact);
+      }
+    }
+    return ok([...latest.values()]);
+  } catch (error) {
+    logger.error('Failed to fetch latest artifacts', {
+      error: getErrorMessage(error),
+      projectId,
+    });
+    return err(
+      new AppError({
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to fetch latest artifacts',
+      }),
+    );
+  }
+}

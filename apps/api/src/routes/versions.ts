@@ -71,8 +71,12 @@ export const versionRoutes: FastifyPluginAsync<VersionRouteOptions> = async (app
         throw notFound('Version');
       }
 
-      // Restoring stamps a new version whose content is the snapshot's —
-      // history is append-only, never rewound (doc 03 §7)
+      // Restore copies the snapshot's IPS + config forward onto the working
+      // draft and advances currentVersion so the NEXT generation stamps a fresh
+      // version from this restored model (doc 03 §7, doc 07 §5) — history is
+      // append-only and never rewound. No snapshot/artifacts are written here;
+      // they materialize when the user generates (the artifact grid still shows
+      // the last-generated set until then, at their older versions).
       project.currentVersion += 1;
       project.generationConfig = snapshot.configSnapshot;
       project.ips = {
