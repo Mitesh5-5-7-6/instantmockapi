@@ -4,7 +4,7 @@
 import { logger, getErrorMessage } from '@instantmockapi/shared';
 import { loadEnvConfig } from '@instantmockapi/config';
 import { connectDB, disconnectDB } from '@instantmockapi/db';
-import { createS3Storage } from '@instantmockapi/storage';
+import { createStorage } from '@instantmockapi/storage';
 import { createRedisCache } from './cache.js';
 import { buildMockRuntime } from './server.js';
 
@@ -14,7 +14,7 @@ async function main(): Promise<void> {
   await connectDB();
   const app = await buildMockRuntime({
     config,
-    storage: createS3Storage(config),
+    storage: createStorage(config),
     cache: createRedisCache(config),
   });
   await app.listen({ port: config.mockRuntimePort, host: '0.0.0.0' });
