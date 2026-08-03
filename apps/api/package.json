@@ -23,6 +23,7 @@
     "@instantmockapi/registry": "workspace:*",
     "@instantmockapi/shared": "workspace:*",
     "@instantmockapi/storage": "workspace:*",
+    "@instantmockapi/workers": "workspace:*",
     "fastify": "^5.2.0"
   },
   "devDependencies": {
