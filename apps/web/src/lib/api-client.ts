@@ -43,6 +43,40 @@ export function loadTokens(): StoredTokens | null {
   }
 }
 
+const tokenListeners = new Set<() => void>();
+
+function handleStorageEvent(event: StorageEvent): void {
+  if (event.key === null || event.key === TOKEN_STORAGE_KEY) {
+    for (const listener of tokenListeners) {
+      listener();
+    }
+  }
+}
+
+/**
+ * Subscribe to token changes so components re-render when auth state flips —
+ * login, logout, refresh rotation, or a sign-out in another tab. Storage
+ * writes in this tab do not fire `storage` events, so `saveTokens` notifies
+ * listeners directly. Shaped for `useSyncExternalStore`.
+ */
+export function subscribeTokens(listener: () => void): () => void {
+  tokenListeners.add(listener);
+  if (typeof window !== 'undefined' && tokenListeners.size === 1) {
+    window.addEventListener('storage', handleStorageEvent);
+  }
+  return () => {
+    tokenListeners.delete(listener);
+    if (typeof window !== 'undefined' && tokenListeners.size === 0) {
+      window.removeEventListener('storage', handleStorageEvent);
+    }
+  };
+}
+
+/** Snapshot of auth state — a primitive, so it is referentially stable. */
+export function hasTokens(): boolean {
+  return loadTokens() !== null;
+}
+
 export function saveTokens(tokens: StoredTokens | null): void {
   if (typeof window === 'undefined') {
     return;
@@ -51,6 +85,9 @@ export function saveTokens(tokens: StoredTokens | null): void {
     window.localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(tokens));
   } else {
     window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+  }
+  for (const listener of tokenListeners) {
+    listener();
   }
 }
 

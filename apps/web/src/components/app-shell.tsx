@@ -9,7 +9,7 @@ import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Button, Card, Input, StatusChip } from '@instantmockapi/ui';
-import { useLogin, useLogout, useMe } from '../lib/hooks';
+import { useAuthState, useLogin, useLogout, useMe } from '../lib/hooks';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard' },
@@ -68,13 +68,38 @@ function LoginScreen() {
   );
 }
 
+function Splash() {
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <p className="ui-meta">Loading…</p>
+    </div>
+  );
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const authState = useAuthState();
   const me = useMe();
   const logout = useLogout();
 
-  if (me.isError || (!me.isLoading && !me.data && !me.isFetching)) {
+  // No token, or the token was rejected (apiFetch clears it after a failed
+  // refresh) — back to sign-in. Both flip reactively, so signing in swaps the
+  // screen over without a page refresh.
+  if (authState === 'anonymous' || me.isError) {
     return <LoginScreen />;
+  }
+
+  // Auth state not resolved yet (server render / pre-hydration), or /v1/me
+  // still in flight.
+  if (authState === 'unknown' || !me.data) {
+    return <Splash />;
   }
 
   return (
@@ -97,9 +122,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
       <div>
         <header className="ui-topbar">
-          <span className="ui-meta ui-mono">{me.data?.email ?? ''}</span>
+          <span className="ui-meta ui-mono">{me.data.email}</span>
           <div className="ui-row">
-            {me.data ? <StatusChip status="active" label={`${me.data.plan} plan`} /> : null}
+            <StatusChip status="active" label={`${me.data.plan} plan`} />
             <Button variant="ghost" size="sm" onClick={() => logout.mutate()}>
               Sign out
             </Button>
