@@ -5,9 +5,9 @@
  * (doc 08, Phase 6). Screens consume these; no component fetches directly.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch, loadTokens, saveTokens, subscribeJobStream } from './api-client';
+import { apiFetch, hasTokens, saveTokens, subscribeJobStream, subscribeTokens } from './api-client';
 import type {
   ApiUser,
   ArtifactContent,
@@ -31,7 +31,13 @@ export function useLogin() {
       saveTokens({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
       return tokens.user;
     },
-    onSuccess: () => queryClient.invalidateQueries(),
+    // The login response already carries the user, so seed ['me'] instead of
+    // making the shell wait on a /v1/me round trip. Everything else was
+    // fetched (or skipped) while unauthenticated, so it is all stale now.
+    onSuccess: (user) => {
+      queryClient.setQueryData(['me'], { user });
+      void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] !== 'me' });
+    },
   });
 }
 
@@ -49,11 +55,31 @@ export function useLogout() {
   });
 }
 
+export type AuthState = 'unknown' | 'authenticated' | 'anonymous';
+
+/**
+ * Token presence as reactive state, so login and logout re-render their
+ * consumers. Reading localStorage during render instead would never re-render,
+ * which would leave the app stuck on the sign-in screen until a manual refresh.
+ *
+ * `unknown` is the server/hydration snapshot — localStorage does not exist
+ * there, and rendering the sign-in screen on that pass would flash it at
+ * already-signed-in visitors on every page load.
+ */
+export function useAuthState(): AuthState {
+  return useSyncExternalStore(
+    subscribeTokens,
+    () => (hasTokens() ? 'authenticated' : 'anonymous'),
+    () => 'unknown',
+  );
+}
+
 export function useMe() {
+  const authState = useAuthState();
   return useQuery({
     queryKey: ['me'],
     queryFn: () => apiFetch<{ user: ApiUser }>('/v1/me'),
-    enabled: loadTokens() !== null,
+    enabled: authState === 'authenticated',
     retry: false,
     select: (data) => data.user,
   });
