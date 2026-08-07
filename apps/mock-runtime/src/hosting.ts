@@ -8,19 +8,25 @@
  */
 
 import { AppError } from '@instantmockapi/shared';
+import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import { Project } from '@instantmockapi/db';
 import { getArtifactRecord } from '@instantmockapi/registry';
 import type { StorageClient } from '@instantmockapi/storage';
 import type { HostedEntityConfig, HostingConfig } from '@instantmockapi/generator-hosting';
-import type { CacheClient } from './cache.js';
+import type { CacheService } from './cache.js';
 
 const OBJECT_ID_PATTERN = /^[0-9a-f]{24}$/i;
-const CONFIG_TTL_SECONDS = 60;
 
 export interface HostedContext {
   projectId: string;
   version: number;
   entities: Map<string, HostedEntityConfig>;
+  /**
+   * Generation stamp of the hosted artifact backing this context. Downstream
+   * cache keys embed it so a regenerate invalidates by producing new keys
+   * rather than by issuing DELs.
+   */
+  stamp: string;
 }
 
 export function notFound(message = 'Not found'): AppError {
@@ -29,11 +35,12 @@ export function notFound(message = 'Not found'): AppError {
 
 export async function resolveHostedProject(
   projectId: string,
-  deps: { storage: StorageClient; cache: CacheClient },
+  deps: { storage: StorageClient; cache: CacheService; config?: EnvConfig },
 ): Promise<HostedContext> {
   if (!OBJECT_ID_PATTERN.test(projectId)) {
     throw notFound();
   }
+  const env = deps.config ?? loadEnvConfig();
 
   const project = await Project.findById(projectId).select('status hosted currentVersion');
   if (!project || project.status !== 'active') {
@@ -55,30 +62,43 @@ export async function resolveHostedProject(
   }
 
   // Cache key carries version + generation time, so regeneration (same
-  // version, fresh generatedAt) naturally invalidates (doc: Redis caching)
-  const stamp = record.value.generatedAt ? record.value.generatedAt.getTime() : 0;
+  // version, fresh generatedAt) naturally invalidates (doc: Redis caching).
+  // Because the key is content-addressed this way, a stale hit is structurally
+  // impossible — which is what lets the TTL be an hour rather than a minute.
+  const stamp = String(record.value.generatedAt ? record.value.generatedAt.getTime() : 0);
   const cacheKey = `mockcfg:${projectId}:v${project.currentVersion}:${stamp}`;
+  const storageRef = record.value.storageRef;
 
-  let raw = await deps.cache.get(cacheKey);
-  if (!raw) {
-    const object = await deps.storage.get(record.value.storageRef);
-    if (!object) {
-      throw notFound();
-    }
-    raw = new TextDecoder().decode(object.body);
-    await deps.cache.set(cacheKey, raw, CONFIG_TTL_SECONDS);
-  }
-
-  let config: HostingConfig;
-  try {
-    config = JSON.parse(raw) as HostingConfig;
-  } catch {
-    throw new AppError({ code: 'INTERNAL_ERROR', message: 'Hosted config is unreadable' });
-  }
+  // One read-through call: L1 hit costs zero Redis commands, L1 miss costs a
+  // single GET, and concurrent misses on the same key share one object-storage
+  // fetch instead of each issuing their own.
+  const config = await deps.cache.read<HostingConfig>(
+    cacheKey,
+    {
+      ttlSeconds: env.cacheConfigTtlSeconds,
+      // The key is content-addressed, so the value behind it can never change:
+      // a regenerate yields a different key rather than a different value.
+      // L1 therefore needs no staleness cap and holds it for the full TTL —
+      // this is what takes hosted-config reads off Redis almost entirely.
+      l1TtlSeconds: env.cacheConfigTtlSeconds,
+    },
+    async () => {
+      const object = await deps.storage.get(storageRef);
+      if (!object) {
+        throw notFound();
+      }
+      const raw = new TextDecoder().decode(object.body);
+      try {
+        return JSON.parse(raw) as HostingConfig;
+      } catch {
+        throw new AppError({ code: 'INTERNAL_ERROR', message: 'Hosted config is unreadable' });
+      }
+    },
+  );
 
   const entities = new Map<string, HostedEntityConfig>();
   for (const entity of config.entities ?? []) {
     entities.set(entity.path, entity);
   }
-  return { projectId, version: config.version, entities };
+  return { projectId, version: config.version, entities, stamp };
 }

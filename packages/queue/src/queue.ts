@@ -167,9 +167,27 @@ export function createGenerationWorker(
   handler: (payload: GenerationJobPayload) => Promise<void>,
   options: { concurrency?: number } = {},
 ): Worker<GenerationJobPayload> {
+  const config = loadEnvConfig();
+
+  // Idle polling — not cache traffic — is what actually consumes a free Redis
+  // plan's monthly command budget. A BullMQ worker sitting on an empty queue
+  // issues one blocking BZPOPMIN every `drainDelay` seconds plus one stalled
+  // sweep every `stalledInterval` ms, forever. At the library defaults (5s /
+  // 30s) that is ~20K commands/day = ~605K/month for a worker that has done
+  // no work at all, which alone exceeds the 500K/month free tier.
+  //
+  // Raising drainDelay costs nothing in pickup latency: `Queue.add` writes the
+  // marker key that wakes the blocked BZPOPMIN immediately, so drainDelay is
+  // only the timeout on an otherwise-idle wait, never a poll interval that a
+  // new job has to wait out.
   const workerOptions: WorkerOptions = {
     connection: getRedisConnection(),
     concurrency: options.concurrency ?? 2,
+    drainDelay: config.queueDrainDelaySeconds,
+    // The one real trade-off: a job orphaned by a hard worker crash is
+    // recovered after up to this interval instead of 30s. It is a recovery
+    // path, not the happy path — retries and idempotency still apply.
+    stalledInterval: config.queueStalledIntervalMs,
   };
 
   const worker = new Worker<GenerationJobPayload>(

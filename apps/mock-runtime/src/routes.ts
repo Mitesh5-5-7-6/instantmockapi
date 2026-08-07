@@ -13,14 +13,14 @@ import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import { ApiLog } from '@instantmockapi/db';
 import type { StorageClient } from '@instantmockapi/storage';
 import type { HostedEntityConfig } from '@instantmockapi/generator-hosting';
-import type { CacheClient } from './cache.js';
+import type { CacheService } from './cache.js';
 import { notFound, resolveHostedProject, type HostedContext } from './hosting.js';
 import { findRecordIndex, readRecords, recordId, writeRecords, type MockRecord } from './store.js';
 import { validateRecord } from './validate.js';
 
 export interface RuntimeDeps {
   storage: StorageClient;
-  cache: CacheClient;
+  cache: CacheService;
   config?: EnvConfig;
 }
 
@@ -94,7 +94,7 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
       env.maxPaginationLimit,
     );
 
-    const records = await readRecords(ctx.projectId, entity.path, deps.cache);
+    const records = await readRecords(ctx, entity.path, deps.cache, env);
     const start = (page - 1) * limit;
     const data = records
       .slice(start, start + limit)
@@ -108,7 +108,7 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
     const { ctx, entity } = await resolveEntity(request, deps);
     const { recordId: id } = request.params as Required<EntityParams>;
 
-    const records = await readRecords(ctx.projectId, entity.path, deps.cache);
+    const records = await readRecords(ctx, entity.path, deps.cache, env);
     const index = findRecordIndex(records, id);
     if (index === -1) {
       throw notFound('Record not found');
@@ -126,7 +126,7 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
       throw invalidWrite(errors);
     }
 
-    const records = await readRecords(ctx.projectId, entity.path, deps.cache);
+    const records = await readRecords(ctx, entity.path, deps.cache, env);
     if (records.length >= env.maxMockRecords) {
       throw new AppError({
         code: 'VALIDATION_ERROR',
@@ -144,7 +144,7 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
       });
     }
 
-    await writeRecords(ctx.projectId, entity.path, [...records, record], deps.cache);
+    await writeRecords(ctx, entity.path, [...records, record], deps.cache, env);
     return reply.status(201).send(record);
   });
 
@@ -159,7 +159,7 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
       throw invalidWrite(errors);
     }
 
-    const records = await readRecords(ctx.projectId, entity.path, deps.cache);
+    const records = await readRecords(ctx, entity.path, deps.cache, env);
     const index = findRecordIndex(records, id);
     if (index === -1) {
       throw notFound('Record not found');
@@ -168,7 +168,7 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
     const replaced: MockRecord = { ...body, id };
     const next = [...records];
     next[index] = replaced;
-    await writeRecords(ctx.projectId, entity.path, next, deps.cache);
+    await writeRecords(ctx, entity.path, next, deps.cache, env);
     return reply.send(replaced);
   });
 
@@ -183,7 +183,7 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
       throw invalidWrite(errors);
     }
 
-    const records = await readRecords(ctx.projectId, entity.path, deps.cache);
+    const records = await readRecords(ctx, entity.path, deps.cache, env);
     const index = findRecordIndex(records, id);
     if (index === -1) {
       throw notFound('Record not found');
@@ -192,7 +192,7 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
     const merged: MockRecord = { ...records[index], ...body, id };
     const next = [...records];
     next[index] = merged;
-    await writeRecords(ctx.projectId, entity.path, next, deps.cache);
+    await writeRecords(ctx, entity.path, next, deps.cache, env);
     return reply.send(merged);
   });
 
@@ -201,16 +201,17 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
     const { ctx, entity } = await resolveEntity(request, deps);
     const { recordId: id } = request.params as Required<EntityParams>;
 
-    const records = await readRecords(ctx.projectId, entity.path, deps.cache);
+    const records = await readRecords(ctx, entity.path, deps.cache, env);
     const index = findRecordIndex(records, id);
     if (index === -1) {
       throw notFound('Record not found');
     }
     await writeRecords(
-      ctx.projectId,
+      ctx,
       entity.path,
       records.filter((_, i) => i !== index),
       deps.cache,
+      env,
     );
     return reply.status(204).send();
   });

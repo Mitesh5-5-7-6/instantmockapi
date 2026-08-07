@@ -2,49 +2,74 @@
  * Mock record store access (doc 07 `mockStores`, doc 13 §4).
  *
  * Records live per (projectId, entity) — namespacing IS the tenant isolation.
- * Reads go through the cache with a short TTL; every write persists to Mongo
- * and invalidates the cached copy so subsequent reads are consistent.
+ * Reads go through the tiered cache; every write persists to Mongo and
+ * invalidates the cached copy so subsequent reads are consistent.
+ *
+ * The cache key embeds the hosted artifact's generation stamp. That matters
+ * because `apps/workers` re-seeds `mockStores` directly during generation,
+ * outside this module's invalidation path — previously the only thing bounding
+ * that staleness was a 10s TTL, which forced a Redis GET on nearly every
+ * request. Keying by stamp makes a post-regenerate read miss by construction,
+ * so the TTL no longer has to carry that job.
  */
 
 import { MockStore } from '@instantmockapi/db';
-import type { CacheClient } from './cache.js';
-
-const SEED_TTL_SECONDS = 10;
+import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
+import type { CacheService } from './cache.js';
 
 export type MockRecord = Record<string, unknown>;
 
-function cacheKey(projectId: string, entity: string): string {
-  return `mockseed:${projectId}:${entity}`;
+/** Identifies which generation of a project's data a key belongs to. */
+export interface SeedScope {
+  projectId: string;
+  stamp: string;
+}
+
+function cacheKey(scope: SeedScope, entity: string): string {
+  return `mockseed:${scope.projectId}:${scope.stamp}:${entity}`;
 }
 
 export async function readRecords(
-  projectId: string,
+  scope: SeedScope,
   entity: string,
-  cache: CacheClient,
+  cache: CacheService,
+  config: EnvConfig = loadEnvConfig(),
 ): Promise<MockRecord[]> {
-  const key = cacheKey(projectId, entity);
-  const cached = await cache.get(key);
-  if (cached) {
-    try {
-      return JSON.parse(cached) as MockRecord[];
-    } catch {
-      await cache.del(key);
-    }
-  }
-  const store = await MockStore.findOne({ projectId, entity });
-  const records = (store?.records ?? []) as MockRecord[];
-  await cache.set(key, JSON.stringify(records), SEED_TTL_SECONDS);
-  return records;
+  return cache.read<MockRecord[]>(
+    cacheKey(scope, entity),
+    {
+      ttlSeconds: config.cacheSeedTtlSeconds,
+      // Records are mutable, so L1 gets a short lease: it bounds how long a
+      // second runtime replica could serve a value this one has since
+      // rewritten. Single-replica deployments are unaffected either way.
+      l1TtlSeconds: config.cacheSeedL1TtlSeconds,
+    },
+    async () => {
+      const store = await MockStore.findOne({ projectId: scope.projectId, entity });
+      return (store?.records ?? []) as MockRecord[];
+    },
+  );
 }
 
 export async function writeRecords(
-  projectId: string,
+  scope: SeedScope,
   entity: string,
   records: MockRecord[],
-  cache: CacheClient,
+  cache: CacheService,
+  config: EnvConfig = loadEnvConfig(),
 ): Promise<void> {
-  await MockStore.findOneAndUpdate({ projectId, entity }, { $set: { records } }, { upsert: true });
-  await cache.del(cacheKey(projectId, entity));
+  await MockStore.findOneAndUpdate(
+    { projectId: scope.projectId, entity },
+    { $set: { records } },
+    { upsert: true },
+  );
+  // Write-through rather than delete-then-reload: the next reader would have
+  // re-fetched from Mongo and issued a SET anyway, so seeding the new value
+  // here costs the same one Redis command and saves that reader a round-trip.
+  await cache.setJSON(cacheKey(scope, entity), records, {
+    ttlSeconds: config.cacheSeedTtlSeconds,
+    l1TtlSeconds: config.cacheSeedL1TtlSeconds,
+  });
 }
 
 /** Stable record identity: the `id` field. Seeded records lacking one get `rec-<n>`. */
