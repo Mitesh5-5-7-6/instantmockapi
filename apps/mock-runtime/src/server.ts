@@ -10,13 +10,13 @@ import rateLimit from '@fastify/rate-limit';
 import { getErrorMessage, logger, AppError } from '@instantmockapi/shared';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import type { StorageClient } from '@instantmockapi/storage';
-import type { CacheClient } from './cache.js';
+import type { CacheService } from './cache.js';
 import { registerHostedRoutes } from './routes.js';
 
 export interface BuildRuntimeOptions {
   config?: EnvConfig;
   storage: StorageClient;
-  cache: CacheClient;
+  cache: CacheService;
   /** Override the per-project rate limit, or `false` to disable (tests). */
   rateLimit?: { max?: number; timeWindowMs?: number } | false;
 }
@@ -79,7 +79,10 @@ export async function buildMockRuntime(options: BuildRuntimeOptions): Promise<Fa
     });
   }
 
-  app.get('/healthz', async () => ({ status: 'ok' }));
+  // Cache counters ride along on the health check so Redis command usage is
+  // observable per replica without adding a second endpoint. Counters only —
+  // no keys or cached values are exposed.
+  app.get('/healthz', async () => ({ status: 'ok', cache: options.cache.stats() }));
 
   registerHostedRoutes(app, {
     storage: options.storage,

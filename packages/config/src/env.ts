@@ -24,6 +24,36 @@ export interface EnvConfig {
   /** Redis connection string */
   readonly redisUrl: string;
 
+  /**
+   * Whether cache traffic may use Redis at all. False → CacheService runs
+   * L1-only. The generation queue always needs Redis and ignores this.
+   */
+  readonly redisEnabled: boolean;
+
+  /** Max entries held in the in-process L1 cache */
+  readonly cacheL1MaxEntries: number;
+
+  /** Max total bytes held in the in-process L1 cache */
+  readonly cacheL1MaxBytes: number;
+
+  /** Ceiling on how long L1 may serve a value without re-checking Redis */
+  readonly cacheL1TtlSeconds: number;
+
+  /** Redis TTL for hosted-config blobs (key is content-addressed) */
+  readonly cacheConfigTtlSeconds: number;
+
+  /** Redis TTL for mock seed record sets */
+  readonly cacheSeedTtlSeconds: number;
+
+  /** L1 TTL for mock seed record sets — bounds cross-replica write staleness */
+  readonly cacheSeedL1TtlSeconds: number;
+
+  /** How long an idle queue worker blocks on Redis before re-polling */
+  readonly queueDrainDelaySeconds: number;
+
+  /** Interval between BullMQ stalled-job sweeps */
+  readonly queueStalledIntervalMs: number;
+
   /** S3-compatible object storage */
   readonly s3Endpoint: string;
   readonly s3Bucket: string;
@@ -82,18 +112,52 @@ function envInt(key: string, fallback: number): number {
   return Number.isNaN(parsed) ? fallback : parsed;
 }
 
+function envBool(key: string, fallback: boolean): boolean {
+  const val = process.env[key];
+  if (val === undefined) return fallback;
+  return val === 'true' || val === '1';
+}
+
+/**
+ * Redis is opt-out in deployed environments and opt-in locally: a developer
+ * with no REDIS_URL set gets the in-memory cache rather than a connection
+ * error, while an explicit REDIS_ENABLED always wins.
+ */
+function resolveRedisEnabled(nodeEnv: string): boolean {
+  if (process.env['REDIS_ENABLED'] !== undefined) {
+    return envBool('REDIS_ENABLED', true);
+  }
+  if (nodeEnv === 'development' || nodeEnv === 'test') {
+    return process.env['REDIS_URL'] !== undefined;
+  }
+  return true;
+}
+
 /**
  * Load environment configuration.
  * Call once at app startup; pass the result to constructors/factories.
  */
 export function loadEnvConfig(): EnvConfig {
+  const nodeEnv = envStr('NODE_ENV', 'development');
   return {
-    nodeEnv: envStr('NODE_ENV', 'development') as EnvConfig['nodeEnv'],
+    nodeEnv: nodeEnv as EnvConfig['nodeEnv'],
     apiPort: envInt('API_PORT', 4000),
     mockRuntimePort: envInt('MOCK_RUNTIME_PORT', 4001),
     webPort: envInt('WEB_PORT', 3000),
     mongoUri: envStr('MONGO_URI', 'mongodb://localhost:27017/instantmockapi'),
     redisUrl: envStr('REDIS_URL', 'redis://localhost:6379'),
+    redisEnabled: resolveRedisEnabled(nodeEnv),
+    cacheL1MaxEntries: envInt('CACHE_L1_MAX_ENTRIES', 500),
+    cacheL1MaxBytes: envInt('CACHE_L1_MAX_BYTES', 16 * 1024 * 1024), // 16MB
+    cacheL1TtlSeconds: envInt('CACHE_L1_TTL_SECONDS', 60),
+    // Safe to keep for an hour: the key embeds version + generatedAt, so a
+    // regenerate produces a different key rather than a stale hit.
+    cacheConfigTtlSeconds: envInt('CACHE_CONFIG_TTL_SECONDS', 3600),
+    // Same content-addressing applies; runtime writes invalidate explicitly.
+    cacheSeedTtlSeconds: envInt('CACHE_SEED_TTL_SECONDS', 900),
+    cacheSeedL1TtlSeconds: envInt('CACHE_SEED_L1_TTL_SECONDS', 5),
+    queueDrainDelaySeconds: envInt('QUEUE_DRAIN_DELAY_SECONDS', 60),
+    queueStalledIntervalMs: envInt('QUEUE_STALLED_INTERVAL_MS', 300_000),
     s3Endpoint: envStr('S3_ENDPOINT', 'http://localhost:9000'),
     s3Bucket: envStr('S3_BUCKET', 'instantmockapi-artifacts'),
     s3AccessKey: envStr('S3_ACCESS_KEY', ''),

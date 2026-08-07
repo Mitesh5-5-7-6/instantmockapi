@@ -5,6 +5,7 @@
     "paths": {
       "@instantmockapi/shared": ["packages/shared/src/index.ts"],
       "@instantmockapi/config": ["packages/config/src/index.ts"],
+      "@instantmockapi/cache": ["packages/cache/src/index.ts"],
       "@instantmockapi/ips": ["packages/ips/src/index.ts"],
       "@instantmockapi/parsers": ["packages/parsers/src/index.ts"],
       "@instantmockapi/queue": ["packages/queue/src/index.ts"],
