@@ -6,7 +6,7 @@
  * the live API always agree.
  */
 
-import { HTTP_METHODS, type HttpMethod } from '@instantmockapi/shared';
+import { HTTP_METHODS, hostedUrl, type HttpMethod } from '@instantmockapi/shared';
 import type { Entity, InternalProjectSchema } from '@instantmockapi/ips';
 import { entitySchema, type OpenAPISchemaNode } from './schema-mapper.js';
 import { exampleList, firstExample, type EntityExamples } from './examples.js';
@@ -55,9 +55,32 @@ function selectedMethods(ips: InternalProjectSchema): HttpMethod[] {
   return HTTP_METHODS.filter((m) => chosen.has(m));
 }
 
+/** Where the hosted API lives. Options keep the generator pure — no env reads. */
+export interface DocsOptions {
+  /** Hosted base URL without the project segment. */
+  baseUrl?: string;
+}
+
+export const DEFAULT_HOSTED_BASE_URL = 'https://api.instantmockapi.dev/p';
+
+/**
+ * Canonical server URL for a project: the pretty `{publicId}/{slug}` form when
+ * the IPS carries addressing, else the legacy project-id form. Exactly one entry
+ * is emitted — a second `servers[]` would leave codegen tooling guessing which
+ * to use, so the legacy form is documented in prose instead.
+ */
+export function serverUrl(ips: InternalProjectSchema, options: DocsOptions = {}): string {
+  return hostedUrl(options.baseUrl ?? DEFAULT_HOSTED_BASE_URL, {
+    projectId: ips.projectId,
+    publicId: ips.publicId,
+    slug: ips.slug,
+  });
+}
+
 export function generateOpenAPI(
   ips: InternalProjectSchema,
   examples: EntityExamples = {},
+  options: DocsOptions = {},
 ): Record<string, string> {
   const methods = selectedMethods(ips);
   const paths: OpenAPISchemaNode = {};
@@ -172,7 +195,7 @@ export function generateOpenAPI(
       description:
         'Generated hosted mock API documentation. Unselected methods return 405; invalid writes return 422 with field-level errors.',
     },
-    servers: [{ url: `https://api.instantmockapi.dev/p/${ips.projectId}` }],
+    servers: [{ url: serverUrl(ips, options) }],
     paths,
     components: { schemas: schemas },
   };

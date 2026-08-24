@@ -19,6 +19,11 @@ export function toProjectSummary(project: IProject) {
   return {
     id: String(project._id),
     name: project.name,
+    // Addressing: the web app needs these to render the hosted base URL and to
+    // branch the wizard/detail screens on project kind.
+    kind: project.kind ?? 'project',
+    publicId: project.publicId ?? null,
+    slug: project.slug ?? null,
     status: project.status,
     currentVersion: project.currentVersion,
     inputType: project.inputSource.type,

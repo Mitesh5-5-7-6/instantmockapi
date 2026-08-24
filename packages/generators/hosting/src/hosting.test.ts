@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import { materializeRelations } from '@instantmockapi/ips';
 import { goldenFixtureIPS } from '../../__tests__/golden-fixture.js';
-import { generateHostingConfig } from './hosting.js';
+import { goldenRelationsIPS } from '../../__tests__/golden-relations-fixture.js';
+import { generateHostingConfig, type HostedEntityConfig, type HostingConfig } from './hosting.js';
 
 describe('generateHostingConfig (Worker F)', () => {
   const output = generateHostingConfig(goldenFixtureIPS);
@@ -55,5 +57,120 @@ describe('generateHostingConfig (Worker F)', () => {
 
   it('is deterministic', () => {
     expect(generateHostingConfig(goldenFixtureIPS)).toEqual(output);
+  });
+
+  it('defaults identity and emits no relations for a pre-relations IPS', () => {
+    expect(config.entities[0].identity).toEqual({ field: 'id', style: 'uuid' });
+    expect(config.entities[0].relations).toEqual([]);
+  });
+});
+
+describe('generateHostingConfig — relations (doc 19 §Phase A)', () => {
+  const materialized = materializeRelations(goldenRelationsIPS);
+  const config = JSON.parse(
+    generateHostingConfig(materialized)['hosting.config.json'] ?? '{}',
+  ) as HostingConfig;
+
+  const byName = (name: string): HostedEntityConfig =>
+    config.entities.find((entity) => entity.name === name)!;
+
+  it('carries each entity identity descriptor', () => {
+    expect(byName('Classroom').identity).toEqual({ field: 'id', style: 'int' });
+    expect(byName('Course').identity).toEqual({ field: 'id', style: 'uuid' });
+  });
+
+  it('preserves field meta so the runtime can see identity and reference markers', () => {
+    // fieldRule used to drop meta entirely — this is the regression guard.
+    const student = byName('Student');
+    expect(student.fields.find((f) => f.name === 'id')!.meta).toMatchObject({
+      identity: true,
+      readOnly: true,
+    });
+    expect(student.fields.find((f) => f.name === 'classroomId')!.meta).toMatchObject({
+      reference: true,
+      relation: 'Classroom',
+    });
+  });
+
+  it('emits a resolved relation rule per relation, with the target path precomputed', () => {
+    const student = byName('Student');
+    expect(student.relations).toEqual([
+      {
+        name: 'classroom',
+        kind: 'belongsTo',
+        target: 'Classroom',
+        targetPath: 'classroom',
+        localField: 'classroomId',
+        foreignField: 'id',
+        collection: false,
+        onDelete: 'restrict',
+      },
+      {
+        name: 'courses',
+        kind: 'manyToMany',
+        target: 'Course',
+        targetPath: 'course',
+        localField: 'courseIds',
+        foreignField: 'id',
+        collection: true,
+        onDelete: 'setNull',
+      },
+    ]);
+  });
+
+  it('marks the inverse side as a collection reading the FK on the target', () => {
+    expect(byName('Classroom').relations).toEqual([
+      {
+        name: 'students',
+        kind: 'hasMany',
+        target: 'Student',
+        targetPath: 'student',
+        localField: 'id',
+        foreignField: 'classroomId',
+        collection: true,
+        onDelete: 'restrict',
+      },
+    ]);
+  });
+
+  it('completes sparsely-authored relations without prior materialization', () => {
+    // A hand-authored pack must be hostable directly.
+    const raw = JSON.parse(
+      generateHostingConfig(goldenRelationsIPS)['hosting.config.json'] ?? '{}',
+    ) as HostingConfig;
+    const student = raw.entities.find((entity) => entity.name === 'Student')!;
+    expect(student.relations[0]).toMatchObject({
+      localField: 'classroomId',
+      foreignField: 'id',
+    });
+  });
+
+  it('drops relations whose target is not a declared entity', () => {
+    const dangling = JSON.parse(
+      generateHostingConfig({
+        ...goldenRelationsIPS,
+        entities: [
+          {
+            ...goldenRelationsIPS.entities[2]!,
+            relations: [
+              {
+                name: 'ghost',
+                kind: 'belongsTo',
+                target: 'Ghost',
+                localField: '',
+                foreignField: '',
+                required: false,
+                onDelete: 'restrict',
+              },
+            ],
+          },
+        ],
+      })['hosting.config.json'] ?? '{}',
+    ) as HostingConfig;
+    expect(dangling.entities[0]!.relations).toEqual([]);
+  });
+
+  it('is deterministic', () => {
+    expect(generateHostingConfig(materialized)).toEqual(generateHostingConfig(materialized));
   });
 });

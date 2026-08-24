@@ -72,9 +72,28 @@ export async function writeRecords(
   });
 }
 
-/** Stable record identity: the `id` field. Seeded records lacking one get `rec-<n>`. */
-export function recordId(record: MockRecord, index: number): string {
-  const value = record['id'];
+/** Which field carries a record's identity, and how values are issued. */
+export interface IdentityRule {
+  field: string;
+  style: 'int' | 'uuid';
+}
+
+/** Identity used when a hosted config predates the identity descriptor. */
+export const DEFAULT_IDENTITY_RULE: IdentityRule = { field: 'id', style: 'uuid' };
+
+/**
+ * Stable record identity: the entity's declared identity field.
+ *
+ * The `rec-<n>` fallback stays deliberately: seeds generated before identity
+ * fields existed carry no such key, and dropping the fallback would 404 every
+ * already-hosted project.
+ */
+export function recordId(
+  record: MockRecord,
+  index: number,
+  identity: IdentityRule = DEFAULT_IDENTITY_RULE,
+): string {
+  const value = record[identity.field];
   if (typeof value === 'string' && value.length > 0) {
     return value;
   }
@@ -84,6 +103,10 @@ export function recordId(record: MockRecord, index: number): string {
   return `rec-${index + 1}`;
 }
 
-export function findRecordIndex(records: MockRecord[], id: string): number {
-  return records.findIndex((record, index) => recordId(record, index) === id);
+export function findRecordIndex(
+  records: MockRecord[],
+  id: string,
+  identity: IdentityRule = DEFAULT_IDENTITY_RULE,
+): number {
+  return records.findIndex((record, index) => recordId(record, index, identity) === id);
 }

@@ -5,6 +5,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { EnvConfig } from '@instantmockapi/config';
 import { Version } from '@instantmockapi/db';
+import { materializeRelations } from '@instantmockapi/ips';
 import { loadOwnedProject, notFound } from '../access.js';
 import { listEnvelope, parsePagination } from '../pagination.js';
 import { toProjectDetail, toVersionView } from '../serializers.js';
@@ -79,12 +80,14 @@ export const versionRoutes: FastifyPluginAsync<VersionRouteOptions> = async (app
       // the last-generated set until then, at their older versions).
       project.currentVersion += 1;
       project.generationConfig = snapshot.configSnapshot;
-      project.ips = {
+      // Materialize on the way out so a snapshot taken before relations existed
+      // is restored in the current shape rather than the one it was captured in.
+      project.ips = materializeRelations({
         ...snapshot.ipsSnapshot,
         projectId: String(project._id),
         version: project.currentVersion,
         generationConfig: snapshot.configSnapshot,
-      };
+      });
       await project.save();
 
       return reply.send(toProjectDetail(project));

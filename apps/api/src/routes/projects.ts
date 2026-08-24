@@ -4,10 +4,26 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { AppError, PROJECT_STATUSES, unwrap, type InputSourceType } from '@instantmockapi/shared';
+import {
+  AppError,
+  PROJECT_KINDS,
+  PROJECT_STATUSES,
+  SLUG_MAX_LENGTH,
+  SLUG_PATTERN,
+  hostedUrl,
+  isUsableSlug,
+  unwrap,
+  type InputSourceType,
+  type ProjectKind,
+} from '@instantmockapi/shared';
 import { getPlanConfig, type EnvConfig } from '@instantmockapi/config';
-import { Project, hardDeleteProject } from '@instantmockapi/db';
-import { validateIPS } from '@instantmockapi/ips';
+import {
+  Project,
+  ensurePublicIdentity,
+  hardDeleteProject,
+  type IProject,
+} from '@instantmockapi/db';
+import { materializeRelations, validateIPS } from '@instantmockapi/ips';
 import { loadOwnedProject } from '../access.js';
 import { escapeRegExp, listEnvelope, parsePagination, parseSort } from '../pagination.js';
 import { toProjectDetail, toProjectSummary } from '../serializers.js';
@@ -24,6 +40,20 @@ interface ListQuery {
   status?: (typeof PROJECT_STATUSES)[number];
   sort?: string;
   q?: string;
+}
+
+/**
+ * Addressing the IPS carries for generators that emit URLs.
+ *
+ * Always taken from the live Project document, never from client input — a client
+ * must not be able to rewrite its own routing by PATCHing the IPS.
+ */
+function addressing(project: IProject): { kind: ProjectKind; publicId?: string; slug?: string } {
+  return {
+    kind: project.kind ?? 'project',
+    ...(project.publicId ? { publicId: project.publicId } : {}),
+    ...(project.slug ? { slug: project.slug } : {}),
+  };
 }
 
 export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app, { config }) => {
@@ -81,6 +111,8 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
           additionalProperties: false,
           properties: {
             name: { type: 'string', minLength: 1, maxLength: 120 },
+            kind: { type: 'string', enum: [...PROJECT_KINDS] },
+            slug: { type: 'string', pattern: SLUG_PATTERN.source, maxLength: SLUG_MAX_LENGTH },
             inputSource: {
               type: 'object',
               required: ['type', 'raw'],
@@ -98,8 +130,17 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
       const authUser = request.authUser;
       const body = request.body as {
         name: string;
+        kind?: ProjectKind;
+        slug?: string;
         inputSource: { type: InputSourceType; raw: unknown };
       };
+      if (body.slug !== undefined && !isUsableSlug(body.slug)) {
+        throw new AppError({
+          code: 'VALIDATION_ERROR',
+          message: `slug '${body.slug}' is reserved or malformed`,
+          details: [{ path: 'slug', issue: 'must be kebab-case and not a reserved word' }],
+        });
+      }
 
       // Plan gate: max projects (0 = unlimited) → 403 PLAN_LIMIT_EXCEEDED
       const planConfig = getPlanConfig(authUser?.plan ?? 'free');
@@ -118,10 +159,13 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
           ? body.inputSource.raw
           : JSON.stringify(body.inputSource.raw);
 
-      // Instantiate first so the generated _id can be stamped into the IPS
+      // Instantiate first so the generated _id can be stamped into the IPS.
+      // `kind` must be set before minting the public id — it selects the prefix.
       const project = new Project({
         ownerId: authUser?.sub,
         name: body.name,
+        kind: body.kind ?? 'project',
+        slug: body.slug ?? null,
         status: 'draft',
         inputSource: { type: body.inputSource.type, raw: rawString },
       });
@@ -131,6 +175,12 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
       project.ips = { ...ips, projectId, version: 1 };
       project.generationConfig = ips.generationConfig;
       project.currentVersion = 1;
+      await project.save();
+
+      // Addressable from creation, so the wizard can show the hosted URL before
+      // the first generation ever runs.
+      await ensurePublicIdentity(project);
+      project.ips = { ...project.ips, ...addressing(project) };
       await project.save();
 
       return reply.status(201).send(toProjectDetail(project));
@@ -153,6 +203,7 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
           additionalProperties: false,
           properties: {
             name: { type: 'string', minLength: 1, maxLength: 120 },
+            slug: { type: 'string', pattern: SLUG_PATTERN.source, maxLength: SLUG_MAX_LENGTH },
             ips: { type: 'object' },
             generationConfig: { type: 'object' },
           },
@@ -163,6 +214,7 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
       const { id } = request.params as { id: string };
       const body = request.body as {
         name?: string;
+        slug?: string;
         ips?: Record<string, unknown>;
         generationConfig?: Record<string, unknown>;
       };
@@ -172,14 +224,54 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
         project.name = body.name;
       }
 
+      if (body.slug !== undefined && body.slug !== project.slug) {
+        if (!isUsableSlug(body.slug)) {
+          throw new AppError({
+            code: 'VALIDATION_ERROR',
+            message: `slug '${body.slug}' is reserved or malformed`,
+            details: [{ path: 'slug', issue: 'must be kebab-case and not a reserved word' }],
+          });
+        }
+        const taken = await Project.exists({
+          ownerId: project.ownerId,
+          slug: body.slug,
+          _id: { $ne: project._id },
+        });
+        if (taken) {
+          throw new AppError({
+            code: 'CONFLICT',
+            message: `You already have a project using the slug '${body.slug}'`,
+          });
+        }
+        project.slug = body.slug;
+        // Addressing, not schema: a rename must never bump the version (which
+        // would force a regenerate) and never invalidates the old URL, because
+        // resolution matches publicId alone.
+        if (project.hosted.url) {
+          project.hosted.url = hostedUrl(config.hostedBaseUrl, {
+            projectId: String(project._id),
+            publicId: project.publicId,
+            slug: project.slug,
+          });
+        }
+      }
+
       let schemaChanged = false;
       if (body.generationConfig) {
         project.generationConfig = unwrap(validateGenerationConfig(body.generationConfig, config));
         schemaChanged = true;
       }
       if (body.ips) {
-        project.ips = unwrap(
-          validateIPS({ ...body.ips, projectId: String(project._id) }, config.maxNestingDepth),
+        // Validate what the client actually sent (so error paths match its own
+        // indices), then materialize — otherwise this save would strip the
+        // identity/foreign-key fields back out of the stored model.
+        project.ips = materializeRelations(
+          unwrap(
+            validateIPS(
+              { ...body.ips, projectId: String(project._id), ...addressing(project) },
+              config.maxNestingDepth,
+            ),
+          ),
         );
         schemaChanged = true;
       }

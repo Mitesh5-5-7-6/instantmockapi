@@ -190,10 +190,17 @@ describe('full pipeline', () => {
     expect(job?.completedAt).toBeInstanceOf(Date);
     expect(job?.workers.every((w) => w.status === 'completed')).toBe(true);
 
-    // Project activated with hosted URL + plan-based expiry (free = 2 days)
+    // Project activated with hosted URL + plan-based expiry (free = 2 days).
+    // Addressing is minted on settle, so the URL is the advertised pretty form
+    // `{publicId}/{slug}` — the legacy `/p/{projectId}` form still resolves but is
+    // no longer what gets stamped (doc 19 §Phase 3).
     const updated = await Project.findById(project._id);
     expect(updated?.status).toBe('active');
-    expect(updated?.hosted.url).toBe(`https://api.instantmockapi.dev/p/${String(project._id)}`);
+    expect(updated?.publicId).toMatch(/^prj_[0-9a-f]{10}$/);
+    expect(updated?.slug).toBeTruthy();
+    expect(updated?.hosted.url).toBe(
+      `https://api.instantmockapi.dev/p/${updated?.publicId}/${updated?.slug}`,
+    );
     expect(updated?.hosted.expiresAt).toBeInstanceOf(Date);
 
     // Mock stores seeded from Worker D's records

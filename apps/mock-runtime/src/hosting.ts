@@ -7,19 +7,27 @@
  * everything downstream is keyed by the projectId that resolved here.
  */
 
-import { AppError } from '@instantmockapi/shared';
+import { AppError, type ProjectKind } from '@instantmockapi/shared';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import { Project } from '@instantmockapi/db';
 import { getArtifactRecord } from '@instantmockapi/registry';
 import type { StorageClient } from '@instantmockapi/storage';
 import type { HostedEntityConfig, HostingConfig } from '@instantmockapi/generator-hosting';
 import type { CacheService } from './cache.js';
-
-const OBJECT_ID_PATTERN = /^[0-9a-f]{24}$/i;
+import { rememberPublicId } from './identity.js';
+import type { HostedRefInput } from './path.js';
 
 export interface HostedContext {
+  /**
+   * Canonical Mongo id. Every downstream cache key is built from THIS, never from
+   * the public id — which is what lets the legacy and pretty URL forms share
+   * every cache entry without a form discriminator in the key.
+   */
   projectId: string;
   version: number;
+  kind: ProjectKind;
+  publicId: string | null;
+  slug: string | null;
   entities: Map<string, HostedEntityConfig>;
   /**
    * Generation stamp of the hosted artifact backing this context. Downstream
@@ -33,19 +41,26 @@ export function notFound(message = 'Not found'): AppError {
   return new AppError({ code: 'NOT_FOUND', message });
 }
 
+const PROJECT_FIELDS = 'status hosted currentVersion kind publicId slug';
+
 export async function resolveHostedProject(
-  projectId: string,
+  ref: HostedRefInput,
   deps: { storage: StorageClient; cache: CacheService; config?: EnvConfig },
 ): Promise<HostedContext> {
-  if (!OBJECT_ID_PATTERN.test(projectId)) {
-    throw notFound();
-  }
   const env = deps.config ?? loadEnvConfig();
 
-  const project = await Project.findById(projectId).select('status hosted currentVersion');
+  // Both lookups cost one indexed query. The slug segment is deliberately NOT
+  // part of the pretty filter: a stale slug still resolves, so renaming one can
+  // never break a URL someone has already copied.
+  const project =
+    ref.form === 'legacy'
+      ? await Project.findById(ref.projectId).select(PROJECT_FIELDS)
+      : await Project.findOne({ publicId: ref.publicId }).select(PROJECT_FIELDS);
+
   if (!project || project.status !== 'active') {
     throw notFound();
   }
+  const projectId = String(project._id);
   // Post-expiry the URL stops resolving even before cleanup runs (doc 07 §6)
   if (project.hosted.expiresAt && project.hosted.expiresAt.getTime() <= Date.now()) {
     throw notFound();
@@ -100,5 +115,17 @@ export async function resolveHostedProject(
   for (const entity of config.entities ?? []) {
     entities.set(entity.path, entity);
   }
-  return { projectId, version: config.version, entities, stamp };
+
+  // Lets the rate limiter canonicalise a pretty-URL key without any I/O.
+  rememberPublicId(project.publicId, projectId);
+
+  return {
+    projectId,
+    version: config.version,
+    kind: project.kind ?? 'project',
+    publicId: project.publicId ?? null,
+    slug: project.slug ?? null,
+    entities,
+    stamp,
+  };
 }

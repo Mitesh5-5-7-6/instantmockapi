@@ -7,6 +7,7 @@
 import { AppError, HTTP_METHODS, type InputSourceType, type Result } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
 import {
+  materializeRelations,
   validateIPS,
   type Entity,
   type GenerationConfig,
@@ -95,5 +96,9 @@ export function parseInputSource(
   if (validated.ok === false) {
     throw validated.error;
   }
-  return validated.value;
+  // Materialize on the WRITE path, not just in the worker: `GET /projects/:id`
+  // returns the stored IPS, so the wizard's review screen and the generated
+  // artifacts must describe the same entity — identity and foreign-key fields
+  // included. Idempotent, so running it again downstream is harmless.
+  return materializeRelations(validated.value);
 }

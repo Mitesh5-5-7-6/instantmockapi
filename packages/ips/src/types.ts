@@ -5,7 +5,7 @@
  * for all parser inputs and generator outputs (doc 04 §F3, doc 09 §3).
  */
 
-import type { HttpMethod } from '@instantmockapi/shared';
+import type { HttpMethod, ProjectKind } from '@instantmockapi/shared';
 
 /**
  * Valid primitive and nested field types in the IPS.
@@ -56,9 +56,23 @@ export interface ValidationRules {
 
 /**
  * Metadata key-value map for additional properties (e.g. unique constraint).
+ *
+ * The known keys are declared explicitly rather than left to the index
+ * signature: `noPropertyAccessFromIndexSignature` is on, so `meta.identity`
+ * would otherwise have to be written `meta['identity']` in every consumer.
  */
 export interface FieldMeta {
   unique?: boolean;
+  /** Set by `materializeRelations`: this field is the entity's identity. */
+  identity?: boolean;
+  /** Set by `materializeRelations`: this field holds a foreign key. */
+  reference?: boolean;
+  /** Server-assigned — clients are never required to send it. */
+  readOnly?: boolean;
+  /** For reference fields: the entity name the key points at. */
+  relation?: string;
+  /** Opt-in `?search=` target; when any field sets it, it becomes the whitelist. */
+  searchable?: boolean;
   [key: string]: unknown;
 }
 
@@ -84,6 +98,52 @@ export interface Field {
 }
 
 /**
+ * How two entities relate (doc 19 §Phase A).
+ *
+ * `belongsTo` and `manyToMany` are the **owning** sides — they carry the key on
+ * the declaring entity. `hasOne` and `hasMany` are **inverse views** that read a
+ * key living on the target entity.
+ */
+export type RelationKind = 'belongsTo' | 'hasOne' | 'hasMany' | 'manyToMany';
+
+/**
+ * A relation from one entity to another.
+ *
+ * Field roles are uniform regardless of kind: `localField` always names a field
+ * on *this* entity and `foreignField` always names one on the *target*. Two
+ * records are related when `this[localField]` matches `target[foreignField]`
+ * (for `manyToMany`, when the `localField` array contains it).
+ */
+export interface Relation {
+  /** Include key and JSON property on expanded records, e.g. `classroom` */
+  name: string;
+  kind: RelationKind;
+  /** Target entity name — must exist in `ips.entities` */
+  target: string;
+  /** Field on this entity: the FK (belongsTo), id array (manyToMany), or identity (inverse sides) */
+  localField: string;
+  /** Field on the target: its identity (owning sides) or the FK pointing back (inverse sides) */
+  foreignField: string;
+  /** Whether the owning-side key is mandatory (ignored on inverse sides) */
+  required: boolean;
+  /** What happens to related records when the record on the other side is deleted */
+  onDelete: 'restrict' | 'cascade' | 'setNull';
+}
+
+/**
+ * Record identity for an entity — the field the hosted API routes on
+ * (`GET /students/{id}`) and the value relations point at.
+ *
+ * `int` issues small stable integers (1..N) to seeded records so documentation
+ * examples are copy-pasteable; `uuid` issues UUIDs.
+ */
+export interface EntityIdentity {
+  /** Identity field name (conventionally `id`) */
+  field: string;
+  style: 'int' | 'uuid';
+}
+
+/**
  * An entity (corresponds to a database collection or API resource).
  */
 export interface Entity {
@@ -91,6 +151,13 @@ export interface Entity {
   name: string;
   /** Field list for the entity */
   fields: Field[];
+  /**
+   * Relations to other entities. Optional because documents written before
+   * relations existed have none — read it through `entityRelations`, never raw.
+   */
+  relations?: Relation[];
+  /** Identity descriptor; read through `entityIdentity` for the default. */
+  identity?: EntityIdentity;
 }
 
 /**
@@ -115,6 +182,15 @@ export interface InternalProjectSchema {
   projectId: string;
   /** IPS version number */
   version: number;
+  /** What this project generates; absent on documents written before kinds. */
+  kind?: ProjectKind;
+  /**
+   * Public routing id, copied from the live Project document so generators can
+   * emit canonical URLs. Never authoritative here — the Project row owns it.
+   */
+  publicId?: string;
+  /** Vanity path segment, copied from the live Project document. */
+  slug?: string;
   /** Entities defined in the schema */
   entities: Entity[];
   /** Generation settings associated with this version */

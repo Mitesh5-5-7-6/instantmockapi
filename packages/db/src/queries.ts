@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import { Types } from 'mongoose';
 import { Project, IProject } from './models/project.js';
 import { MockStore } from './models/mockStore.js';
@@ -5,7 +6,79 @@ import { ApiLog } from './models/apiLog.js';
 import { Artifact } from './models/artifact.js';
 import { Version } from './models/version.js';
 import { Job } from './models/job.js';
-import { logger } from '@instantmockapi/shared';
+import { AppError, PUBLIC_ID_PREFIX, logger, slugify } from '@instantmockapi/shared';
+
+/** Attempts before giving up on finding a free public id. */
+const MAX_PUBLIC_ID_ATTEMPTS = 5;
+/** Suffix attempts before giving up on a free per-owner slug. */
+const MAX_SLUG_ATTEMPTS = 50;
+/**
+ * Random bytes per public id. 5 bytes = 10 hex characters ≈ 1.1e12 values, which
+ * keeps the birthday-collision point around a million projects rather than the
+ * ~19k that 7 hex characters would give.
+ */
+const PUBLIC_ID_BYTES = 5;
+
+/**
+ * Mint `publicId` and `slug` if absent, so the project is addressable by its
+ * pretty URL.
+ *
+ * Idempotent and safe to call on every write path — a project that already has
+ * both is returned untouched without a save. A duplicate-key collision on
+ * `publicId` is retried with a fresh value rather than surfaced.
+ */
+export async function ensurePublicIdentity(
+  project: IProject,
+  options: { bytes?: number } = {},
+): Promise<IProject> {
+  if (project.publicId && project.slug) {
+    return project;
+  }
+
+  if (!project.slug) {
+    const base = slugify(project.name);
+    let candidate = base;
+    for (let attempt = 2; attempt <= MAX_SLUG_ATTEMPTS; attempt++) {
+      const clash = await Project.exists({
+        ownerId: project.ownerId,
+        slug: candidate,
+        _id: { $ne: project._id },
+      });
+      if (!clash) {
+        break;
+      }
+      candidate = `${base}-${attempt}`;
+    }
+    project.slug = candidate;
+  }
+
+  if (project.publicId) {
+    await project.save();
+    return project;
+  }
+
+  const prefix = PUBLIC_ID_PREFIX[project.kind ?? 'project'];
+  for (let attempt = 1; attempt <= MAX_PUBLIC_ID_ATTEMPTS; attempt++) {
+    project.publicId = `${prefix}_${randomBytes(options.bytes ?? PUBLIC_ID_BYTES).toString('hex')}`;
+    try {
+      await project.save();
+      return project;
+    } catch (error) {
+      if ((error as { code?: number }).code !== 11000) {
+        throw error;
+      }
+      logger.warn('Public id collision, retrying', {
+        projectId: String(project._id),
+        attempt,
+      });
+    }
+  }
+
+  throw new AppError({
+    code: 'INTERNAL_ERROR',
+    message: 'Could not allocate a public API id',
+  });
+}
 
 /**
  * Find all active projects that have passed their expiry date.

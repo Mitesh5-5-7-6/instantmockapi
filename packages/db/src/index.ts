@@ -21,4 +21,9 @@ export { MockStore, type IMockStore } from './models/mockStore.js';
 export { ApiLog, type IApiLog } from './models/apiLog.js';
 
 // Export Queries
-export { findExpiredProjects, expireProjectInDB, hardDeleteProject } from './queries.js';
+export {
+  findExpiredProjects,
+  expireProjectInDB,
+  hardDeleteProject,
+  ensurePublicIdentity,
+} from './queries.js';
