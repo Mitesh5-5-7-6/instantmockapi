@@ -6,7 +6,33 @@
  */
 
 import { AppError, type ErrorDetail, type Result, ok, err } from '@instantmockapi/shared';
-import type { InternalProjectSchema, Entity, Field, FieldType } from './types.js';
+import type {
+  InternalProjectSchema,
+  Entity,
+  Field,
+  FieldType,
+  Relation,
+  RelationKind,
+} from './types.js';
+import {
+  completeRelation,
+  entityIdentity,
+  entityRelations,
+  isOwningRelation,
+} from './relations.js';
+
+const VALID_RELATION_KINDS: ReadonlySet<RelationKind> = new Set<RelationKind>([
+  'belongsTo',
+  'hasOne',
+  'hasMany',
+  'manyToMany',
+]);
+
+const VALID_ON_DELETE: ReadonlySet<Relation['onDelete']> = new Set<Relation['onDelete']>([
+  'restrict',
+  'cascade',
+  'setNull',
+]);
 
 const VALID_FIELD_TYPES: ReadonlySet<FieldType> = new Set([
   'string',
@@ -164,7 +190,16 @@ export function validateIPS(ips: unknown, maxDepth = 10): Result<InternalProject
           );
         });
       }
+
+      // Identity checks — relations point at it, so it must be well-formed
+      if (ent.identity !== undefined) {
+        validateIdentity(ent.identity, `${path}.identity`, ctx);
+      }
     });
+
+    // Relations are validated once every entity is known, so targets resolve and
+    // an inverse side can be checked against the field its owning side implies.
+    validateRelations(entities as Entity[], ctx);
   }
 
   if (ctx.errors.length > 0) {
@@ -179,6 +214,198 @@ export function validateIPS(ips: unknown, maxDepth = 10): Result<InternalProject
   }
 
   return ok(schema as InternalProjectSchema);
+}
+
+function validateIdentity(identity: unknown, path: string, ctx: ValidationCtx): void {
+  if (!identity || typeof identity !== 'object') {
+    ctx.errors.push({ path, issue: 'identity must be an object' });
+    return;
+  }
+  const value = identity as Partial<Entity['identity']>;
+  if (typeof value?.field !== 'string' || !FIELD_NAME_REGEX.test(value.field)) {
+    ctx.errors.push({ path: `${path}.field`, issue: 'identity.field must be a valid field name' });
+  }
+  if (value?.style !== 'int' && value?.style !== 'uuid') {
+    ctx.errors.push({ path: `${path}.style`, issue: "identity.style must be 'int' or 'uuid'" });
+  }
+}
+
+/** Enough of a relation to derive field names from without guessing. */
+function isRelationShaped(relation: unknown): relation is Relation {
+  const value = relation as Partial<Relation> | null;
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    VALID_RELATION_KINDS.has(value.kind as RelationKind) &&
+    typeof value.target === 'string' &&
+    value.target.length > 0
+  );
+}
+
+/**
+ * The field names an entity carries *after* `materializeRelations` runs: its
+ * declared fields, its identity field, and one reference field per owning-side
+ * relation.
+ *
+ * Inverse sides (`hasMany`/`hasOne`) are checked against this projection rather
+ * than against `entity.fields`, so a sparsely-authored IPS validates on the write
+ * path — a `Classroom hasMany Student` is legal before anything has materialized
+ * the `classroomId` its partner `belongsTo` will create.
+ */
+function projectedFieldNames(entity: Entity, byName: ReadonlyMap<string, Entity>): Set<string> {
+  const names = new Set<string>();
+  for (const field of Array.isArray(entity.fields) ? entity.fields : []) {
+    if (field && typeof field.name === 'string') {
+      names.add(field.name);
+    }
+  }
+  names.add(entityIdentity(entity).field);
+  for (const relation of entityRelations(entity)) {
+    if (isRelationShaped(relation) && isOwningRelation(relation)) {
+      names.add(completeRelation(entity, relation, byName.get(relation.target)).localField);
+    }
+  }
+  return names;
+}
+
+/**
+ * Cross-entity relation checks (doc 19 §Phase A).
+ *
+ * None of the issues raised here may contain the substring `exceeds max depth`,
+ * or `validateIPS`'s error-code heuristic would report them as
+ * DEPTH_LIMIT_EXCEEDED instead of VALIDATION_ERROR.
+ */
+function validateRelations(entities: Entity[], ctx: ValidationCtx): void {
+  // Only well-formed entities can be relation targets; malformed ones already
+  // reported their own errors. First name wins, mirroring how the duplicate-name
+  // check reports the *second* occurrence.
+  const byName = new Map<string, Entity>();
+  for (const entity of entities) {
+    if (entity && typeof entity === 'object' && typeof entity.name === 'string' && entity.name) {
+      if (!byName.has(entity.name)) {
+        byName.set(entity.name, entity);
+      }
+    }
+  }
+
+  const projected = new Map<string, Set<string>>();
+  for (const [name, entity] of byName) {
+    projected.set(name, projectedFieldNames(entity, byName));
+  }
+
+  entities.forEach((entity, entityIdx) => {
+    const path = `entities[${entityIdx}]`;
+    if (!entity || typeof entity !== 'object' || entity.relations === undefined) {
+      return;
+    }
+    if (!Array.isArray(entity.relations)) {
+      ctx.errors.push({ path: `${path}.relations`, issue: 'relations must be an array' });
+      return;
+    }
+
+    const declaredFields = new Set<string>();
+    for (const field of Array.isArray(entity.fields) ? entity.fields : []) {
+      if (field && typeof field.name === 'string') {
+        declaredFields.add(field.name);
+      }
+    }
+    const relationNames = new Set<string>();
+
+    entity.relations.forEach((relation, relationIdx) => {
+      const rPath = `${path}.relations[${relationIdx}]`;
+      if (!relation || typeof relation !== 'object') {
+        ctx.errors.push({ path: rPath, issue: 'relation must be a non-null object' });
+        return;
+      }
+
+      // name — the ?include= key that expansions are written onto
+      if (typeof relation.name !== 'string' || !FIELD_NAME_REGEX.test(relation.name)) {
+        ctx.errors.push({
+          path: `${rPath}.name`,
+          issue: 'Relation name must be alphanumeric starting with letter/underscore',
+        });
+      } else if (relationNames.has(relation.name)) {
+        ctx.errors.push({
+          path: `${rPath}.name`,
+          issue: `Duplicate relation name '${relation.name}'`,
+        });
+      } else if (declaredFields.has(relation.name)) {
+        ctx.errors.push({
+          path: `${rPath}.name`,
+          issue: `Relation name '${relation.name}' collides with a field of the same name`,
+        });
+      } else {
+        relationNames.add(relation.name);
+      }
+
+      const kindValid = VALID_RELATION_KINDS.has(relation.kind);
+      if (!kindValid) {
+        ctx.errors.push({
+          path: `${rPath}.kind`,
+          issue: `kind must be one of: ${Array.from(VALID_RELATION_KINDS).join(', ')}`,
+        });
+      }
+      if (relation.onDelete !== undefined && !VALID_ON_DELETE.has(relation.onDelete)) {
+        ctx.errors.push({
+          path: `${rPath}.onDelete`,
+          issue: `onDelete must be one of: ${Array.from(VALID_ON_DELETE).join(', ')}`,
+        });
+      }
+      if (relation.required !== undefined && typeof relation.required !== 'boolean') {
+        ctx.errors.push({ path: `${rPath}.required`, issue: 'required must be a boolean' });
+      }
+
+      if (typeof relation.target !== 'string' || !relation.target) {
+        ctx.errors.push({ path: `${rPath}.target`, issue: 'target entity name is required' });
+        return;
+      }
+      const target = byName.get(relation.target);
+      if (!target) {
+        ctx.errors.push({
+          path: `${rPath}.target`,
+          issue: `Relation target '${relation.target}' is not a declared entity`,
+        });
+        return;
+      }
+      if (!kindValid) {
+        return; // field-name derivation below needs a known kind
+      }
+
+      const completed = completeRelation(entity, relation, target);
+      const owning = isOwningRelation(completed);
+
+      // A record can't reference itself before it exists, so a mandatory self-FK
+      // is unsatisfiable under every insert order.
+      if (relation.kind === 'belongsTo' && relation.target === entity.name && completed.required) {
+        ctx.errors.push({
+          path: `${rPath}.required`,
+          issue: `Self-referencing belongsTo '${completed.name}' cannot be required`,
+        });
+      }
+
+      const targetFields = projected.get(target.name) ?? new Set<string>();
+      if (!targetFields.has(completed.foreignField)) {
+        ctx.errors.push({
+          path: `${rPath}.foreignField`,
+          issue: owning
+            ? `foreignField '${completed.foreignField}' does not exist on '${target.name}'`
+            : `foreignField '${completed.foreignField}' does not exist on '${target.name}' — declare it, or add the matching belongsTo on '${target.name}'`,
+        });
+      }
+
+      // Owning sides get localField materialized for them; inverse sides read a
+      // key that must already exist on this entity.
+      if (!owning) {
+        const ownFields = projected.get(entity.name) ?? declaredFields;
+        if (!ownFields.has(completed.localField)) {
+          ctx.errors.push({
+            path: `${rPath}.localField`,
+            issue: `localField '${completed.localField}' does not exist on '${entity.name}'`,
+          });
+        }
+      }
+    });
+  });
 }
 
 function validateField(

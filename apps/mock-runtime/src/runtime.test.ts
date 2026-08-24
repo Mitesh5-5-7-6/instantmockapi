@@ -100,6 +100,9 @@ async function stageHostedProject(options: {
   status?: IProject['status'];
   expiresAt?: Date;
   records?: Record<string, unknown>[];
+  /** Set to make the project addressable by its pretty URL too. */
+  publicId?: string;
+  slug?: string;
 }): Promise<string> {
   const {
     methods = ['GET', 'POST', 'PUT', 'PATCH'],
@@ -120,6 +123,8 @@ async function stageHostedProject(options: {
     ownerId: user._id,
     name: 'Hosted Test',
     status,
+    ...(options.publicId ? { publicId: options.publicId } : {}),
+    ...(options.slug ? { slug: options.slug } : {}),
     inputSource: { type: 'json', raw: '{}' },
     currentVersion: 1,
     hosted: { url: 'https://api.instantmockapi.dev/p/x', expiresAt },
@@ -465,5 +470,161 @@ describe('request logging (doc 13 §9)', () => {
     const entry = await ApiLog.findOne({ projectId, status: 404 });
     expect(entry?.method).toBe('GET');
     expect(entry?.path).toContain('/customer/nope');
+  });
+});
+
+describe('pretty slug URLs are additive (doc 19 §Phase 3)', () => {
+  const PID = 'prj_7d5e9a2f1c';
+  const SLUG = 'student-erp';
+
+  async function staged(): Promise<string> {
+    return stageHostedProject({ publicId: PID, slug: SLUG });
+  }
+
+  it('serves a collection through the pretty URL', async () => {
+    await staged();
+    const res = await app.inject({ method: 'GET', url: `/p/${PID}/${SLUG}/customer` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toHaveLength(3);
+  });
+
+  it('serves a record through the pretty URL', async () => {
+    await staged();
+    const res = await app.inject({ method: 'GET', url: `/p/${PID}/${SLUG}/customer/c-2` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ id: 'c-2', name: 'Grace Hopper' });
+  });
+
+  it('accepts writes through the pretty URL', async () => {
+    await staged();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/p/${PID}/${SLUG}/customer`,
+      payload: { name: 'Alan Turing', email: 'alan@example.com', status: 'active' },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  // The additive guarantee: an already-copied URL keeps working after the project
+  // gains a public id.
+  it('still serves the legacy ObjectId URL for the same project', async () => {
+    const projectId = await staged();
+    const res = await app.inject({ method: 'GET', url: `/p/${projectId}/customer` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toHaveLength(3);
+  });
+
+  it('resolves on publicId alone, so a stale slug still works', async () => {
+    await staged();
+    const res = await app.inject({ method: 'GET', url: `/p/${PID}/renamed-yesterday/customer` });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('404s an unknown public id', async () => {
+    await staged();
+    const res = await app.inject({ method: 'GET', url: `/p/prj_deadbeef00/x/customer` });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('404s a bare public id — the slug segment is part of the base URL', async () => {
+    await staged();
+    const res = await app.inject({ method: 'GET', url: `/p/${PID}` });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('404s beyond the record segment', async () => {
+    await staged();
+    const res = await app.inject({ method: 'GET', url: `/p/${PID}/${SLUG}/customer/c-1/marks` });
+    expect(res.statusCode).toBe(404);
+  });
+
+  /**
+   * Both forms normalise to the canonical ObjectId before any cache key is built,
+   * so they share every cache entry. If a form discriminator ever leaks into a
+   * key, the second request here misses and this fails.
+   */
+  it('shares cached config and seed between the two URL forms', async () => {
+    const projectId = await staged();
+    await app.inject({ method: 'GET', url: `/p/${PID}/${SLUG}/customer` });
+    const warm = cache.stats().misses;
+    const res = await app.inject({ method: 'GET', url: `/p/${projectId}/customer` });
+    expect(res.statusCode).toBe(200);
+    expect(cache.stats().misses).toBe(warm);
+  });
+
+  it('logs the canonical ObjectId for a pretty-URL request', async () => {
+    const projectId = await staged();
+    await app.inject({ method: 'GET', url: `/p/${PID}/${SLUG}/customer` });
+    // The hook reads a request decorator, not a route param — a pretty URL must
+    // never log `prj_…`, because ApiLog.projectId is an ObjectId ref.
+    const entry = await ApiLog.findOne({ projectId });
+    expect(entry).not.toBeNull();
+    expect(entry?.path).toContain(`/p/${PID}/${SLUG}/customer`);
+  });
+
+  it('words the wrong-shape 405 with the caller’s own URL form', async () => {
+    await staged();
+    const res = await app.inject({ method: 'PATCH', url: `/p/${PID}/${SLUG}/customer` });
+    expect(res.statusCode).toBe(405);
+    expect(res.json().error.message).toContain(`/p/${PID}/${SLUG}/{entity}/{recordId}`);
+  });
+
+  it('advertises an Allow header when the method is not enabled', async () => {
+    await staged();
+    const res = await app.inject({ method: 'DELETE', url: `/p/${PID}/${SLUG}/customer/c-1` });
+    expect(res.statusCode).toBe(405);
+    expect(res.headers['allow']).toBe('GET, POST, PUT, PATCH');
+  });
+});
+
+describe('discovery document at the base URL', () => {
+  it('lists entities and their methods for the pretty URL', async () => {
+    await stageHostedProject({ publicId: 'prj_aaaaaaaaaa', slug: 'demo' });
+    const res = await app.inject({ method: 'GET', url: '/p/prj_aaaaaaaaaa/demo' });
+    expect(res.statusCode).toBe(200);
+    const { data } = res.json();
+    expect(data.kind).toBe('project');
+    expect(data.version).toBe(1);
+    expect(data.canonicalUrl).toBe('https://api.instantmockapi.dev/p/prj_aaaaaaaaaa/demo');
+    expect(data.entities).toEqual([
+      {
+        name: 'Customer',
+        path: 'customer',
+        methods: ['GET', 'POST', 'PUT', 'PATCH'],
+        url: 'https://api.instantmockapi.dev/p/prj_aaaaaaaaaa/demo/customer',
+      },
+    ]);
+  });
+
+  it('serves the legacy base URL too, falling back to the id form', async () => {
+    const projectId = await stageHostedProject({});
+    const res = await app.inject({ method: 'GET', url: `/p/${projectId}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.canonicalUrl).toBe(`https://api.instantmockapi.dev/p/${projectId}`);
+  });
+});
+
+describe('rate limiting keys on the project, not the URL form', () => {
+  it('counts both URL forms against one bucket', async () => {
+    const PID = 'prj_bbbbbbbbbb';
+    const projectId = await stageHostedProject({ publicId: PID, slug: 'demo' });
+    const limited = await buildMockRuntime({
+      config: baseConfig,
+      storage,
+      cache,
+      rateLimit: { max: 2, timeWindowMs: 60_000 },
+    });
+    try {
+      // Warm the publicId→ObjectId index so the pretty key canonicalises.
+      const first = await limited.inject({ method: 'GET', url: `/p/${projectId}/customer` });
+      expect(first.statusCode).toBe(200);
+      const second = await limited.inject({ method: 'GET', url: `/p/${PID}/demo/customer` });
+      expect(second.statusCode).toBe(200);
+      // Third request across either form must exceed the shared allowance.
+      const third = await limited.inject({ method: 'GET', url: `/p/${PID}/demo/customer` });
+      expect(third.statusCode).toBe(429);
+    } finally {
+      await limited.close();
+    }
   });
 });

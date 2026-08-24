@@ -9,7 +9,12 @@ import { Artifact } from './models/artifact.js';
 import { Job } from './models/job.js';
 import { MockStore } from './models/mockStore.js';
 import { ApiLog } from './models/apiLog.js';
-import { findExpiredProjects, expireProjectInDB, hardDeleteProject } from './queries.js';
+import {
+  findExpiredProjects,
+  expireProjectInDB,
+  hardDeleteProject,
+  ensurePublicIdentity,
+} from './queries.js';
 
 let mongod: MongoMemoryServer;
 
@@ -213,5 +218,80 @@ describe('hardDeleteProject', () => {
 
     expect(await Project.countDocuments({ _id: survivor._id })).toBe(1);
     expect(await Artifact.countDocuments({ projectId: survivor._id })).toBe(1);
+  });
+});
+
+describe('ensurePublicIdentity (doc 19 §Phase 3)', () => {
+  it('mints a prefixed public id and a slug derived from the name', async () => {
+    const project = await makeProject({ name: 'Student ERP' });
+    await ensurePublicIdentity(project);
+    expect(project.publicId).toMatch(/^prj_[0-9a-f]{10}$/);
+    expect(project.slug).toBe('student-erp');
+  });
+
+  it('uses the sng_ prefix for single APIs', async () => {
+    const project = await makeProject({ name: 'Weather API', kind: 'single' });
+    await ensurePublicIdentity(project);
+    expect(project.publicId).toMatch(/^sng_[0-9a-f]{10}$/);
+  });
+
+  it('is idempotent — a second call changes nothing', async () => {
+    const project = await makeProject({ name: 'Stable' });
+    await ensurePublicIdentity(project);
+    const first = { publicId: project.publicId, slug: project.slug };
+    await ensurePublicIdentity(project);
+    expect({ publicId: project.publicId, slug: project.slug }).toEqual(first);
+  });
+
+  it('suffixes the slug when the owner already uses it', async () => {
+    const ownerId = new Types.ObjectId();
+    const first = await makeProject({ ownerId, name: 'CRM Backend' });
+    await ensurePublicIdentity(first);
+    expect(first.slug).toBe('crm-backend');
+
+    const second = await makeProject({ ownerId, name: 'CRM Backend' });
+    await ensurePublicIdentity(second);
+    expect(second.slug).toBe('crm-backend-2');
+  });
+
+  it('lets two different owners share a slug', async () => {
+    const a = await makeProject({ ownerId: new Types.ObjectId(), name: 'Shop' });
+    const b = await makeProject({ ownerId: new Types.ObjectId(), name: 'Shop' });
+    await ensurePublicIdentity(a);
+    await ensurePublicIdentity(b);
+    expect(a.slug).toBe('shop');
+    expect(b.slug).toBe('shop');
+  });
+
+  it('falls back when the name has no usable characters', async () => {
+    const project = await makeProject({ name: '!!!' });
+    await ensurePublicIdentity(project);
+    expect(project.slug).toBe('api');
+  });
+
+  it('preserves a slug that was set explicitly', async () => {
+    const project = await makeProject({ name: 'Student ERP', slug: 'my-erp' });
+    await ensurePublicIdentity(project);
+    expect(project.slug).toBe('my-erp');
+  });
+
+  /**
+   * The partial filter on the unique index is load-bearing: every project written
+   * before slugs existed carries publicId/slug = null, and a plain unique index
+   * would reject the second such document.
+   */
+  it('tolerates many projects with no public identity at all', async () => {
+    await Project.syncIndexes();
+    const ownerId = new Types.ObjectId();
+    await makeProject({ ownerId, name: 'One' });
+    await makeProject({ ownerId, name: 'Two' });
+    await makeProject({ ownerId, name: 'Three' });
+    expect(await Project.countDocuments({ publicId: null })).toBe(3);
+  });
+
+  it('enforces global uniqueness on publicId', async () => {
+    await Project.syncIndexes();
+    await makeProject({ name: 'A', publicId: 'prj_1111111111' });
+    await expect(makeProject({ name: 'B', publicId: 'prj_1111111111' })).rejects.toThrow();
   });
 });

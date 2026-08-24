@@ -13,7 +13,7 @@ import {
   type ArtifactType,
   type WorkerId,
 } from '@instantmockapi/shared';
-import type { Field, InternalProjectSchema } from '@instantmockapi/ips';
+import { materializeRelations, type Field, type InternalProjectSchema } from '@instantmockapi/ips';
 import { generateJSONSchema } from '@instantmockapi/generator-schema';
 import { generateZod, generateYup } from '@instantmockapi/generator-validation';
 import { generateTypeScript } from '@instantmockapi/generator-types';
@@ -35,6 +35,8 @@ export interface ArtifactContext {
   bundleFiles: Record<string, string | Uint8Array>;
   /** For G's README: artifact types actually present in the bundle. */
   includedArtifacts: string[];
+  /** Hosted base URL for this deployment, for E's `servers`/`baseUrl`. */
+  baseUrl: string;
 }
 
 /** A producer returns filename→content, or raw bytes for binary artifacts. */
@@ -51,8 +53,10 @@ export const DEFAULT_PRODUCERS: Record<ArtifactType, ArtifactProducer> = {
   yup: ({ ips }) => generateYup(ips),
   typescript: ({ ips }) => generateTypeScript(ips),
   mock_data: ({ mockFiles }) => mockFiles,
-  openapi: ({ ips, examples }) => generateOpenAPI(ips, examples),
-  postman: ({ ips, examples }) => generatePostmanCollection(ips, examples),
+  // The base URL is per-deployment, so it is threaded in rather than baked into
+  // the generators (which must stay pure — no env reads).
+  openapi: ({ ips, examples, baseUrl }) => generateOpenAPI(ips, examples, { baseUrl }),
+  postman: ({ ips, examples, baseUrl }) => generatePostmanCollection(ips, examples, { baseUrl }),
   hosted_api: ({ ips }) => generateHostingConfig(ips),
   export_zip: ({ ips, bundleFiles, includedArtifacts }) =>
     generateExportZip(ips, bundleFiles, includedArtifacts),
@@ -100,6 +104,11 @@ export function workerForArtifact(artifactType: ArtifactType): WorkerId | null {
  * Restore structure a Mongo round-trip may have stripped: older documents
  * were saved with `minimize: true`, which drops empty objects (validation: {},
  * meta: {}) that generators legitimately dereference.
+ *
+ * Then derive whatever relations imply. The API materializes on write, so this
+ * is the compatibility floor for documents (and version snapshots) stored before
+ * relations existed — it runs after field normalization so materialization sees
+ * complete `validation`/`meta` objects, and is idempotent for everything else.
  */
 export function normalizeIps(ips: InternalProjectSchema): InternalProjectSchema {
   const normalizeField = (field: Field): Field => ({
@@ -109,13 +118,13 @@ export function normalizeIps(ips: InternalProjectSchema): InternalProjectSchema 
     meta: field.meta ?? {},
     children: (field.children ?? []).map(normalizeField),
   });
-  return {
+  return materializeRelations({
     ...ips,
     entities: (ips.entities ?? []).map((entity) => ({
       ...entity,
       fields: (entity.fields ?? []).map(normalizeField),
     })),
-  };
+  });
 }
 
 /** Parse Worker D's `<entity>.mock.json` files into examples keyed by entity. */

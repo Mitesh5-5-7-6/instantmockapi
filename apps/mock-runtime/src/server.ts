@@ -7,10 +7,12 @@
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
-import { getErrorMessage, logger, AppError } from '@instantmockapi/shared';
+import { getErrorMessage, logger, AppError, OBJECT_ID_PATTERN } from '@instantmockapi/shared';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import type { StorageClient } from '@instantmockapi/storage';
 import type { CacheService } from './cache.js';
+import { lookupPublicId } from './identity.js';
+import { firstHostedSegment } from './path.js';
 import { registerHostedRoutes } from './routes.js';
 
 export interface BuildRuntimeOptions {
@@ -69,12 +71,25 @@ export async function buildMockRuntime(options: BuildRuntimeOptions): Promise<Fa
   if (options.rateLimit !== false) {
     // Per-PROJECT rate limit (doc 13 §5): a public mock URL must not become
     // a free unbounded traffic sink.
+    //
+    // Both URL forms must land in the SAME bucket, or a caller could double its
+    // allowance by alternating them. The key generator has to stay synchronous,
+    // so a pretty URL is canonicalised through the process-local index the
+    // resolver populates; a cold process keys on the raw public id for its first
+    // request, which is the only imprecision. `proj:`/`ip:` are namespaced so a
+    // project id can never collide with an IP.
     await app.register(rateLimit, {
       max: options.rateLimit?.max ?? config.mockRateLimitPerMinute,
       timeWindow: options.rateLimit?.timeWindowMs ?? 60_000,
       keyGenerator: (request) => {
-        const params = request.params as { projectId?: string } | undefined;
-        return params?.projectId ?? request.ip;
+        const first = firstHostedSegment(request.raw.url ?? request.url);
+        if (!first) {
+          return `ip:${request.ip}`;
+        }
+        if (OBJECT_ID_PATTERN.test(first)) {
+          return `proj:${first.toLowerCase()}`;
+        }
+        return `proj:${lookupPublicId(first) ?? first}`;
       },
     });
   }

@@ -7,6 +7,7 @@
 import { HTTP_METHODS, type HttpMethod } from '@instantmockapi/shared';
 import type { InternalProjectSchema } from '@instantmockapi/ips';
 import { firstExample, type EntityExamples } from './examples.js';
+import { serverUrl, type DocsOptions } from './openapi.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface PostmanNode {
@@ -44,6 +45,7 @@ const JSON_HEADER = [{ key: 'Content-Type', value: 'application/json' }];
 export function generatePostmanCollection(
   ips: InternalProjectSchema,
   examples: EntityExamples = {},
+  options: DocsOptions = {},
 ): Record<string, string> {
   const chosen = new Set(ips.generationConfig.methods);
   const methods = HTTP_METHODS.filter((m): m is HttpMethod => chosen.has(m));
@@ -117,7 +119,7 @@ export function generatePostmanCollection(
       schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json',
     },
     variable: [
-      { key: 'baseUrl', value: `https://api.instantmockapi.dev/p/${ips.projectId}` },
+      { key: 'baseUrl', value: serverUrl(ips, options) },
       { key: 'recordId', value: '' },
     ],
     item: folders,

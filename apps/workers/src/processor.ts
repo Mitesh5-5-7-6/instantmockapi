@@ -11,9 +11,17 @@
  * `failed_partial`, never a global failure; completed siblings survive.
  */
 
-import { getErrorMessage, logger, type ArtifactType } from '@instantmockapi/shared';
+import { getErrorMessage, hostedUrl, logger, type ArtifactType } from '@instantmockapi/shared';
 import { calculateExpiresAt } from '@instantmockapi/config';
-import { Job, MockStore, Project, User, Version, type IProject } from '@instantmockapi/db';
+import {
+  Job,
+  MockStore,
+  Project,
+  User,
+  Version,
+  ensurePublicIdentity,
+  type IProject,
+} from '@instantmockapi/db';
 import {
   createOrResetArtifactRecord,
   getArtifactRecord,
@@ -263,11 +271,16 @@ export async function processGenerationJob(
     return;
   }
 
-  // Generators run against the immutable version snapshot (doc 09 §7)
+  // Generators run against the immutable version snapshot (doc 09 §7) — but
+  // addressing comes from the LIVE project document, never the snapshot: a slug
+  // edited after the snapshot was taken must not resurrect the old path.
   const snapshot = await Version.findOne({ projectId: project._id, version: payload.version });
   const ips: InternalProjectSchema = normalizeIps({
     ...(snapshot?.ipsSnapshot ?? project.ips),
     generationConfig: snapshot?.configSnapshot ?? project.generationConfig,
+    kind: project.kind ?? 'project',
+    ...(project.publicId ? { publicId: project.publicId } : {}),
+    ...(project.slug ? { slug: project.slug } : {}),
   });
 
   if (payload.jobId) {
@@ -279,7 +292,14 @@ export async function processGenerationJob(
   const mockFiles = generateMockData(ips, payload.version);
   const examples = parseExamples(mockFiles);
 
-  const ctx: ArtifactContext = { ips, mockFiles, examples, bundleFiles: {}, includedArtifacts: [] };
+  const ctx: ArtifactContext = {
+    ips,
+    mockFiles,
+    examples,
+    bundleFiles: {},
+    includedArtifacts: [],
+    baseUrl: HOSTED_BASE_URL,
+  };
   const plan = buildExecutionPlan(payload.requestedArtifacts);
   const outcomes = new Map<ArtifactType, 'completed' | 'failed'>();
 
@@ -367,9 +387,16 @@ async function settle(
   }
 
   if (outcomes.get('hosted_api') === 'completed') {
+    // Mint addressing first so the URL is the pretty form; a project that somehow
+    // has none falls back to the legacy id form, which still resolves.
+    await ensurePublicIdentity(project);
     const owner = await User.findById(project.ownerId);
     project.hosted = {
-      url: `${HOSTED_BASE_URL}/${String(project._id)}`,
+      url: hostedUrl(HOSTED_BASE_URL, {
+        projectId: String(project._id),
+        publicId: project.publicId,
+        slug: project.slug,
+      }),
       expiresAt: calculateExpiresAt(owner?.plan ?? 'free'),
     };
   }

@@ -31,6 +31,7 @@ InstantMockAPI is a **Backend Generation Platform**, not a database service. It 
 | 16 | [Roadmap](./16-roadmap.md) | V1 → V2 → V3 | ✅ |
 | 17 | [Coding Standard](./17-coding-standard.md) | Naming, folders, commits, architecture rules | ✅ |
 | 18 | [AI Roadmap](./18-ai-roadmap.md) | Future AI: requirement understanding, Figma, OCR | ✅ |
+| 19 | [Catalog Projects](./19-catalog-projects.md) | Phase 8: pre-built relational project packs + Single APIs — relations, hosted auth, query layer, sandboxes | 🚧 |
 
 ---
 

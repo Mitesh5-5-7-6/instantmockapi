@@ -32,3 +32,18 @@ export {
   PLAN_TIERS,
   type PlanTier,
 } from './constants.js';
+export {
+  PUBLIC_ID_PREFIX,
+  PROJECT_KINDS,
+  type ProjectKind,
+  OBJECT_ID_PATTERN,
+  PUBLIC_ID_PATTERN,
+  SLUG_PATTERN,
+  SLUG_MAX_LENGTH,
+  RESERVED_SLUGS,
+  type HostedRef,
+  hostedPath,
+  hostedUrl,
+  slugify,
+  isUsableSlug,
+} from './hosting-urls.js';

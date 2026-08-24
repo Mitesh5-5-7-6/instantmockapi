@@ -306,3 +306,130 @@ describe('DELETE and parse', () => {
     expect(res.json().ips.projectId).toBe(created.json().id);
   });
 });
+
+describe('project kinds and slugs (doc 19 §Phase 3)', () => {
+  it('mints addressing on create and returns it', async () => {
+    const res = await createProjectViaApi(app, session.accessToken);
+    const body = res.json();
+    expect(body.kind).toBe('project');
+    expect(body.publicId).toMatch(/^prj_[0-9a-f]{10}$/);
+    expect(body.slug).toBe('crm-backend');
+    // Generators read addressing off the IPS to emit canonical URLs
+    expect(body.ips.publicId).toBe(body.publicId);
+    expect(body.ips.slug).toBe(body.slug);
+    expect(body.ips.kind).toBe('project');
+  });
+
+  it('uses the sng_ prefix for a single-API project', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(session.accessToken),
+      payload: {
+        name: 'Weather API',
+        kind: 'single',
+        inputSource: { type: 'json', raw: sampleRaw },
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().kind).toBe('single');
+    expect(res.json().publicId).toMatch(/^sng_[0-9a-f]{10}$/);
+  });
+
+  it('honours an explicit slug', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(session.accessToken),
+      payload: {
+        name: 'Anything',
+        slug: 'my-own-slug',
+        inputSource: { type: 'json', raw: sampleRaw },
+      },
+    });
+    expect(res.json().slug).toBe('my-own-slug');
+  });
+
+  it('rejects a reserved slug', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(session.accessToken),
+      payload: { name: 'Anything', slug: 'healthz', inputSource: { type: 'json', raw: sampleRaw } },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('rejects a malformed slug at the schema layer', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(session.accessToken),
+      payload: {
+        name: 'Anything',
+        slug: 'Not A Slug',
+        inputSource: { type: 'json', raw: sampleRaw },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('renames the slug without bumping the version, and rewrites hosted.url', async () => {
+    const created = await createProjectViaApi(app, session.accessToken);
+    const id = created.json().id;
+    const publicId = created.json().publicId;
+
+    // Pretend the project has been generated and hosted
+    await Project.updateOne(
+      { _id: id },
+      { $set: { 'hosted.url': `https://api.instantmockapi.dev/p/${publicId}/crm-backend` } },
+    );
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/projects/${id}`,
+      headers: authHeader(session.accessToken),
+      payload: { slug: 'renamed-crm' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().slug).toBe('renamed-crm');
+    // Addressing is not schema: a rename must not force a regenerate
+    expect(res.json().currentVersion).toBe(created.json().currentVersion);
+    expect(res.json().hosted.url).toBe(`https://api.instantmockapi.dev/p/${publicId}/renamed-crm`);
+  });
+
+  it('409s when the owner already uses the slug', async () => {
+    const first = await createProjectViaApi(app, session.accessToken);
+    const second = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(session.accessToken),
+      payload: { name: 'Other', inputSource: { type: 'json', raw: sampleRaw } },
+    });
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/projects/${second.json().id}`,
+      headers: authHeader(session.accessToken),
+      payload: { slug: first.json().slug },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe('CONFLICT');
+  });
+
+  it('ignores client-supplied addressing inside a PATCHed IPS', async () => {
+    const created = await createProjectViaApi(app, session.accessToken);
+    const id = created.json().id;
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/projects/${id}`,
+      headers: authHeader(session.accessToken),
+      payload: {
+        ips: { ...created.json().ips, publicId: 'prj_hacked0000', slug: 'hacked' },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().ips.publicId).toBe(created.json().publicId);
+    expect(res.json().ips.slug).toBe(created.json().slug);
+  });
+});
