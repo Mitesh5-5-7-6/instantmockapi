@@ -16,6 +16,26 @@ export {
 export { validateIPS } from './validator.js';
 
 export {
+  QUERY_FEATURES,
+  type QueryFeature,
+  type QueryFeatures,
+  type FilterOperator,
+  type EntityQueryFields,
+  RESERVED_QUERY_KEYS,
+  FILTER_OPERATORS,
+  NO_QUERY_FEATURES,
+  ALL_QUERY_FEATURES,
+  resolveQueryFeatures,
+  queryFeatures,
+  hasQueryFeatures,
+  enabledQueryFeatures,
+  queryableFields,
+  searchableFields,
+  includableRelations,
+  entityQueryFields,
+} from './query.js';
+
+export {
   DEFAULT_IDENTITY,
   type RelationInput,
   completeRelation,

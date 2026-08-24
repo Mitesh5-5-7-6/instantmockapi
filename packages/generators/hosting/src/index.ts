@@ -6,4 +6,6 @@ export {
   type HostingConfig,
   type HostedEntityConfig,
   type HostedFieldRule,
+  type HostedIdentityRule,
+  type HostedRelationRule,
 } from './hosting.js';

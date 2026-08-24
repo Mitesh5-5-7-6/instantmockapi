@@ -19,6 +19,7 @@
     "@instantmockapi/auth": "workspace:*",
     "@instantmockapi/registry": "workspace:*",
     "@instantmockapi/storage": "workspace:*",
+    "@instantmockapi/ips": "workspace:*",
     "@instantmockapi/generator-hosting": "workspace:*",
     "fastify": "^5.2.0",
     "@fastify/cors": "^11.3.0",

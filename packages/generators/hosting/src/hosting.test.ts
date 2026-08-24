@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { materializeRelations } from '@instantmockapi/ips';
+import {
+  ALL_QUERY_FEATURES,
+  NO_QUERY_FEATURES,
+  materializeRelations,
+  type QueryFeatures,
+} from '@instantmockapi/ips';
 import { goldenFixtureIPS } from '../../__tests__/golden-fixture.js';
 import { goldenRelationsIPS } from '../../__tests__/golden-relations-fixture.js';
 import { generateHostingConfig, type HostedEntityConfig, type HostingConfig } from './hosting.js';
@@ -172,5 +177,90 @@ describe('generateHostingConfig — relations (doc 19 §Phase A)', () => {
 
   it('is deterministic', () => {
     expect(generateHostingConfig(materialized)).toEqual(generateHostingConfig(materialized));
+  });
+});
+
+describe('generateHostingConfig — query layer (doc 19 §Phase 4)', () => {
+  const withFeatures = (features: Partial<QueryFeatures>): HostingConfig =>
+    JSON.parse(
+      generateHostingConfig({
+        ...materializeRelations(goldenRelationsIPS),
+        generationConfig: {
+          ...goldenRelationsIPS.generationConfig,
+          features: { ...NO_QUERY_FEATURES, ...features },
+        },
+      })['hosting.config.json'] ?? '{}',
+    ) as HostingConfig;
+
+  it('stamps the toggle set from the generation config', () => {
+    expect(withFeatures({ search: true, sort: true }).features).toEqual({
+      search: true,
+      filter: false,
+      sort: true,
+      include: false,
+    });
+  });
+
+  it('resolves an absent toggle block to every feature off', () => {
+    // A pre-query-layer IPS must produce a config the runtime reads as "off",
+    // never as `undefined` it has to guess about.
+    const legacy = JSON.parse(
+      generateHostingConfig(goldenRelationsIPS)['hosting.config.json'] ?? '{}',
+    ) as HostingConfig;
+    expect(legacy.features).toEqual(NO_QUERY_FEATURES);
+  });
+
+  it('precomputes the field lists regardless of which toggles are on', () => {
+    // The lists describe the schema, not the request surface — emitting them
+    // unconditionally keeps the config diff-stable when a toggle flips, and the
+    // runtime gates on `features`, not on the presence of a list.
+    const off = withFeatures({});
+    const on = withFeatures({ search: true, filter: true, sort: true, include: true });
+    const student = (config: HostingConfig): HostedEntityConfig =>
+      config.entities.find((entity) => entity.name === 'Student')!;
+    expect(student(off).query).toEqual(student(on).query);
+  });
+
+  it('derives the lists from the materialized schema the runtime will see', () => {
+    const config = withFeatures({ filter: true, include: true });
+    const student = config.entities.find((entity) => entity.name === 'Student')!;
+    // classroomId exists only because relation materialization created it, and
+    // it is the field `?classroomId=` has to match.
+    expect(student.query?.filterable).toContain('classroomId');
+    expect(student.query?.sortable).toContain('classroomId');
+    // The many-to-many key is an array, so it is filterable by neither name.
+    expect(student.query?.filterable).not.toContain('courseIds');
+    expect(student.query?.includable).toEqual(['classroom', 'courses']);
+  });
+
+  it('offers only textual fields to search when nothing is marked searchable', () => {
+    const student = withFeatures({ search: true }).entities.find((e) => e.name === 'Student')!;
+    // name is a string; enrolledAt is a date and classroomId an integer.
+    expect(student.query?.searchable).toEqual(['name']);
+  });
+
+  it('lists no foreign key for a pack whose relations were never materialized', () => {
+    // Relations are completed defensively here, but the *fields* they imply are
+    // created by `materializeRelations` — which every API-borne IPS passes
+    // through before storage. A hand-authored pack hosted directly therefore
+    // resolves `?include=classroom` while `?classroomId=` is not a known
+    // filter. Recorded so template packs (Phase 8) materialize on import.
+    const raw = JSON.parse(
+      generateHostingConfig({
+        ...goldenRelationsIPS,
+        generationConfig: { ...goldenRelationsIPS.generationConfig, features: ALL_QUERY_FEATURES },
+      })['hosting.config.json'] ?? '{}',
+    ) as HostingConfig;
+    const student = raw.entities.find((entity) => entity.name === 'Student')!;
+    expect(student.query?.filterable).not.toContain('classroomId');
+    expect(student.query?.includable).toEqual(['classroom', 'courses']);
+  });
+
+  it('is deterministic with features enabled', () => {
+    const ips = {
+      ...materializeRelations(goldenRelationsIPS),
+      generationConfig: { ...goldenRelationsIPS.generationConfig, features: ALL_QUERY_FEATURES },
+    };
+    expect(generateHostingConfig(ips)).toEqual(generateHostingConfig(ips));
   });
 });

@@ -17,6 +17,8 @@ export interface IProject extends Document {
    * so renaming it cannot break a URL anyone has already copied.
    */
   slug?: string | null;
+  /** Free-text purpose, shown on the project page. Absent on older documents. */
+  description?: string | null;
   status: 'draft' | 'generating' | 'active' | 'expired';
   inputSource: {
     type: 'json' | 'swagger' | 'builder' | 'docs';
@@ -53,6 +55,12 @@ const projectSchema = new Schema<IProject>(
     publicId: {
       type: String,
       default: null,
+    },
+    description: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 500,
     },
     slug: {
       type: String,

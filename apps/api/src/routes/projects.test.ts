@@ -255,6 +255,113 @@ describe('PATCH /v1/projects/:id', () => {
     expect(body.generationConfig.validators).toEqual(['zod', 'yup']);
   });
 
+  it('starts a new project with every query feature on', async () => {
+    // Same posture as methods, which also default to the full set: a fresh
+    // project exposes its whole surface and the wizard narrows it.
+    const created = await createProjectViaApi(app, session.accessToken);
+    expect(created.json().generationConfig.features).toEqual({
+      search: true,
+      filter: true,
+      sort: true,
+      include: true,
+    });
+  });
+
+  it('persists the query feature toggles it was given', async () => {
+    const created = await createProjectViaApi(app, session.accessToken);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/projects/${created.json().id}`,
+      headers: authHeader(session.accessToken),
+      payload: {
+        generationConfig: {
+          validators: ['zod'],
+          types: ['typescript'],
+          methods: ['GET'],
+          mockRecords: 10,
+          features: { search: true, sort: true },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    // Completed to a full block, so the runtime never has to guess.
+    expect(res.json().generationConfig.features).toEqual({
+      search: true,
+      filter: false,
+      sort: true,
+      include: false,
+    });
+  });
+
+  it('reads a config sent without features as the query layer switched off', async () => {
+    // Replace semantics, the same as omitting a validator. Documented because
+    // it is a footgun: any client sending a config must send the toggles too.
+    const created = await createProjectViaApi(app, session.accessToken);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/projects/${created.json().id}`,
+      headers: authHeader(session.accessToken),
+      payload: {
+        generationConfig: {
+          validators: ['zod'],
+          types: ['typescript'],
+          methods: ['GET'],
+          mockRecords: 10,
+        },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().generationConfig.features).toEqual({
+      search: false,
+      filter: false,
+      sort: false,
+      include: false,
+    });
+  });
+
+  it('rejects an unknown or non-boolean query feature toggle', async () => {
+    const created = await createProjectViaApi(app, session.accessToken);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/projects/${created.json().id}`,
+      headers: authHeader(session.accessToken),
+      payload: {
+        generationConfig: {
+          validators: ['zod'],
+          types: ['typescript'],
+          methods: ['GET'],
+          mockRecords: 10,
+          features: { serch: true, sort: 'yes' },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(422);
+    const paths = res.json().error.details.map((d: { path: string }) => d.path);
+    expect(paths).toContain('generationConfig.features.serch');
+    expect(paths).toContain('generationConfig.features.sort');
+  });
+
+  it('changing a query feature toggle bumps the version', async () => {
+    // Toggles live in the generation config, so they take part in the version
+    // bump and the idempotency key without any special handling.
+    const created = await createProjectViaApi(app, session.accessToken);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/projects/${created.json().id}`,
+      headers: authHeader(session.accessToken),
+      payload: {
+        generationConfig: {
+          validators: ['zod'],
+          types: ['typescript'],
+          methods: ['GET'],
+          mockRecords: 10,
+          features: { filter: true },
+        },
+      },
+    });
+    expect(res.json().currentVersion).toBe(2);
+  });
+
   it('rejects an invalid generation config with 422 and field details', async () => {
     const created = await createProjectViaApi(app, session.accessToken);
     const res = await app.inject({

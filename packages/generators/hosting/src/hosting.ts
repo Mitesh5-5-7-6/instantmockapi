@@ -15,11 +15,15 @@ import { HTTP_METHODS, type HttpMethod } from '@instantmockapi/shared';
 import {
   completeRelation,
   entityIdentity,
+  entityQueryFields,
   entityRelations,
   isCollectionRelation,
+  queryFeatures,
   type Entity,
   type Field,
   type InternalProjectSchema,
+  type EntityQueryFields,
+  type QueryFeatures,
   type Relation,
   type RelationKind,
 } from '@instantmockapi/ips';
@@ -71,12 +75,29 @@ export interface HostedEntityConfig {
   fields: HostedFieldRule[];
   identity: HostedIdentityRule;
   relations: HostedRelationRule[];
+  /**
+   * Which fields the query layer accepts, precomputed per entity.
+   *
+   * The runtime validates a request against these lists rather than re-walking
+   * the field tree, and the same derivation feeds the OpenAPI parameter list —
+   * so a 400 from the runtime and the documented parameters can never disagree.
+   * Absent on configs generated before the query layer.
+   */
+  query?: EntityQueryFields;
   seedStore: { collection: 'mockStores'; entity: string };
 }
 
 export interface HostingConfig {
   projectId: string;
   version: number;
+  /**
+   * Enabled query capabilities, copied from the generation config.
+   *
+   * Project-wide rather than per-entity because that is the granularity the
+   * wizard offers. Absent on configs generated before the query layer, which
+   * `resolveQueryFeatures` reads as all-off.
+   */
+  features?: QueryFeatures;
   entities: HostedEntityConfig[];
 }
 
@@ -130,6 +151,7 @@ export function generateHostingConfig(ips: InternalProjectSchema): Record<string
   const config: HostingConfig = {
     projectId: ips.projectId,
     version: ips.version,
+    features: queryFeatures(ips.generationConfig),
     entities: entities.map((entity) => {
       const path = entityPath(entity.name);
       return {
@@ -139,6 +161,7 @@ export function generateHostingConfig(ips: InternalProjectSchema): Record<string
         fields: entity.fields.map(fieldRule),
         identity: entityIdentity(entity),
         relations: relationRules(entity, entities),
+        query: entityQueryFields(entity),
         seedStore: { collection: 'mockStores', entity: path },
       };
     }),

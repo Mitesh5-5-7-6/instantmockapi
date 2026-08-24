@@ -8,6 +8,7 @@
  */
 
 import { AppError, type ProjectKind } from '@instantmockapi/shared';
+import { resolveQueryFeatures, type QueryFeatures } from '@instantmockapi/ips';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import { Project } from '@instantmockapi/db';
 import { getArtifactRecord } from '@instantmockapi/registry';
@@ -29,6 +30,12 @@ export interface HostedContext {
   publicId: string | null;
   slug: string | null;
   entities: Map<string, HostedEntityConfig>;
+  /**
+   * Query capabilities this project has switched on. Resolved from the hosted
+   * config, so a config generated before the query layer reads as all-off and
+   * the API it backs answers exactly as it did before.
+   */
+  features: QueryFeatures;
   /**
    * Generation stamp of the hosted artifact backing this context. Downstream
    * cache keys embed it so a regenerate invalidates by producing new keys
@@ -126,6 +133,7 @@ export async function resolveHostedProject(
     publicId: project.publicId ?? null,
     slug: project.slug ?? null,
     entities,
+    features: resolveQueryFeatures(config.features),
     stamp,
   };
 }

@@ -17,15 +17,25 @@ import { AppError, HTTP_METHODS, hostedUrl, type HttpMethod } from '@instantmock
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import { ApiLog } from '@instantmockapi/db';
 import type { StorageClient } from '@instantmockapi/storage';
+import { enabledQueryFeatures, type EntityQueryFields } from '@instantmockapi/ips';
 import type { HostedEntityConfig } from '@instantmockapi/generator-hosting';
 import type { CacheService } from './cache.js';
 import { notFound, resolveHostedProject, type HostedContext } from './hosting.js';
 import { parseHostedPath, refPath, type HostedRefInput, type HostedTarget } from './path.js';
 import {
+  NO_QUERY_FIELDS,
+  expandIncludes,
+  paginate,
+  parseQuery,
+  selectRecords,
+  sortRecords,
+  type IncludeTarget,
+} from './query.js';
+import {
   DEFAULT_IDENTITY_RULE,
   findRecordIndex,
+  materializeIdentity,
   readRecords,
-  recordId,
   writeRecords,
   type IdentityRule,
   type MockRecord,
@@ -75,6 +85,67 @@ function identityOf(entity: HostedEntityConfig): IdentityRule {
   return entity.identity ?? DEFAULT_IDENTITY_RULE;
 }
 
+/**
+ * Query-capable fields of a hosted entity.
+ *
+ * Configs generated before the query layer carry none, which resolves to "no
+ * field is queryable" — combined with all-off features, such a project answers
+ * exactly as it did before this existed.
+ */
+function queryFieldsOf(entity: HostedEntityConfig): EntityQueryFields {
+  return entity.query ?? NO_QUERY_FIELDS;
+}
+
+/**
+ * The relations named by `?include=`, in the order the caller asked for them.
+ *
+ * Unknown names never reach here: `parseQuery` validates them against the
+ * includable list the config carries for this entity.
+ */
+function includeTargets(entity: HostedEntityConfig, names: readonly string[]): IncludeTarget[] {
+  const targets: IncludeTarget[] = [];
+  for (const name of names) {
+    const relation = (entity.relations ?? []).find((candidate) => candidate.name === name);
+    if (relation) {
+      targets.push({
+        name: relation.name,
+        targetPath: relation.targetPath,
+        localField: relation.localField,
+        foreignField: relation.foreignField,
+        collection: relation.collection,
+      });
+    }
+  }
+  return targets;
+}
+
+/**
+ * The query capabilities an entity advertises, limited to enabled features.
+ *
+ * Omitted entirely when nothing is enabled, so a project generated before the
+ * query layer keeps the exact discovery document it had.
+ */
+function describeQuery(
+  entity: HostedEntityConfig,
+  features: HostedContext['features'],
+): { query?: Partial<EntityQueryFields> } {
+  const fields = queryFieldsOf(entity);
+  const query: Partial<EntityQueryFields> = {};
+  if (features.search) {
+    query.searchable = fields.searchable;
+  }
+  if (features.filter) {
+    query.filterable = fields.filterable;
+  }
+  if (features.sort) {
+    query.sortable = fields.sortable;
+  }
+  if (features.include) {
+    query.includable = fields.includable;
+  }
+  return Object.keys(query).length > 0 ? { query } : {};
+}
+
 /** Discovery document served at the project's base URL. */
 function sendIndex(reply: FastifyReply, ctx: HostedContext, env: EnvConfig): FastifyReply {
   const base = hostedUrl(env.hostedBaseUrl, ctx);
@@ -83,11 +154,15 @@ function sendIndex(reply: FastifyReply, ctx: HostedContext, env: EnvConfig): Fas
       kind: ctx.kind,
       version: ctx.version,
       canonicalUrl: base,
+      features: enabledQueryFeatures(ctx.features),
       entities: [...ctx.entities.values()].map((entity) => ({
         name: entity.name,
         path: entity.path,
         methods: entity.methods,
         url: `${base}/${entity.path}`,
+        // Only the lists the caller can actually use, so the document answers
+        // "what can I send?" rather than describing a capability that 400s.
+        ...describeQuery(entity, ctx.features),
       })),
     },
   });
@@ -116,45 +191,85 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
     done();
   });
 
-  // GET list — paginated from the seed store (doc 08 §9)
+  /**
+   * Loads a related entity, identity already resolved, so a join key reads the
+   * same value the target URL routes on.
+   *
+   * Without it a legacy seed — records predating identity fields, which fall
+   * back to `rec-<n>` — would index under `undefined` and every include
+   * against that entity would quietly expand to null.
+   */
+  const relatedLoader = (ctx: HostedContext) => async (targetPath: string) => {
+    const target = ctx.entities.get(targetPath);
+    const records = await readRecords(ctx, targetPath, deps.cache, env);
+    return materializeIdentity(records, target ? identityOf(target) : DEFAULT_IDENTITY_RULE);
+  };
+
+  // GET list — filter → search → sort → paginate → include (doc 08 §9, doc 19 §Phase 4)
   const listRecords = async (
     request: FastifyRequest,
     reply: FastifyReply,
     ctx: HostedContext,
     entity: HostedEntityConfig,
   ): Promise<FastifyReply> => {
-    const query = request.query as { page?: string; limit?: string };
-    const page = Math.max(1, Number.parseInt(query.page ?? '1', 10) || 1);
-    const limit = Math.min(
-      Math.max(1, Number.parseInt(query.limit ?? '20', 10) || 20),
-      env.maxPaginationLimit,
+    const identity = identityOf(entity);
+    const fields = queryFieldsOf(entity);
+    const plan = parseQuery(request.query, fields, ctx.features, env);
+
+    // Identity is resolved up front, over the stored order, so every step below
+    // treats it as an ordinary field (see `materializeIdentity`).
+    const records = materializeIdentity(
+      await readRecords(ctx, entity.path, deps.cache, env),
+      identity,
     );
 
-    const identity = identityOf(entity);
-    const records = await readRecords(ctx, entity.path, deps.cache, env);
-    const start = (page - 1) * limit;
-    const data = records.slice(start, start + limit).map((record, index) => ({
-      [identity.field]: recordId(record, start + index, identity),
-      ...record,
-    }));
+    const selected = selectRecords(records, plan, fields.searchable);
+    const ordered = sortRecords(selected, plan, identity.field);
+    // `total` counts what the query selected, not what the entity holds — that
+    // is what makes a page count meaningful under a filter.
+    const { data, total } = paginate(ordered, plan);
 
-    return reply.send({ data, meta: { page, limit, total: records.length } });
+    // Expanded last, on the page only: the cost of an include tracks the page
+    // size rather than the size of the collection.
+    const expanded = await expandIncludes(
+      data,
+      includeTargets(entity, plan.includes),
+      relatedLoader(ctx),
+    );
+
+    return reply.send({ data: expanded, meta: { page: plan.page, limit: plan.limit, total } });
   };
 
   // GET one
   const getRecord = async (
+    request: FastifyRequest,
     reply: FastifyReply,
     ctx: HostedContext,
     entity: HostedEntityConfig,
     id: string,
   ): Promise<FastifyReply> => {
     const identity = identityOf(entity);
+    // Only `?include=` is meaningful on a single record. The whole plan is
+    // parsed regardless so an unusable parameter is reported on this URL shape
+    // too, rather than being accepted here and rejected on the collection.
+    const plan = parseQuery(request.query, queryFieldsOf(entity), ctx.features, env);
+
     const records = await readRecords(ctx, entity.path, deps.cache, env);
     const index = findRecordIndex(records, id, identity);
     if (index === -1) {
       throw notFound('Record not found');
     }
-    return reply.send({ [identity.field]: id, ...records[index] });
+
+    const record: MockRecord = { [identity.field]: id, ...records[index] };
+    if (plan.includes.length === 0) {
+      return reply.send(record);
+    }
+    const [expanded] = await expandIncludes(
+      [record],
+      includeTargets(entity, plan.includes),
+      relatedLoader(ctx),
+    );
+    return reply.send(expanded);
   };
 
   // POST create — validated against the generated rules
@@ -330,7 +445,7 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
 
     switch (method) {
       case 'GET':
-        return getRecord(reply, ctx, entity, target.recordId);
+        return getRecord(request, reply, ctx, entity, target.recordId);
       case 'PUT':
         return replaceRecord(request, reply, ctx, entity, target.recordId);
       case 'PATCH':

@@ -135,6 +135,9 @@ importers:
       '@instantmockapi/generator-hosting':
         specifier: workspace:*
         version: link:../../packages/generators/hosting
+      '@instantmockapi/ips':
+        specifier: workspace:*
+        version: link:../../packages/ips
       '@instantmockapi/registry':
         specifier: workspace:*
         version: link:../../packages/registry

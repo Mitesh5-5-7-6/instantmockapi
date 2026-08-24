@@ -24,6 +24,7 @@ export function toProjectSummary(project: IProject) {
     kind: project.kind ?? 'project',
     publicId: project.publicId ?? null,
     slug: project.slug ?? null,
+    description: project.description ?? null,
     status: project.status,
     currentVersion: project.currentVersion,
     inputType: project.inputSource.type,
