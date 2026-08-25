@@ -10,7 +10,7 @@
  * you picked.
  */
 
-import { Button, Input, Select } from '@instantmockapi/ui';
+import { Button, Icon, Input, Select } from '@instantmockapi/ui';
 import {
   RELATION_KINDS,
   newRelation,
@@ -133,7 +133,7 @@ export function RelationEditor({
                   })
                 }
               >
-                ✕
+                <Icon name="x" size={14} />
               </Button>
             </div>
 

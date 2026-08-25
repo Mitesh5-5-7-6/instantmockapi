@@ -8,15 +8,9 @@
 import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Button, Card, Input, StatusChip } from '@instantmockapi/ui';
+import { Button, Card, Icon, Input, StatusChip } from '@instantmockapi/ui';
 import { useAuthState, useLogin, useLogout, useMe } from '../lib/hooks';
-
-const NAV_ITEMS = [
-  { href: '/', label: 'Dashboard' },
-  { href: '/new', label: 'New API' },
-  { href: '/templates', label: 'Templates' },
-  { href: '/settings', label: 'Settings' },
-];
+import { VISIBLE_NAV_ITEMS, isNavActive } from '../lib/nav-items';
 
 function LoginScreen() {
   const login = useLogin();
@@ -109,13 +103,19 @@ export function AppShell({ children }: { children: ReactNode }) {
           Instant<span>Mock</span>API
         </div>
         <nav className="ui-nav" aria-label="Primary">
-          {NAV_ITEMS.map((item) => (
+          {VISIBLE_NAV_ITEMS.map((item) => (
             <Link
               key={item.href}
               href={item.href}
-              aria-current={pathname === item.href ? 'page' : undefined}
+              aria-current={isNavActive(pathname, item.href) ? 'page' : undefined}
             >
-              {item.label}
+              {/* No label on the Icon: it sits beside the text, so announcing
+                  "folder Projects" would be worse than "Projects". The collapsed
+                  rail adds an aria-label to the anchor instead. */}
+              <Icon name={item.icon} size={18} />
+              {/* Wrapped rather than a bare text child: the collapsed sidebar
+                  hides the label with CSS, which needs an element to target. */}
+              <span className="ui-nav__label">{item.label}</span>
             </Link>
           ))}
         </nav>

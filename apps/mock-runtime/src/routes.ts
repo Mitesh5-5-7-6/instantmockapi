@@ -186,6 +186,11 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
         path: request.url,
         status: reply.statusCode,
         at: new Date(),
+        // Fastify measures this for us and it is valid in `onResponse`, so there
+        // is no timer to start and stop. Rounded because the raw value is a
+        // sub-nanosecond float that would be stored at full precision for no
+        // benefit.
+        durationMs: Math.round(reply.elapsedTime),
       }).catch(() => undefined);
     }
     done();

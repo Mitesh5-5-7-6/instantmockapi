@@ -327,8 +327,28 @@ export async function downloadArtifact(
   const blob = await response.blob();
   const disposition = response.headers.get('content-disposition') ?? '';
   const match = /filename="([^"]+)"/.exec(disposition);
-  const filename = match?.[1] ?? `${artifactType}.json`;
+  const filename = match?.[1] ?? artifactDownloadFilename(artifactType);
 
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function artifactDownloadFilename(artifactType: string): string {
+  if (artifactType === 'export_zip') {
+    return 'export.zip';
+  }
+  if (artifactType === 'openapi' || artifactType === 'postman' || artifactType === 'hosted_api') {
+    return `${artifactType}.json`;
+  }
+  return `${artifactType}.ts`;
+}
+
+export function downloadTextFile(filename: string, content: string): void {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;

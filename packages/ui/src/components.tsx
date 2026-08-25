@@ -13,6 +13,7 @@ import {
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from 'react';
+import { Icon } from './icons.js';
 
 function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(' ');
@@ -154,7 +155,15 @@ export function CodeViewer({
   downloadLabel = 'Download',
 }: {
   files: Record<string, string> | undefined;
-  onDownload?: () => void;
+  /**
+   * Receives the file the viewer is currently showing.
+   *
+   * Both arguments are load-bearing: a bundle artifact holds several files, so a
+   * download handler that isn't told which tab is active cannot save the right
+   * one. Wiring this straight to `onClick` would instead hand the callback
+   * React's MouseEvent as its first argument.
+   */
+  onDownload?: (filename: string, code: string) => void;
   downloadLabel?: string;
 }) {
   const names = files ? Object.keys(files) : [];
@@ -189,7 +198,11 @@ export function CodeViewer({
           <span className="ui-mono ui-meta">{names[0]}</span>
         )}
         {onDownload ? (
-          <Button variant="secondary" size="sm" onClick={onDownload}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => onDownload(active, files[active] ?? '')}
+          >
             {downloadLabel}
           </Button>
         ) : null}
@@ -225,7 +238,7 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
         <div className="ui-row ui-row--between" style={{ marginBottom: 'var(--space-4)' }}>
           <h3>{title}</h3>
           <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close">
-            ✕
+            <Icon name="x" size={16} />
           </Button>
         </div>
         {children}
@@ -442,7 +455,9 @@ export function Stepper({ steps, current, onGoTo }: StepperProps) {
         );
         const body = (
           <>
-            <span className="ui-stepper__num">{done ? '✓' : number}</span>
+            <span className="ui-stepper__num">
+              {done ? <Icon name="check" size={14} /> : number}
+            </span>
             <span>{label}</span>
           </>
         );
@@ -519,7 +534,8 @@ export function Stat({ value, label }: { value: ReactNode; label: string }) {
 export function SuccessMark() {
   return (
     <span className="ui-success-mark" role="img" aria-label="Generated successfully">
-      ✓
+      {/* The label is on the wrapper, so the glyph itself stays aria-hidden. */}
+      <Icon name="check" size={28} />
     </span>
   );
 }

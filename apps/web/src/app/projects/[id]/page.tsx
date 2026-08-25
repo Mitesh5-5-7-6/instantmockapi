@@ -24,6 +24,7 @@ import {
 } from '@instantmockapi/ui';
 import {
   downloadArtifact,
+  downloadTextFile,
   useArtifactContent,
   useArtifacts,
   useGenerate,
@@ -313,13 +314,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         ) : (
           <CodeViewer
             files={content.data?.files}
-            onDownload={() => {
+            onDownload={(filename, code) => {
               setDownloadError(null);
-              if (view) {
-                downloadArtifact(id, view.type, view.version).catch((cause: Error) =>
-                  setDownloadError(cause.message),
-                );
-              }
+              downloadTextFile(filename, code);
             }}
           />
         )}

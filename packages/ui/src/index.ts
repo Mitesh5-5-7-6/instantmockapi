@@ -1,5 +1,7 @@
 // @instantmockapi/ui — design tokens (styles.css) + shared React components (doc 12).
 
+export { Icon, ICON_NAMES, type IconName, type IconSize, type IconProps } from './icons.js';
+
 export {
   Button,
   type ButtonProps,

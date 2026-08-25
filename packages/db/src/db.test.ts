@@ -117,6 +117,39 @@ describe('models', () => {
     expect(ttl?.key).toEqual({ at: 1 });
     expect(ttl?.expireAfterSeconds).toBe(30 * 24 * 60 * 60);
   });
+
+  it('declares a compound {projectId, at} index alongside the TTL index', async () => {
+    // Both must exist. A TTL index cannot be compound, so the compound index
+    // cannot absorb it — and "consolidating" them would silently disable
+    // retention while leaving every read fast. That is the failure this pins.
+    await ApiLog.syncIndexes();
+    const indexes = await ApiLog.collection.indexes();
+
+    const compound = indexes.find(
+      (idx) => JSON.stringify(idx.key) === JSON.stringify({ projectId: 1, at: -1 }),
+    );
+    expect(compound).toBeDefined();
+    // The read index must not carry a TTL, or it would expire rows on its own.
+    expect(compound?.expireAfterSeconds).toBeUndefined();
+
+    // Field order is load-bearing: equality before range, or the window scan
+    // cannot be bounded per project.
+    expect(Object.keys(compound?.key ?? {})).toEqual(['projectId', 'at']);
+    expect(indexes.filter((idx) => idx.expireAfterSeconds !== undefined)).toHaveLength(1);
+  });
+
+  it('stores an optional durationMs on apiLogs', async () => {
+    // Rows written before the field existed carry null and cannot be backfilled,
+    // so a missing value has to be representable rather than defaulted to 0.
+    const projectId = new Types.ObjectId();
+    const base = { projectId, method: 'GET', path: '/p/x/customer', status: 200, at: new Date() };
+
+    const timed = await ApiLog.create({ ...base, durationMs: 12 });
+    expect(timed.durationMs).toBe(12);
+
+    const untimed = await ApiLog.create(base);
+    expect(untimed.durationMs).toBeNull();
+  });
 });
 
 describe('findExpiredProjects', () => {
