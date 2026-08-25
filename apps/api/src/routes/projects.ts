@@ -113,6 +113,7 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
             name: { type: 'string', minLength: 1, maxLength: 120 },
             kind: { type: 'string', enum: [...PROJECT_KINDS] },
             slug: { type: 'string', pattern: SLUG_PATTERN.source, maxLength: SLUG_MAX_LENGTH },
+            description: { type: 'string', maxLength: 500 },
             inputSource: {
               type: 'object',
               required: ['type', 'raw'],
@@ -132,6 +133,7 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
         name: string;
         kind?: ProjectKind;
         slug?: string;
+        description?: string;
         inputSource: { type: InputSourceType; raw: unknown };
       };
       if (body.slug !== undefined && !isUsableSlug(body.slug)) {
@@ -166,6 +168,7 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
         name: body.name,
         kind: body.kind ?? 'project',
         slug: body.slug ?? null,
+        description: body.description ?? null,
         status: 'draft',
         inputSource: { type: body.inputSource.type, raw: rawString },
       });
@@ -204,6 +207,7 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
           properties: {
             name: { type: 'string', minLength: 1, maxLength: 120 },
             slug: { type: 'string', pattern: SLUG_PATTERN.source, maxLength: SLUG_MAX_LENGTH },
+            description: { type: 'string', maxLength: 500 },
             ips: { type: 'object' },
             generationConfig: { type: 'object' },
           },
@@ -215,6 +219,7 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
       const body = request.body as {
         name?: string;
         slug?: string;
+        description?: string;
         ips?: Record<string, unknown>;
         generationConfig?: Record<string, unknown>;
       };
@@ -222,6 +227,10 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
 
       if (body.name) {
         project.name = body.name;
+      }
+
+      if (body.description !== undefined) {
+        project.description = body.description;
       }
 
       if (body.slug !== undefined && body.slug !== project.slug) {

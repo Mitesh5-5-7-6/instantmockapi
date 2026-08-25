@@ -135,6 +135,9 @@ importers:
       '@instantmockapi/generator-hosting':
         specifier: workspace:*
         version: link:../../packages/generators/hosting
+      '@instantmockapi/ips':
+        specifier: workspace:*
+        version: link:../../packages/ips
       '@instantmockapi/registry':
         specifier: workspace:*
         version: link:../../packages/registry
@@ -209,6 +212,9 @@ importers:
       typescript:
         specifier: ^5.8.0
         version: 5.9.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@22.20.1)(jiti@2.6.1)(tsx@4.23.0)(yaml@2.9.0)
 
   apps/workers:
     dependencies:

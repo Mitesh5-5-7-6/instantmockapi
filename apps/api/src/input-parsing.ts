@@ -7,6 +7,7 @@
 import { AppError, HTTP_METHODS, type InputSourceType, type Result } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
 import {
+  ALL_QUERY_FEATURES,
   materializeRelations,
   validateIPS,
   type Entity,
@@ -21,6 +22,9 @@ function defaultGenerationConfig(env: EnvConfig): GenerationConfig {
     types: ['typescript'],
     methods: [...HTTP_METHODS],
     mockRecords: env.defaultMockRecords,
+    // On by default, for the same reason every HTTP method is: a fresh project
+    // should expose the whole surface, and the wizard turns things off.
+    features: { ...ALL_QUERY_FEATURES },
   };
 }
 

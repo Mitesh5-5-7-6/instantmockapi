@@ -7,7 +7,14 @@
  */
 
 import { HTTP_METHODS, hostedUrl, type HttpMethod } from '@instantmockapi/shared';
-import type { Entity, InternalProjectSchema } from '@instantmockapi/ips';
+import {
+  FILTER_OPERATORS,
+  entityQueryFields,
+  queryFeatures,
+  type Entity,
+  type InternalProjectSchema,
+  type QueryFeatures,
+} from '@instantmockapi/ips';
 import { entitySchema, type OpenAPISchemaNode } from './schema-mapper.js';
 import { exampleList, firstExample, type EntityExamples } from './examples.js';
 
@@ -49,6 +56,96 @@ function errorResponse(description: string): OpenAPISchemaNode {
   return { description, content: jsonContent({ $ref: '#/components/schemas/Error' }) };
 }
 
+const PAGINATION_PARAMETERS: OpenAPISchemaNode[] = [
+  { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+  { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, default: 20 } },
+];
+
+/**
+ * Query parameters for a list operation, derived from the same helper the
+ * runtime validates against — so the documented surface and the accepted
+ * surface are the same set by construction, not by two matching edits.
+ *
+ * One parameter is emitted per filterable field rather than one per
+ * field-and-operator pair: with seven operators a ten-field entity would
+ * otherwise carry eighty parameters, which buries the useful ones. The suffix
+ * grammar goes in the operation description instead.
+ */
+function listParameters(entity: Entity, features: QueryFeatures): OpenAPISchemaNode[] {
+  const parameters = [...PAGINATION_PARAMETERS];
+  const fields = entityQueryFields(entity);
+
+  if (features.search && fields.searchable.length > 0) {
+    parameters.push({
+      name: 'search',
+      in: 'query',
+      description: `Case-insensitive substring match across: ${fields.searchable.join(', ')}.`,
+      schema: { type: 'string' },
+    });
+  }
+
+  if (features.sort && fields.sortable.length > 0) {
+    parameters.push({
+      name: 'sort',
+      in: 'query',
+      description:
+        `Comma-separated field list; prefix a field with '-' to sort descending. ` +
+        `Sortable: ${fields.sortable.join(', ')}.`,
+      schema: { type: 'string' },
+    });
+  }
+
+  if (features.include && fields.includable.length > 0) {
+    parameters.push(includeParameter(fields.includable));
+  }
+
+  if (features.filter) {
+    for (const field of entity.fields) {
+      if (!fields.filterable.includes(field.name)) {
+        continue;
+      }
+      parameters.push({
+        name: field.name,
+        in: 'query',
+        description:
+          `Filter by ${field.name}. Also accepts the suffixed forms ` +
+          FILTER_OPERATORS.map((operator) => `${field.name}_${operator}`).join(', ') +
+          '.',
+        schema: filterSchema(field.type),
+      });
+    }
+  }
+
+  return parameters;
+}
+
+function includeParameter(includable: readonly string[]): OpenAPISchemaNode {
+  return {
+    name: 'include',
+    in: 'query',
+    description: `Comma-separated relations to expand: ${includable.join(', ')}.`,
+    schema: { type: 'string' },
+  };
+}
+
+/**
+ * Query values always arrive as text, so these types are a hint for tooling
+ * input widgets rather than a constraint the runtime enforces.
+ */
+function filterSchema(type: Entity['fields'][number]['type']): OpenAPISchemaNode {
+  switch (type) {
+    case 'integer':
+      return { type: 'integer' };
+    case 'number':
+    case 'decimal':
+      return { type: 'number' };
+    case 'boolean':
+      return { type: 'boolean' };
+    default:
+      return { type: 'string' };
+  }
+}
+
 /** Selected methods in canonical HTTP_METHODS order. */
 function selectedMethods(ips: InternalProjectSchema): HttpMethod[] {
   const chosen = new Set(ips.generationConfig.methods);
@@ -77,17 +174,50 @@ export function serverUrl(ips: InternalProjectSchema, options: DocsOptions = {})
   });
 }
 
+/**
+ * Spec-level prose. The query-layer sentence is only added when something is
+ * enabled, so a project without it keeps the description it always had.
+ */
+function describeApi(features: QueryFeatures): string {
+  const base =
+    'Generated hosted mock API documentation. Unselected methods return 405; ' +
+    'invalid writes return 422 with field-level errors.';
+  const notes: string[] = [];
+  if (features.filter) {
+    notes.push(
+      `Filters accept the operator suffixes ${FILTER_OPERATORS.map((o) => '_' + o).join(', ')} ` +
+        "(for example 'price_gte=10', 'city_in=Paris,Berlin', 'name_like=ada'); " +
+        "'field=null' matches records where the field is absent. " +
+        'An unknown filter parameter is rejected with 400 rather than ignored.',
+    );
+  }
+  if (features.include) {
+    notes.push('Relations expand one level deep; nested includes are not supported.');
+  }
+  return notes.length > 0 ? `${base} ${notes.join(' ')}` : base;
+}
+
 export function generateOpenAPI(
   ips: InternalProjectSchema,
   examples: EntityExamples = {},
   options: DocsOptions = {},
 ): Record<string, string> {
   const methods = selectedMethods(ips);
+  const features = queryFeatures(ips.generationConfig);
   const paths: OpenAPISchemaNode = {};
   const schemas: OpenAPISchemaNode = { Error: ERROR_SCHEMA };
 
+  const tags: OpenAPISchemaNode[] = [];
+
   for (const entity of ips.entities) {
-    schemas[entity.name] = entitySchema(entity);
+    const schema = entitySchema(entity);
+    if (entity.description) {
+      schema['description'] = entity.description;
+      // A described entity also becomes a described tag, which is what Swagger
+      // UI renders above its operation group.
+      tags.push({ name: entity.name, description: entity.description });
+    }
+    schemas[entity.name] = schema;
 
     const path = `/${entity.name.toLowerCase()}`;
     const itemPath = `${path}/{recordId}`;
@@ -101,10 +231,7 @@ export function generateOpenAPI(
         operationId: `list${entity.name}`,
         summary: `List ${entity.name} records`,
         tags: [entity.name],
-        parameters: [
-          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
-          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, default: 20 } },
-        ],
+        parameters: listParameters(entity, features),
         responses: {
           '200': {
             description: `Paginated ${entity.name} records`,
@@ -112,10 +239,16 @@ export function generateOpenAPI(
           },
         },
       };
+      const includable = entityQueryFields(entity).includable;
       item['get'] = {
         operationId: `get${entity.name}`,
         summary: `Fetch a single ${entity.name}`,
         tags: [entity.name],
+        // Only include= is meaningful on one record, and only when relations
+        // are switched on.
+        ...(features.include && includable.length > 0
+          ? { parameters: [includeParameter(includable)] }
+          : {}),
         responses: {
           '200': { description: `The ${entity.name}`, content: jsonContent(ref(entity), example) },
           '404': errorResponse('Record not found'),
@@ -192,10 +325,12 @@ export function generateOpenAPI(
     info: {
       title: `InstantMockAPI — project ${ips.projectId}`,
       version: `v${ips.version}`,
-      description:
-        'Generated hosted mock API documentation. Unselected methods return 405; invalid writes return 422 with field-level errors.',
+      description: describeApi(features),
     },
     servers: [{ url: serverUrl(ips, options) }],
+    // Omitted entirely when nothing is described, so an existing spec gains no
+    // empty array.
+    ...(tags.length > 0 ? { tags } : {}),
     paths,
     components: { schemas: schemas },
   };

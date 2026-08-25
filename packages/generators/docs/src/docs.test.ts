@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { goldenFixtureIPS } from '../../__tests__/golden-fixture.js';
+import { goldenRelationsIPS } from '../../__tests__/golden-relations-fixture.js';
+import {
+  NO_QUERY_FEATURES,
+  materializeRelations,
+  type QueryFeatures,
+} from '@instantmockapi/ips';
 import { generateOpenAPI } from './openapi.js';
 import { generatePostmanCollection } from './postman.js';
 import type { EntityExamples } from './examples.js';
@@ -130,5 +136,183 @@ describe('generatePostmanCollection (Worker E)', () => {
 
   it('is deterministic', () => {
     expect(generatePostmanCollection(goldenFixtureIPS, examples)).toEqual(output);
+  });
+});
+
+describe('query layer documentation (doc 19 §Phase 4)', () => {
+  const withFeatures = (features: Partial<QueryFeatures>) => ({
+    ...materializeRelations(goldenRelationsIPS),
+    generationConfig: {
+      ...goldenRelationsIPS.generationConfig,
+      features: { ...NO_QUERY_FEATURES, ...features },
+    },
+  });
+
+  const listOperation = (features: Partial<QueryFeatures>) => {
+    const spec = JSON.parse(
+      generateOpenAPI(withFeatures(features))['openapi.json'] ?? '{}',
+    );
+    return spec.paths['/student'].get;
+  };
+
+  const parameterNames = (features: Partial<QueryFeatures>): string[] =>
+    listOperation(features).parameters.map((p: { name: string }) => p.name);
+
+  it('documents only pagination when nothing is enabled', () => {
+    // A project generated before the query layer must keep exactly the spec it
+    // had, or every committed client contract would show a spurious diff.
+    expect(parameterNames({})).toEqual(['page', 'limit']);
+  });
+
+  it('adds one parameter per enabled feature', () => {
+    expect(parameterNames({ search: true })).toEqual(['page', 'limit', 'search']);
+    expect(parameterNames({ sort: true })).toEqual(['page', 'limit', 'sort']);
+    expect(parameterNames({ include: true })).toEqual(['page', 'limit', 'include']);
+  });
+
+  it('documents one parameter per filterable field, not one per operator pair', () => {
+    // Seven operators across a wide entity would bury the useful parameters, so
+    // the suffix grammar lives in the descriptions instead.
+    const names = parameterNames({ filter: true });
+    expect(names).toEqual(['page', 'limit', 'id', 'name', 'enrolledAt', 'classroomId']);
+    const filter = listOperation({ filter: true }).parameters.find(
+      (p: { name: string }) => p.name === 'name',
+    );
+    expect(filter.description).toContain('name_gte');
+    expect(filter.description).toContain('name_like');
+  });
+
+  it('types a filter parameter from its field, for tooling input widgets', () => {
+    const parameters = listOperation({ filter: true }).parameters;
+    const byName = (name: string) =>
+      parameters.find((p: { name: string }) => p.name === name).schema;
+    expect(byName('classroomId')).toEqual({ type: 'integer' });
+    expect(byName('name')).toEqual({ type: 'string' });
+  });
+
+  it('names the searchable and sortable fields in the parameter descriptions', () => {
+    const search = listOperation({ search: true }).parameters.find(
+      (p: { name: string }) => p.name === 'search',
+    );
+    expect(search.description).toContain('name');
+    const sort = listOperation({ sort: true }).parameters.find(
+      (p: { name: string }) => p.name === 'sort',
+    );
+    expect(sort.description).toContain('classroomId');
+    expect(sort.description).toContain('descending');
+  });
+
+  it('lists the includable relations in the include description', () => {
+    const include = listOperation({ include: true }).parameters.find(
+      (p: { name: string }) => p.name === 'include',
+    );
+    expect(include.description).toContain('classroom');
+  });
+
+  it('documents include on the single-record operation only', () => {
+    const spec = JSON.parse(
+      generateOpenAPI(withFeatures({ include: true, filter: true }))['openapi.json'] ?? '{}',
+    );
+    const item = spec.paths['/student/{recordId}'].get;
+    expect(item.parameters.map((p: { name: string }) => p.name)).toEqual(['include']);
+  });
+
+  it('omits query parameters from the single-record operation when relations are off', () => {
+    const spec = JSON.parse(
+      generateOpenAPI(withFeatures({ filter: true, sort: true }))['openapi.json'] ?? '{}',
+    );
+    expect(spec.paths['/student/{recordId}'].get).not.toHaveProperty('parameters');
+  });
+
+  it('explains the filter grammar and the include depth in the spec description', () => {
+    const bare = JSON.parse(generateOpenAPI(withFeatures({}))['openapi.json'] ?? '{}');
+    expect(bare.info.description).not.toContain('operator suffixes');
+
+    const rich = JSON.parse(
+      generateOpenAPI(withFeatures({ filter: true, include: true }))['openapi.json'] ?? '{}',
+    );
+    expect(rich.info.description).toContain('_gte');
+    expect(rich.info.description).toContain('rejected with 400');
+    expect(rich.info.description).toContain('nested includes are not supported');
+  });
+
+  it('offers the enabled parameters in Postman, disabled so they do not fire', () => {
+    const collection = JSON.parse(
+      generatePostmanCollection(withFeatures({ search: true, sort: true, include: true }))[
+        'postman_collection.json'
+      ] ?? '{}',
+    );
+    const student = collection.item.find((f: { name: string }) => f.name === 'Student');
+    const list = student.item.find((r: { name: string }) => r.name === 'List Student');
+    const query = list.request.url.query as { key: string; disabled?: boolean }[];
+    expect(query.filter((entry) => !entry.disabled).map((entry) => entry.key)).toEqual([
+      'page',
+      'limit',
+    ]);
+    expect(query.filter((entry) => entry.disabled).map((entry) => entry.key)).toEqual([
+      'search',
+      'sort',
+      'include',
+    ]);
+  });
+
+  it('keeps the Postman raw URL to the parameters that will actually be sent', () => {
+    const collection = JSON.parse(
+      generatePostmanCollection(withFeatures({ search: true }))['postman_collection.json'] ?? '{}',
+    );
+    const student = collection.item.find((f: { name: string }) => f.name === 'Student');
+    const list = student.item.find((r: { name: string }) => r.name === 'List Student');
+    expect(list.request.url.raw).toBe('{{baseUrl}}/student?page=1&limit=20');
+  });
+
+  it('leaves the Postman List request unchanged when nothing is enabled', () => {
+    const collection = JSON.parse(
+      generatePostmanCollection(withFeatures({}))['postman_collection.json'] ?? '{}',
+    );
+    const student = collection.item.find((f: { name: string }) => f.name === 'Student');
+    const list = student.item.find((r: { name: string }) => r.name === 'List Student');
+    expect(list.request.url.query).toEqual([
+      { key: 'page', value: '1' },
+      { key: 'limit', value: '20' },
+    ]);
+  });
+});
+
+describe('entity descriptions (doc 19 §Phase 7)', () => {
+  const described = {
+    ...goldenFixtureIPS,
+    entities: goldenFixtureIPS.entities.map((entity) => ({
+      ...entity,
+      description: 'Everything published on the blog',
+    })),
+  };
+
+  it('describes the schema and declares a described tag', () => {
+    const spec = JSON.parse(generateOpenAPI(described)['openapi.json'] ?? '{}');
+    expect(spec.components.schemas.BlogPost.description).toBe('Everything published on the blog');
+    expect(spec.tags).toEqual([
+      { name: 'BlogPost', description: 'Everything published on the blog' },
+    ]);
+  });
+
+  it('omits the tags array entirely when nothing is described', () => {
+    // An existing spec must not gain an empty array it never had.
+    const spec = JSON.parse(generateOpenAPI(goldenFixtureIPS)['openapi.json'] ?? '{}');
+    expect(spec).not.toHaveProperty('tags');
+    expect(spec.components.schemas.BlogPost).not.toHaveProperty('description');
+  });
+
+  it('describes the Postman folder', () => {
+    const collection = JSON.parse(
+      generatePostmanCollection(described)['postman_collection.json'] ?? '{}',
+    );
+    expect(collection.item[0].description).toBe('Everything published on the blog');
+  });
+
+  it('leaves the Postman folder undescribed when the entity has no description', () => {
+    const collection = JSON.parse(
+      generatePostmanCollection(goldenFixtureIPS)['postman_collection.json'] ?? '{}',
+    );
+    expect(collection.item[0]).not.toHaveProperty('description');
   });
 });

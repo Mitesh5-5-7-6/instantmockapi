@@ -255,6 +255,113 @@ describe('PATCH /v1/projects/:id', () => {
     expect(body.generationConfig.validators).toEqual(['zod', 'yup']);
   });
 
+  it('starts a new project with every query feature on', async () => {
+    // Same posture as methods, which also default to the full set: a fresh
+    // project exposes its whole surface and the wizard narrows it.
+    const created = await createProjectViaApi(app, session.accessToken);
+    expect(created.json().generationConfig.features).toEqual({
+      search: true,
+      filter: true,
+      sort: true,
+      include: true,
+    });
+  });
+
+  it('persists the query feature toggles it was given', async () => {
+    const created = await createProjectViaApi(app, session.accessToken);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/projects/${created.json().id}`,
+      headers: authHeader(session.accessToken),
+      payload: {
+        generationConfig: {
+          validators: ['zod'],
+          types: ['typescript'],
+          methods: ['GET'],
+          mockRecords: 10,
+          features: { search: true, sort: true },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    // Completed to a full block, so the runtime never has to guess.
+    expect(res.json().generationConfig.features).toEqual({
+      search: true,
+      filter: false,
+      sort: true,
+      include: false,
+    });
+  });
+
+  it('reads a config sent without features as the query layer switched off', async () => {
+    // Replace semantics, the same as omitting a validator. Documented because
+    // it is a footgun: any client sending a config must send the toggles too.
+    const created = await createProjectViaApi(app, session.accessToken);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/projects/${created.json().id}`,
+      headers: authHeader(session.accessToken),
+      payload: {
+        generationConfig: {
+          validators: ['zod'],
+          types: ['typescript'],
+          methods: ['GET'],
+          mockRecords: 10,
+        },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().generationConfig.features).toEqual({
+      search: false,
+      filter: false,
+      sort: false,
+      include: false,
+    });
+  });
+
+  it('rejects an unknown or non-boolean query feature toggle', async () => {
+    const created = await createProjectViaApi(app, session.accessToken);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/projects/${created.json().id}`,
+      headers: authHeader(session.accessToken),
+      payload: {
+        generationConfig: {
+          validators: ['zod'],
+          types: ['typescript'],
+          methods: ['GET'],
+          mockRecords: 10,
+          features: { serch: true, sort: 'yes' },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(422);
+    const paths = res.json().error.details.map((d: { path: string }) => d.path);
+    expect(paths).toContain('generationConfig.features.serch');
+    expect(paths).toContain('generationConfig.features.sort');
+  });
+
+  it('changing a query feature toggle bumps the version', async () => {
+    // Toggles live in the generation config, so they take part in the version
+    // bump and the idempotency key without any special handling.
+    const created = await createProjectViaApi(app, session.accessToken);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/projects/${created.json().id}`,
+      headers: authHeader(session.accessToken),
+      payload: {
+        generationConfig: {
+          validators: ['zod'],
+          types: ['typescript'],
+          methods: ['GET'],
+          mockRecords: 10,
+          features: { filter: true },
+        },
+      },
+    });
+    expect(res.json().currentVersion).toBe(2);
+  });
+
   it('rejects an invalid generation config with 422 and field details', async () => {
     const created = await createProjectViaApi(app, session.accessToken);
     const res = await app.inject({
@@ -431,5 +538,265 @@ describe('project kinds and slugs (doc 19 §Phase 3)', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().ips.publicId).toBe(created.json().publicId);
     expect(res.json().ips.slug).toBe(created.json().slug);
+  });
+});
+
+describe('Project wizard payload (doc 19 §Phase 5)', () => {
+  /** Exactly what the Design Data Model step submits: sparse relations, no FKs. */
+  const wizardPayload = (overrides: Record<string, unknown> = {}) => ({
+    name: 'Student ERP',
+    kind: 'project',
+    slug: 'student-erp',
+    description: 'Complete Student ERP with relationships',
+    inputSource: {
+      type: 'builder',
+      raw: {
+        entities: [
+          {
+            name: 'Classroom',
+            identity: { field: 'id', style: 'int' },
+            fields: [
+              {
+                name: 'name',
+                type: 'string',
+                required: true,
+                default: null,
+                children: [],
+                validation: {},
+                meta: { searchable: true },
+              },
+            ],
+            relations: [
+              {
+                name: 'students',
+                kind: 'hasMany',
+                target: 'Student',
+                required: false,
+                onDelete: 'restrict',
+              },
+            ],
+          },
+          {
+            name: 'Student',
+            identity: { field: 'id', style: 'int' },
+            fields: [
+              {
+                name: 'name',
+                type: 'string',
+                required: true,
+                default: null,
+                children: [],
+                validation: {},
+                meta: {},
+              },
+            ],
+            relations: [
+              {
+                name: 'classroom',
+                kind: 'belongsTo',
+                target: 'Classroom',
+                required: true,
+                onDelete: 'restrict',
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          validators: ['zod'],
+          types: ['typescript'],
+          methods: ['GET', 'POST'],
+          mockRecords: 10,
+          features: { search: true, filter: true, sort: true, include: true },
+        },
+      },
+    },
+    ...overrides,
+  });
+
+  const create = async (payload: Record<string, unknown>) =>
+    app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(session.accessToken),
+      payload,
+    });
+
+  it('accepts sparse relations and derives the foreign key server-side', async () => {
+    // The wizard deliberately sends no localField/foreignField: deriving them in
+    // the browser would disagree with completeRelation whenever two entities use
+    // different identity field names.
+    const res = await create(wizardPayload());
+    expect(res.statusCode).toBe(201);
+
+    const ips = res.json().ips as {
+      entities: {
+        name: string;
+        fields: { name: string; meta?: Record<string, unknown> }[];
+        relations: { name: string; localField: string; foreignField: string }[];
+        identity: { field: string; style: string };
+      }[];
+    };
+    const student = ips.entities.find((entity) => entity.name === 'Student')!;
+
+    // Materialization happened on the write path, so the review screen and the
+    // generated artifacts describe the same entity.
+    expect(student.fields.map((field) => field.name)).toContain('classroomId');
+    expect(student.relations[0]).toMatchObject({
+      name: 'classroom',
+      localField: 'classroomId',
+      foreignField: 'id',
+    });
+    expect(student.identity).toEqual({ field: 'id', style: 'int' });
+  });
+
+  it('keeps the searchable opt-in the field editor sets', async () => {
+    const res = await create(wizardPayload());
+    const ips = res.json().ips as {
+      entities: { name: string; fields: { name: string; meta?: Record<string, unknown> }[] }[];
+    };
+    const classroom = ips.entities.find((entity) => entity.name === 'Classroom')!;
+    expect(classroom.fields.find((field) => field.name === 'name')?.meta).toMatchObject({
+      searchable: true,
+    });
+  });
+
+  it('stores the addressing and description the first step collects', async () => {
+    const body = (await create(wizardPayload())).json();
+    expect(body).toMatchObject({
+      kind: 'project',
+      slug: 'student-erp',
+      description: 'Complete Student ERP with relationships',
+    });
+    // Addressable from creation, so the wizard can show the URL immediately.
+    expect(body.publicId).toMatch(/^prj_/);
+  });
+
+  it('rejects a relation whose target was not submitted', async () => {
+    // What an unpruned submit would look like — the client prunes precisely so
+    // this cannot reach the API, and this pins why that pruning exists.
+    const payload = wizardPayload();
+    const raw = (payload.inputSource as { raw: { entities: { name: string }[] } }).raw;
+    raw.entities = raw.entities.filter((entity) => entity.name !== 'Classroom');
+
+    const res = await create(payload);
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('carries the wizard feature toggles into the stored config', async () => {
+    const body = (await create(wizardPayload())).json();
+    expect(body.generationConfig.features).toEqual({
+      search: true,
+      filter: true,
+      sort: true,
+      include: true,
+    });
+  });
+});
+
+describe('Single API wizard payload (doc 19 §Phase 7)', () => {
+  /** What the Define Endpoints step submits: one entity per endpoint. */
+  const singlePayload = () => ({
+    name: 'Weather API',
+    kind: 'single',
+    slug: 'weather',
+    description: 'Get current weather information by city',
+    inputSource: {
+      type: 'builder',
+      raw: {
+        entities: [
+          {
+            name: 'Current',
+            description: 'Get current weather',
+            fields: [
+              {
+                name: 'city',
+                type: 'string',
+                required: true,
+                default: null,
+                children: [],
+                validation: {},
+                meta: { searchable: true },
+              },
+              {
+                name: 'temperature',
+                type: 'integer',
+                required: true,
+                default: null,
+                children: [],
+                validation: {},
+                meta: {},
+              },
+            ],
+            relations: [],
+          },
+          {
+            name: 'Forecast',
+            description: '5 day forecast',
+            fields: [
+              {
+                name: 'city',
+                type: 'string',
+                required: true,
+                default: null,
+                children: [],
+                validation: {},
+                meta: {},
+              },
+            ],
+            relations: [],
+          },
+        ],
+        generationConfig: {
+          validators: ['zod'],
+          types: ['typescript'],
+          methods: ['GET', 'POST'],
+          mockRecords: 20,
+          features: { search: true, filter: true, sort: true, include: false },
+        },
+      },
+    },
+  });
+
+  it('creates a single API addressed with the sng_ prefix and its base path', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(session.accessToken),
+      payload: singlePayload(),
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    // The design's base path is the slug: /p/{sng_id}/weather/{endpoint}.
+    expect(body).toMatchObject({ kind: 'single', slug: 'weather' });
+    expect(body.publicId).toMatch(/^sng_/);
+  });
+
+  it('keeps each endpoint description, so it reaches the generated docs', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(session.accessToken),
+      payload: singlePayload(),
+    });
+    const ips = res.json().ips as { entities: { name: string; description?: string }[] };
+    expect(ips.entities.map((entity) => entity.description)).toEqual([
+      'Get current weather',
+      '5 day forecast',
+    ]);
+  });
+
+  it('accepts entities that declare no relations', async () => {
+    // A single API has nothing to relate; the relation validator must treat an
+    // empty array as fine rather than as a missing field.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(session.accessToken),
+      payload: singlePayload(),
+    });
+    expect(res.statusCode).toBe(201);
+    const ips = res.json().ips as { entities: { relations?: unknown[] }[] };
+    expect(ips.entities.every((entity) => (entity.relations ?? []).length === 0)).toBe(true);
   });
 });

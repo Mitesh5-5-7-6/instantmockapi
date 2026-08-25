@@ -6,6 +6,7 @@
  */
 
 import type { HttpMethod, ProjectKind } from '@instantmockapi/shared';
+import type { QueryFeatures } from './query.js';
 
 /**
  * Valid primitive and nested field types in the IPS.
@@ -158,6 +159,12 @@ export interface Entity {
   relations?: Relation[];
   /** Identity descriptor; read through `entityIdentity` for the default. */
   identity?: EntityIdentity;
+  /**
+   * What this resource is for, in the author's words. Surfaces as the tag and
+   * schema description in the generated docs; the Single API wizard collects one
+   * per endpoint. Absent on documents written before it existed.
+   */
+  description?: string;
 }
 
 /**
@@ -172,6 +179,14 @@ export interface GenerationConfig {
   methods: HttpMethod[];
   /** Number of mock records to seed for hosted API */
   mockRecords: number;
+  /**
+   * Hosted-API query capabilities (doc 19 §Phase 4).
+   *
+   * Optional because every document written before the query layer has none —
+   * read it through `queryFeatures`, never raw, so those resolve to all-off
+   * rather than `undefined`.
+   */
+  features?: QueryFeatures;
 }
 
 /**

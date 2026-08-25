@@ -87,8 +87,17 @@ export default function ProgressPage({
 
       {job.data && (job.data.status === 'completed' || job.data.status === 'failed_partial') ? (
         <div className="ui-row">
+          {/* A clean run lands on the Ready screen; a partial one goes straight
+              to the project, where the failed artifacts can be retried. */}
+          {job.data.status === 'completed' ? (
+            <Link href={`/projects/${id}/ready`}>
+              <Button>See what was built</Button>
+            </Link>
+          ) : null}
           <Link href={`/projects/${id}`}>
-            <Button>Open project</Button>
+            <Button variant={job.data.status === 'completed' ? 'secondary' : 'primary'}>
+              Open project
+            </Button>
           </Link>
           {job.data.status === 'failed_partial' ? (
             <span className="ui-meta">

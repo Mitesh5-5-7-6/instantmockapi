@@ -6,12 +6,13 @@
  */
 
 import { AppError, type ErrorDetail, type Result, ok, err } from '@instantmockapi/shared';
-import type {
-  InternalProjectSchema,
-  Entity,
-  Field,
-  FieldType,
-  ValidationRules,
+import {
+  ALL_QUERY_FEATURES,
+  type InternalProjectSchema,
+  type Entity,
+  type Field,
+  type FieldType,
+  type ValidationRules,
 } from '@instantmockapi/ips';
 
 // ISO-8601 Date regex: Matches YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss.sssZ etc.
@@ -95,6 +96,7 @@ export function parseJSONPayload(
       types: ['typescript'],
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
       mockRecords: 25,
+      features: { ...ALL_QUERY_FEATURES },
     },
   };
 

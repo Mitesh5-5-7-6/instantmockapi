@@ -8,6 +8,7 @@
  */
 
 import { use, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   Button,
@@ -139,7 +140,16 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             ) : null}
           </div>
           {detail.hosted.url ? (
-            <CodeBlock code={detail.hosted.url} />
+            <>
+              <CodeBlock code={detail.hosted.url} />
+              <div className="ui-row">
+                <Link href={`/projects/${id}/explore`}>
+                  <Button variant="secondary" size="sm">
+                    Explore endpoints &amp; snippets
+                  </Button>
+                </Link>
+              </div>
+            </>
           ) : (
             <p className="ui-meta">
               Not hosted yet — generate to bring the mock API up

@@ -5,13 +5,63 @@
  */
 
 import { HTTP_METHODS, type HttpMethod } from '@instantmockapi/shared';
-import type { InternalProjectSchema } from '@instantmockapi/ips';
+import {
+  entityQueryFields,
+  queryFeatures,
+  type Entity,
+  type InternalProjectSchema,
+  type QueryFeatures,
+} from '@instantmockapi/ips';
 import { firstExample, type EntityExamples } from './examples.js';
 import { serverUrl, type DocsOptions } from './openapi.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface PostmanNode {
   [key: string]: any;
+}
+
+/**
+ * Query entries for the List request, disabled so they do not fire on the first
+ * send but are one checkbox away in Postman.
+ *
+ * Pagination stays enabled, matching the request this generator has always
+ * produced.
+ */
+function listQuery(entity: Entity, features: QueryFeatures): PostmanNode[] {
+  const fields = entityQueryFields(entity);
+  const entries: PostmanNode[] = [
+    { key: 'page', value: '1' },
+    { key: 'limit', value: '20' },
+  ];
+  if (features.search && fields.searchable.length > 0) {
+    entries.push({ key: 'search', value: '', disabled: true });
+  }
+  if (features.sort && fields.sortable.length > 0) {
+    entries.push({ key: 'sort', value: fields.sortable[0] ?? '', disabled: true });
+  }
+  if (features.include && fields.includable.length > 0) {
+    entries.push({ key: 'include', value: fields.includable.join(','), disabled: true });
+  }
+  if (features.filter && fields.filterable.length > 0) {
+    // One example filter rather than every field: the collection is a starting
+    // point, and a request carrying a dozen disabled rows is harder to read.
+    entries.push({ key: fields.filterable[0] ?? '', value: '', disabled: true });
+  }
+  return entries;
+}
+
+function urlWithQuery(pathSegments: string[], query: PostmanNode[]): PostmanNode {
+  const enabled = query.filter((entry) => entry['disabled'] !== true);
+  return {
+    raw:
+      `{{baseUrl}}/${pathSegments.join('/')}` +
+      (enabled.length > 0
+        ? `?${enabled.map((entry) => `${entry['key']}=${entry['value']}`).join('&')}`
+        : ''),
+    host: ['{{baseUrl}}'],
+    path: pathSegments,
+    query,
+  };
 }
 
 function url(pathSegments: string[], query?: Record<string, string>): PostmanNode {
@@ -49,6 +99,7 @@ export function generatePostmanCollection(
 ): Record<string, string> {
   const chosen = new Set(ips.generationConfig.methods);
   const methods = HTTP_METHODS.filter((m): m is HttpMethod => chosen.has(m));
+  const features = queryFeatures(ips.generationConfig);
 
   const folders: PostmanNode[] = [];
   for (const entity of ips.entities) {
@@ -62,7 +113,7 @@ export function generatePostmanCollection(
         request: {
           method: 'GET',
           header: [],
-          url: url([entityPath], { page: '1', limit: '20' }),
+          url: urlWithQuery([entityPath], listQuery(entity, features)),
         },
       });
       requests.push({
@@ -110,7 +161,11 @@ export function generatePostmanCollection(
       });
     }
 
-    folders.push({ name: entity.name, item: requests });
+    folders.push({
+      name: entity.name,
+      ...(entity.description ? { description: entity.description } : {}),
+      item: requests,
+    });
   }
 
   const collection: PostmanNode = {

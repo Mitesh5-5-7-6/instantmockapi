@@ -110,3 +110,29 @@ export function findRecordIndex(
 ): number {
   return records.findIndex((record, index) => recordId(record, index, identity) === id);
 }
+
+/**
+ * Stamp every record with its resolved identity value.
+ *
+ * Run once, on the whole collection, before the query layer touches it: from
+ * that point on identity is an ordinary field, so filtering `?id=3`, ordering
+ * `?sort=-id` and matching a foreign key all read it the same way as any other
+ * value, and none of them needs to know about the `rec-<n>` fallback.
+ *
+ * It has to happen **before** filtering and sorting, not after. The fallback is
+ * positional, so computing it on a reordered or shortened list would hand the
+ * same record a different id depending on the query that fetched it.
+ *
+ * Identity is written first and the record spread over it, so a record carrying
+ * a real value keeps it — and the JSON key order matches what the runtime
+ * returned before this existed.
+ */
+export function materializeIdentity(
+  records: readonly MockRecord[],
+  identity: IdentityRule = DEFAULT_IDENTITY_RULE,
+): MockRecord[] {
+  return records.map((record, index) => ({
+    [identity.field]: recordId(record, index, identity),
+    ...record,
+  }));
+}

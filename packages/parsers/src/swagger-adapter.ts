@@ -24,6 +24,7 @@ import {
   HTTP_METHODS,
 } from '@instantmockapi/shared';
 import {
+  ALL_QUERY_FEATURES,
   validateIPS,
   type InternalProjectSchema,
   type Entity,
@@ -38,6 +39,7 @@ const DEFAULT_GENERATION_CONFIG = {
   types: ['typescript'],
   methods: [...HTTP_METHODS] as HttpMethod[],
   mockRecords: 25,
+  features: { ...ALL_QUERY_FEATURES },
 };
 
 /** Default nesting depth cap — aligns with the IPS default (doc 04 §F3). */

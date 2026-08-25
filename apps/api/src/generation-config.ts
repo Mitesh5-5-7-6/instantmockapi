@@ -16,7 +16,13 @@ import {
   err,
 } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
-import type { GenerationConfig } from '@instantmockapi/ips';
+import {
+  NO_QUERY_FEATURES,
+  QUERY_FEATURES,
+  resolveQueryFeatures,
+  type GenerationConfig,
+  type QueryFeatures,
+} from '@instantmockapi/ips';
 import type { IJobWorker } from '@instantmockapi/db';
 
 const ALLOWED_VALIDATORS = ['zod', 'yup', 'jsonschema'] as const;
@@ -37,6 +43,46 @@ export const REGENERATABLE_ARTIFACTS: readonly ArtifactType[] = [
 
 function isSubset(values: unknown, allowed: readonly string[]): values is string[] {
   return Array.isArray(values) && values.every((v) => typeof v === 'string' && allowed.includes(v));
+}
+
+/**
+ * Validate the query-feature toggles, collecting problems into `details`.
+ *
+ * An absent block resolves to every feature off. That follows the replace
+ * semantics the rest of this config already has — a PATCH that omits
+ * `validators` drops them — and it is what keeps a client written before the
+ * query layer from being rejected outright. The consequence is worth stating:
+ * a caller that PATCHes a config without `features` switches the query layer
+ * off, so any client sending a config must send the toggles it wants.
+ */
+function validateFeatures(input: unknown, details: ErrorDetail[]): QueryFeatures {
+  if (input === undefined) {
+    return { ...NO_QUERY_FEATURES };
+  }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    details.push({
+      path: 'generationConfig.features',
+      issue: `must be an object with boolean keys drawn from ${QUERY_FEATURES.join(', ')}`,
+    });
+    return { ...NO_QUERY_FEATURES };
+  }
+  const known: readonly string[] = QUERY_FEATURES;
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (!known.includes(key)) {
+      // Rejected rather than ignored: a typo'd toggle that silently does
+      // nothing looks exactly like a feature that does not work.
+      details.push({
+        path: `generationConfig.features.${key}`,
+        issue: `unknown feature; expected one of ${QUERY_FEATURES.join(', ')}`,
+      });
+    } else if (typeof value !== 'boolean') {
+      details.push({
+        path: `generationConfig.features.${key}`,
+        issue: 'must be a boolean',
+      });
+    }
+  }
+  return resolveQueryFeatures(input);
 }
 
 /** Semantic validation of a generation config (doc 08 §7 example, doc 13 §3). */
@@ -82,6 +128,8 @@ export function validateGenerationConfig(
     });
   }
 
+  const features = validateFeatures(cfg.features, details);
+
   if (details.length > 0) {
     return err(
       new AppError({ code: 'VALIDATION_ERROR', message: 'Invalid generation config', details }),
@@ -92,6 +140,7 @@ export function validateGenerationConfig(
     types: [...(cfg.types as string[])],
     methods: [...(cfg.methods as GenerationConfig['methods'])],
     mockRecords: cfg.mockRecords as number,
+    features,
   });
 }
 

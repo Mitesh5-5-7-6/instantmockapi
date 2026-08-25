@@ -13,7 +13,12 @@ import {
 } from '@instantmockapi/db';
 import { artifactKey, createMemoryStorage, type MemoryStorage } from '@instantmockapi/storage';
 import { generateHostingConfig } from '@instantmockapi/generator-hosting';
-import type { InternalProjectSchema } from '@instantmockapi/ips';
+import {
+  ALL_QUERY_FEATURES,
+  materializeRelations,
+  type InternalProjectSchema,
+  type QueryFeatures,
+} from '@instantmockapi/ips';
 import type { HttpMethod } from '@instantmockapi/shared';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import { createMemoryCache } from './cache.js';
@@ -43,7 +48,12 @@ beforeEach(async () => {
   );
 });
 
-function makeIps(projectId: string, methods: HttpMethod[]): InternalProjectSchema {
+function makeIps(
+  projectId: string,
+  methods: HttpMethod[],
+  features?: QueryFeatures,
+  searchableField?: string,
+): InternalProjectSchema {
   return {
     projectId,
     version: 1,
@@ -67,7 +77,7 @@ function makeIps(projectId: string, methods: HttpMethod[]): InternalProjectSchem
             default: '',
             children: [],
             validation: { min: 2, max: 50 },
-            meta: {},
+            meta: searchableField === 'name' ? { searchable: true } : {},
           },
           {
             name: 'email',
@@ -90,7 +100,15 @@ function makeIps(projectId: string, methods: HttpMethod[]): InternalProjectSchem
         ],
       },
     ],
-    generationConfig: { validators: ['zod'], types: [], methods, mockRecords: 3 },
+    generationConfig: {
+      validators: ['zod'],
+      types: [],
+      methods,
+      mockRecords: 3,
+      // Left off entirely when not asked for, so the default staging path keeps
+      // exercising a config that predates the query layer.
+      ...(features ? { features } : {}),
+    },
   };
 }
 
@@ -103,6 +121,10 @@ async function stageHostedProject(options: {
   /** Set to make the project addressable by its pretty URL too. */
   publicId?: string;
   slug?: string;
+  /** Query toggles; omitted entirely to stage a pre-query-layer config. */
+  features?: QueryFeatures;
+  /** Field to mark `meta.searchable`, narrowing the search whitelist. */
+  searchableField?: string;
 }): Promise<string> {
   const {
     methods = ['GET', 'POST', 'PUT', 'PATCH'],
@@ -129,7 +151,7 @@ async function stageHostedProject(options: {
     currentVersion: 1,
     hosted: { url: 'https://api.instantmockapi.dev/p/x', expiresAt },
   });
-  const ips = makeIps(String(project._id), methods);
+  const ips = makeIps(String(project._id), methods, options.features, options.searchableField);
   project.ips = ips;
   project.generationConfig = ips.generationConfig;
   await project.save();
@@ -150,6 +172,25 @@ async function stageHostedProject(options: {
 
   await MockStore.create({ projectId: project._id, entity: 'customer', records });
   return projectId;
+}
+
+/**
+ * Wait for at least `count` apiLogs rows for a project.
+ *
+ * The logging hook deliberately does not await its insert — logging must never
+ * delay a hosted response — so a test that reads straight after `inject`
+ * resolves is racing the write. Polling is the assertion the contract actually
+ * supports: the entry lands shortly, not synchronously.
+ */
+async function waitForLogs(projectId: string, count = 1): Promise<number> {
+  let logs = 0;
+  for (let attempt = 0; attempt < 40 && logs < count; attempt++) {
+    logs = await ApiLog.countDocuments({ projectId });
+    if (logs < count) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  return logs;
 }
 
 let app: FastifyInstance;
@@ -458,15 +499,7 @@ describe('request logging (doc 13 §9)', () => {
     await app.inject({ method: 'GET', url: `/p/${projectId}/customer` });
     await app.inject({ method: 'GET', url: `/p/${projectId}/customer/nope` });
 
-    // fire-and-forget writes — poll briefly
-    let logs = 0;
-    for (let attempt = 0; attempt < 20 && logs < 2; attempt++) {
-      logs = await ApiLog.countDocuments({ projectId });
-      if (logs < 2) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-    }
-    expect(logs).toBeGreaterThanOrEqual(2);
+    expect(await waitForLogs(projectId, 2)).toBeGreaterThanOrEqual(2);
     const entry = await ApiLog.findOne({ projectId, status: 404 });
     expect(entry?.method).toBe('GET');
     expect(entry?.path).toContain('/customer/nope');
@@ -557,6 +590,7 @@ describe('pretty slug URLs are additive (doc 19 §Phase 3)', () => {
     await app.inject({ method: 'GET', url: `/p/${PID}/${SLUG}/customer` });
     // The hook reads a request decorator, not a route param — a pretty URL must
     // never log `prj_…`, because ApiLog.projectId is an ObjectId ref.
+    expect(await waitForLogs(projectId)).toBeGreaterThanOrEqual(1);
     const entry = await ApiLog.findOne({ projectId });
     expect(entry).not.toBeNull();
     expect(entry?.path).toContain(`/p/${PID}/${SLUG}/customer`);
@@ -626,5 +660,421 @@ describe('rate limiting keys on the project, not the URL form', () => {
     } finally {
       await limited.close();
     }
+  });
+});
+
+/**
+ * A two-entity relational project, staged the way the worker pipeline leaves it.
+ *
+ * Relations are materialized first, exactly as the API does on every input, so
+ * the foreign-key field the join reads is really present in the schema.
+ */
+async function stageRelationalProject(features: QueryFeatures): Promise<string> {
+  const text = (name: string): InternalProjectSchema['entities'][number]['fields'][number] => ({
+    name,
+    type: 'string',
+    required: true,
+    default: null,
+    children: [],
+    validation: {},
+    meta: {},
+  });
+
+  const user = await User.create({
+    email: `owner-${Math.random().toString(36).slice(2)}@x.dev`,
+    authProvider: 'email',
+  });
+  const project = new Project({
+    ownerId: user._id,
+    name: 'Relational Test',
+    status: 'active',
+    inputSource: { type: 'json', raw: '{}' },
+    currentVersion: 1,
+    hosted: {
+      url: 'https://api.instantmockapi.dev/p/x',
+      expiresAt: new Date(Date.now() + 86_400_000),
+    },
+  });
+  const projectId = String(project._id);
+
+  const ips = materializeRelations({
+    projectId,
+    version: 1,
+    entities: [
+      {
+        name: 'Classroom',
+        identity: { field: 'id', style: 'int' },
+        fields: [text('name')],
+        relations: [
+          {
+            name: 'students',
+            kind: 'hasMany',
+            target: 'Student',
+            localField: '',
+            foreignField: '',
+            required: false,
+            onDelete: 'restrict',
+          },
+        ],
+      },
+      {
+        name: 'Student',
+        identity: { field: 'id', style: 'int' },
+        fields: [text('name')],
+        relations: [
+          {
+            name: 'classroom',
+            kind: 'belongsTo',
+            target: 'Classroom',
+            localField: '',
+            foreignField: '',
+            required: true,
+            onDelete: 'restrict',
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      validators: [],
+      types: [],
+      methods: ['GET'],
+      mockRecords: 3,
+      features,
+    },
+  });
+
+  project.ips = ips;
+  project.generationConfig = ips.generationConfig;
+  await project.save();
+
+  const configFiles = generateHostingConfig(ips);
+  const ref = artifactKey(projectId, 1, 'hosted_api', 'hosting.config.json');
+  await storage.put(ref, configFiles['hosting.config.json'] ?? '{}', 'application/json');
+  await Artifact.create({
+    projectId: project._id,
+    artifactType: 'hosted_api',
+    version: 1,
+    status: 'completed',
+    storageRef: ref,
+    generatedAt: new Date(),
+    workerId: 'F',
+  });
+
+  await MockStore.create({
+    projectId: project._id,
+    entity: 'classroom',
+    records: [
+      { id: 1, name: 'Room A' },
+      { id: 2, name: 'Room B' },
+    ],
+  });
+  await MockStore.create({
+    projectId: project._id,
+    entity: 'student',
+    records: [
+      { id: 1, name: 'Ada', classroomId: 1 },
+      { id: 2, name: 'Grace', classroomId: 2 },
+      { id: 3, name: 'Alan', classroomId: 1 },
+    ],
+  });
+
+  return projectId;
+}
+
+describe('query layer — filtering (doc 19 §Phase 4)', () => {
+  it('filters on a bare field name and counts only what matched', () =>
+    (async () => {
+      const projectId = await stageHostedProject({ features: ALL_QUERY_FEATURES });
+      const res = await app.inject({
+        method: 'GET',
+        url: `/p/${projectId}/customer?status=active`,
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.data.map((r: { name: string }) => r.name)).toEqual([
+        'Ada Lovelace',
+        'Grace Hopper',
+      ]);
+      // total is the filtered count — otherwise a paginating client would ask
+      // for pages that cannot exist.
+      expect(body.meta).toEqual({ page: 1, limit: 20, total: 2 });
+    })());
+
+  it('applies operator suffixes', async () => {
+    const projectId = await stageHostedProject({ features: ALL_QUERY_FEATURES });
+    const notActive = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/customer?status_ne=active`,
+    });
+    expect(notActive.json().data.map((r: { name: string }) => r.name)).toEqual(['Edsger Dijkstra']);
+
+    const like = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/customer?name_like=GRACE`,
+    });
+    expect(like.json().data).toHaveLength(1);
+
+    const oneOf = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/customer?id_in=c-1,c-3`,
+    });
+    expect(oneOf.json().meta.total).toBe(2);
+  });
+
+  it('rejects a mistyped filter with a 400 that lists the real fields', async () => {
+    // The alternative — silently returning the unfiltered collection — reads as
+    // "filtering is broken" and gives the caller nothing to go on.
+    const projectId = await stageHostedProject({ features: ALL_QUERY_FEATURES });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/customer?stauts=active`,
+    });
+    expect(res.statusCode).toBe(400);
+    const error = res.json().error;
+    expect(error.message).toContain("'stauts'");
+    expect(error.details[0].issue).toContain('status');
+  });
+
+  it('combines a filter with pagination over the filtered set', async () => {
+    const projectId = await stageHostedProject({ features: ALL_QUERY_FEATURES });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/customer?status=active&page=2&limit=1`,
+    });
+    expect(res.json().data.map((r: { name: string }) => r.name)).toEqual(['Grace Hopper']);
+    expect(res.json().meta).toEqual({ page: 2, limit: 1, total: 2 });
+  });
+});
+
+describe('query layer — search', () => {
+  it('matches a term across every textual field by default', async () => {
+    const projectId = await stageHostedProject({ features: ALL_QUERY_FEATURES });
+    const byName = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/customer?search=hopper`,
+    });
+    expect(byName.json().data.map((r: { name: string }) => r.name)).toEqual(['Grace Hopper']);
+
+    // status is an enum, and enums are textual — so the term reaches it too.
+    const byStatus = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/customer?search=inactive`,
+    });
+    expect(byStatus.json().meta.total).toBe(1);
+  });
+
+  it('narrows to the whitelist once a field is marked searchable', async () => {
+    const projectId = await stageHostedProject({
+      features: ALL_QUERY_FEATURES,
+      searchableField: 'name',
+    });
+    const byName = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/customer?search=hopper`,
+    });
+    expect(byName.json().meta.total).toBe(1);
+
+    // status is no longer searched, because name claimed the whitelist.
+    const byStatus = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/customer?search=inactive`,
+    });
+    expect(byStatus.json().meta.total).toBe(0);
+  });
+
+  it('treats an empty term as no search at all', async () => {
+    const projectId = await stageHostedProject({ features: ALL_QUERY_FEATURES });
+    const res = await app.inject({ method: 'GET', url: `/p/${projectId}/customer?search=` });
+    expect(res.json().meta.total).toBe(3);
+  });
+});
+
+describe('query layer — sorting', () => {
+  it('sorts ascending and descending', async () => {
+    const projectId = await stageHostedProject({ features: ALL_QUERY_FEATURES });
+    const up = await app.inject({ method: 'GET', url: `/p/${projectId}/customer?sort=name` });
+    expect(up.json().data.map((r: { name: string }) => r.name)).toEqual([
+      'Ada Lovelace',
+      'Edsger Dijkstra',
+      'Grace Hopper',
+    ]);
+
+    const down = await app.inject({ method: 'GET', url: `/p/${projectId}/customer?sort=-name` });
+    expect(down.json().data.map((r: { name: string }) => r.name)).toEqual([
+      'Grace Hopper',
+      'Edsger Dijkstra',
+      'Ada Lovelace',
+    ]);
+  });
+
+  it('paginates a sorted collection without repeating or dropping a record', async () => {
+    // The property that matters: page 1 + page 2 must reconstruct the whole
+    // ordered collection exactly once each.
+    const projectId = await stageHostedProject({ features: ALL_QUERY_FEATURES });
+    const url = (page: number) => `/p/${projectId}/customer?sort=status&page=${page}&limit=2`;
+    const first = await app.inject({ method: 'GET', url: url(1) });
+    const second = await app.inject({ method: 'GET', url: url(2) });
+    const ids = [...first.json().data, ...second.json().data].map((r: { id: string }) => r.id);
+    expect(ids).toHaveLength(3);
+    expect(new Set(ids).size).toBe(3);
+  });
+
+  it('rejects an unsortable field', async () => {
+    const projectId = await stageHostedProject({ features: ALL_QUERY_FEATURES });
+    const res = await app.inject({ method: 'GET', url: `/p/${projectId}/customer?sort=nope` });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.message).toContain('Sortable fields');
+  });
+});
+
+describe('query layer — include', () => {
+  it('expands an owning relation on a collection', async () => {
+    const projectId = await stageRelationalProject(ALL_QUERY_FEATURES);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/student?include=classroom`,
+    });
+    expect(res.statusCode).toBe(200);
+    const rows = res.json().data as { name: string; classroom: { name: string } }[];
+    expect(rows.map((r) => r.classroom.name)).toEqual(['Room A', 'Room B', 'Room A']);
+  });
+
+  it('expands an inverse relation to an array', async () => {
+    const projectId = await stageRelationalProject(ALL_QUERY_FEATURES);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/classroom?include=students`,
+    });
+    const rows = res.json().data as { name: string; students: { name: string }[] }[];
+    expect(rows[0]?.students.map((s) => s.name)).toEqual(['Ada', 'Alan']);
+    expect(rows[1]?.students.map((s) => s.name)).toEqual(['Grace']);
+  });
+
+  it('expands on a single record too', async () => {
+    const projectId = await stageRelationalProject(ALL_QUERY_FEATURES);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/student/2?include=classroom`,
+    });
+    expect(res.statusCode).toBe(200);
+    // id comes back as a number: the entity uses int identity, so the record
+    // carries 2 and its own value wins over the string from the URL.
+    expect(res.json()).toMatchObject({ id: 2, name: 'Grace', classroom: { name: 'Room B' } });
+  });
+
+  it('combines with a filter on the foreign key that relations created', async () => {
+    // ?classroomId=1 only works because materialization put that field in the
+    // schema, which is what makes it filterable.
+    const projectId = await stageRelationalProject(ALL_QUERY_FEATURES);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/student?classroomId=1&include=classroom&sort=-name`,
+    });
+    const rows = res.json().data as { name: string; classroom: { name: string } }[];
+    expect(rows.map((r) => r.name)).toEqual(['Alan', 'Ada']);
+    expect(rows.every((r) => r.classroom.name === 'Room A')).toBe(true);
+    expect(res.json().meta.total).toBe(2);
+  });
+
+  it('rejects an unknown relation and lists the real ones', async () => {
+    const projectId = await stageRelationalProject(ALL_QUERY_FEATURES);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/student?include=teacher`,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.message).toContain('classroom');
+  });
+
+  it('rejects a nested include with advice rather than a generic error', async () => {
+    const projectId = await stageRelationalProject(ALL_QUERY_FEATURES);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/student?include=classroom.students`,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.message).toContain('Nested includes are not supported');
+  });
+
+  it('resolves a join against seeds that carry no identity value', async () => {
+    // Records written before identity fields existed route on the positional
+    // rec-N fallback. The join has to read that same resolved value, or the
+    // expansion silently comes back null.
+    const projectId = await stageRelationalProject(ALL_QUERY_FEATURES);
+    await MockStore.findOneAndUpdate(
+      { projectId, entity: 'classroom' },
+      { $set: { records: [{ name: 'Legacy Room' }] } },
+    );
+    await MockStore.findOneAndUpdate(
+      { projectId, entity: 'student' },
+      { $set: { records: [{ name: 'Ada', classroomId: 'rec-1' }] } },
+    );
+    cache.clear();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/student?include=classroom`,
+    });
+    expect(res.json().data[0].classroom).toMatchObject({ id: 'rec-1', name: 'Legacy Room' });
+  });
+});
+
+describe('query layer — disabled features and legacy configs', () => {
+  it('tells the caller which toggle to turn on', async () => {
+    const projectId = await stageHostedProject({});
+    for (const [parameter, toggle] of [
+      ['search=x', 'search'],
+      ['sort=name', 'sorting'],
+      ['include=orders', 'relations'],
+    ] as const) {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/p/${projectId}/customer?${parameter}`,
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error.message).toContain(toggle);
+    }
+  });
+
+  it('ignores a field filter entirely when filtering is off', async () => {
+    // A config written before the query layer must answer exactly as it did:
+    // the parameter is neither honoured nor rejected.
+    const projectId = await stageHostedProject({});
+    const res = await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/customer?status=active&utm_source=email`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().meta).toEqual({ page: 1, limit: 20, total: 3 });
+  });
+
+  it('serves an unchanged discovery document for a pre-query-layer project', async () => {
+    const projectId = await stageHostedProject({});
+    const res = await app.inject({ method: 'GET', url: `/p/${projectId}` });
+    expect(res.json().data.features).toEqual([]);
+    // No query key at all, rather than four empty lists.
+    expect(res.json().data.entities[0]).not.toHaveProperty('query');
+  });
+
+  it('advertises only the enabled capabilities in the discovery document', async () => {
+    const projectId = await stageHostedProject({
+      features: { search: true, filter: false, sort: true, include: false },
+    });
+    const res = await app.inject({ method: 'GET', url: `/p/${projectId}` });
+    const data = res.json().data;
+    expect(data.features).toEqual(['search', 'sort']);
+    const entity = data.entities[0];
+    expect(Object.keys(entity.query).sort()).toEqual(['searchable', 'sortable']);
+    expect(entity.query.sortable).toContain('status');
+  });
+
+  it('returns identical output with every feature on and no parameters sent', async () => {
+    // The additivity guarantee: enabling the query layer on a live project
+    // cannot change any response a client is already making.
+    const off = await stageHostedProject({});
+    const on = await stageHostedProject({ features: ALL_QUERY_FEATURES });
+    const offBody = (await app.inject({ method: 'GET', url: `/p/${off}/customer` })).json();
+    const onBody = (await app.inject({ method: 'GET', url: `/p/${on}/customer` })).json();
+    expect(onBody).toEqual(offBody);
   });
 });
