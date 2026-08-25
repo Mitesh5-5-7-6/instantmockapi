@@ -18,6 +18,7 @@ import { generationRoutes } from './routes/generation.js';
 import { jobRoutes } from './routes/jobs.js';
 import { artifactRoutes } from './routes/artifacts.js';
 import { versionRoutes } from './routes/versions.js';
+import { dashboardRoutes } from './routes/dashboard.js';
 
 export interface BuildServerOptions {
   /** Env config override; defaults to loadEnvConfig(). */
@@ -74,6 +75,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   });
   await app.register(artifactRoutes, { prefix: '/v1', config, storage });
   await app.register(versionRoutes, { prefix: '/v1', config });
+  await app.register(dashboardRoutes, { prefix: '/v1', config });
 
   return app;
 }
