@@ -44,5 +44,8 @@
     "rimraf": "^6.0.0",
     "mongodb-memory-server": "^10.1.4",
     "jszip": "^3.10.1"
+  },
+  "engines": {
+    "node": "24.x"
   }
 }
