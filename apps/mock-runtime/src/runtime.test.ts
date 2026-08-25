@@ -504,6 +504,20 @@ describe('request logging (doc 13 §9)', () => {
     expect(entry?.method).toBe('GET');
     expect(entry?.path).toContain('/customer/nope');
   });
+
+  it('records how long the request took', async () => {
+    const projectId = await stageHostedProject({});
+    await app.inject({ method: 'GET', url: `/p/${projectId}/customer` });
+
+    expect(await waitForLogs(projectId)).toBeGreaterThanOrEqual(1);
+    const entry = await ApiLog.findOne({ projectId });
+    // A whole, non-negative number of milliseconds. Deliberately no upper bound:
+    // a loaded CI box blows any threshold, and this is asserting that the value
+    // is captured at all — not that the runtime is fast.
+    expect(typeof entry?.durationMs).toBe('number');
+    expect(entry?.durationMs).toBeGreaterThanOrEqual(0);
+    expect(Number.isInteger(entry?.durationMs)).toBe(true);
+  });
 });
 
 describe('pretty slug URLs are additive (doc 19 §Phase 3)', () => {
