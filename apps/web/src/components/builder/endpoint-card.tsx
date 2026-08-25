@@ -8,7 +8,7 @@
  * "entity name" would hide that renaming it changes the route.
  */
 
-import { Button, Card, Field, Input, MethodBadge } from '@instantmockapi/ui';
+import { Button, Card, Field, Icon, Input, MethodBadge } from '@instantmockapi/ui';
 import { newField } from '../../lib/builder';
 import { endpointPath, type EndpointIssue, type SingleEndpoint } from '../../lib/single-api';
 import { FieldRow } from './field-row';
@@ -53,7 +53,7 @@ export function EndpointCard({
         <div style={{ flex: 1 }} />
         {removable ? (
           <Button variant="ghost" size="sm" onClick={onRemove} aria-label="Remove endpoint">
-            ✕
+            <Icon name="x" size={14} />
           </Button>
         ) : null}
       </div>

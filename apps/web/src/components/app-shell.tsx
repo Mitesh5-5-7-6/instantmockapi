@@ -8,7 +8,7 @@
 import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Button, Card, Input, StatusChip } from '@instantmockapi/ui';
+import { Button, Card, Icon, Input, StatusChip } from '@instantmockapi/ui';
 import { useAuthState, useLogin, useLogout, useMe } from '../lib/hooks';
 import { VISIBLE_NAV_ITEMS, isNavActive } from '../lib/nav-items';
 
@@ -109,6 +109,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               href={item.href}
               aria-current={isNavActive(pathname, item.href) ? 'page' : undefined}
             >
+              {/* No label on the Icon: it sits beside the text, so announcing
+                  "folder Projects" would be worse than "Projects". The collapsed
+                  rail adds an aria-label to the anchor instead. */}
+              <Icon name={item.icon} size={18} />
               {/* Wrapped rather than a bare text child: the collapsed sidebar
                   hides the label with CSS, which needs an element to target. */}
               <span className="ui-nav__label">{item.label}</span>

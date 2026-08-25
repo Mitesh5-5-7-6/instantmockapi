@@ -13,13 +13,13 @@
  * change.
  */
 
-/** Icon name from `@instantmockapi/ui`'s set. Typed loosely until that set exists. */
-export type NavIconName = string;
+import type { IconName } from '@instantmockapi/ui';
 
 export interface NavItem {
   href: string;
   label: string;
-  icon: NavIconName;
+  /** Typed against the real icon set, so a wrong name is a compile error. */
+  icon: IconName;
   /** `planned` items are declared but never rendered. */
   status: 'ready' | 'planned';
 }

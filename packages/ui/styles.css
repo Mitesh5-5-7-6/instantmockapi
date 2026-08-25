@@ -949,3 +949,21 @@ h3 {
   font-size: 28px;
   line-height: 1;
 }
+
+/* ------------------------------------------------------------------- icon --- */
+.ui-icon {
+  /* `block` kills the inline baseline gap that otherwise makes an icon sit a
+     pixel low next to text, and `flex: none` stops a flex row from stretching a
+     square glyph into a rectangle. */
+  display: block;
+  flex: none;
+}
+
+/* Nav rows become icon + label once the sidebar carries icons. `.ui-nav a` is
+   block today, so this is what turns it into a row without touching the anchor
+   rule the active-state styling depends on. */
+.ui-nav a {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}

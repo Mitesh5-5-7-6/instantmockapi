@@ -8,7 +8,7 @@
  * rules panel, and — for object/array types — a nested editor for its children.
  */
 
-import { Button, Checkbox, Input, Select } from '@instantmockapi/ui';
+import { Button, Checkbox, Icon, Input, Select } from '@instantmockapi/ui';
 import {
   FIELD_TYPES,
   MAX_DEPTH,
@@ -141,13 +141,13 @@ export function FieldRow({
         </Button>
         {suggestion ? (
           <Button variant="ghost" size="sm" onClick={() => setValidation(suggestion.patch)}>
-            ⚡ {suggestion.label}?
+            <Icon name="zap" size={14} /> {suggestion.label}?
           </Button>
         ) : null}
         <div style={{ flex: 1 }} />
         {removable ? (
           <Button variant="ghost" size="sm" onClick={onRemove} aria-label="Remove field">
-            ✕
+            <Icon name="x" size={14} />
           </Button>
         ) : null}
       </div>
