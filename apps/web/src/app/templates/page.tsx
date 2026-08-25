@@ -86,7 +86,7 @@ export default function TemplatesPage() {
                       json: JSON.stringify(template.json, null, 2),
                     }),
                   );
-                  router.push('/new');
+                  router.push('/new/single');
                 }}
               >
                 Use template

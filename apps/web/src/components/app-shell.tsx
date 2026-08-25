@@ -13,7 +13,7 @@ import { useAuthState, useLogin, useLogout, useMe } from '../lib/hooks';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard' },
-  { href: '/new', label: 'New Project' },
+  { href: '/new', label: 'New API' },
   { href: '/templates', label: 'Templates' },
   { href: '/settings', label: 'Settings' },
 ];

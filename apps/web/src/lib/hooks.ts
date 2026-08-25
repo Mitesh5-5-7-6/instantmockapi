@@ -118,8 +118,13 @@ export function useProject(projectId: string | null) {
 export function useCreateProject() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { name: string; inputSource: { type: string; raw: unknown } }) =>
-      apiFetch<ProjectDetail>('/v1/projects', { method: 'POST', body: input }),
+    mutationFn: (input: {
+      name: string;
+      kind?: 'project' | 'single';
+      slug?: string;
+      description?: string;
+      inputSource: { type: string; raw: unknown };
+    }) => apiFetch<ProjectDetail>('/v1/projects', { method: 'POST', body: input }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
   });
 }

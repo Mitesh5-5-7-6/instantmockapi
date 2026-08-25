@@ -540,3 +540,156 @@ describe('project kinds and slugs (doc 19 §Phase 3)', () => {
     expect(res.json().ips.slug).toBe(created.json().slug);
   });
 });
+
+describe('Project wizard payload (doc 19 §Phase 5)', () => {
+  /** Exactly what the Design Data Model step submits: sparse relations, no FKs. */
+  const wizardPayload = (overrides: Record<string, unknown> = {}) => ({
+    name: 'Student ERP',
+    kind: 'project',
+    slug: 'student-erp',
+    description: 'Complete Student ERP with relationships',
+    inputSource: {
+      type: 'builder',
+      raw: {
+        entities: [
+          {
+            name: 'Classroom',
+            identity: { field: 'id', style: 'int' },
+            fields: [
+              {
+                name: 'name',
+                type: 'string',
+                required: true,
+                default: null,
+                children: [],
+                validation: {},
+                meta: { searchable: true },
+              },
+            ],
+            relations: [
+              {
+                name: 'students',
+                kind: 'hasMany',
+                target: 'Student',
+                required: false,
+                onDelete: 'restrict',
+              },
+            ],
+          },
+          {
+            name: 'Student',
+            identity: { field: 'id', style: 'int' },
+            fields: [
+              {
+                name: 'name',
+                type: 'string',
+                required: true,
+                default: null,
+                children: [],
+                validation: {},
+                meta: {},
+              },
+            ],
+            relations: [
+              {
+                name: 'classroom',
+                kind: 'belongsTo',
+                target: 'Classroom',
+                required: true,
+                onDelete: 'restrict',
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          validators: ['zod'],
+          types: ['typescript'],
+          methods: ['GET', 'POST'],
+          mockRecords: 10,
+          features: { search: true, filter: true, sort: true, include: true },
+        },
+      },
+    },
+    ...overrides,
+  });
+
+  const create = async (payload: Record<string, unknown>) =>
+    app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(session.accessToken),
+      payload,
+    });
+
+  it('accepts sparse relations and derives the foreign key server-side', async () => {
+    // The wizard deliberately sends no localField/foreignField: deriving them in
+    // the browser would disagree with completeRelation whenever two entities use
+    // different identity field names.
+    const res = await create(wizardPayload());
+    expect(res.statusCode).toBe(201);
+
+    const ips = res.json().ips as {
+      entities: {
+        name: string;
+        fields: { name: string; meta?: Record<string, unknown> }[];
+        relations: { name: string; localField: string; foreignField: string }[];
+        identity: { field: string; style: string };
+      }[];
+    };
+    const student = ips.entities.find((entity) => entity.name === 'Student')!;
+
+    // Materialization happened on the write path, so the review screen and the
+    // generated artifacts describe the same entity.
+    expect(student.fields.map((field) => field.name)).toContain('classroomId');
+    expect(student.relations[0]).toMatchObject({
+      name: 'classroom',
+      localField: 'classroomId',
+      foreignField: 'id',
+    });
+    expect(student.identity).toEqual({ field: 'id', style: 'int' });
+  });
+
+  it('keeps the searchable opt-in the field editor sets', async () => {
+    const res = await create(wizardPayload());
+    const ips = res.json().ips as {
+      entities: { name: string; fields: { name: string; meta?: Record<string, unknown> }[] }[];
+    };
+    const classroom = ips.entities.find((entity) => entity.name === 'Classroom')!;
+    expect(classroom.fields.find((field) => field.name === 'name')?.meta).toMatchObject({
+      searchable: true,
+    });
+  });
+
+  it('stores the addressing and description the first step collects', async () => {
+    const body = (await create(wizardPayload())).json();
+    expect(body).toMatchObject({
+      kind: 'project',
+      slug: 'student-erp',
+      description: 'Complete Student ERP with relationships',
+    });
+    // Addressable from creation, so the wizard can show the URL immediately.
+    expect(body.publicId).toMatch(/^prj_/);
+  });
+
+  it('rejects a relation whose target was not submitted', async () => {
+    // What an unpruned submit would look like — the client prunes precisely so
+    // this cannot reach the API, and this pins why that pruning exists.
+    const payload = wizardPayload();
+    const raw = (payload.inputSource as { raw: { entities: { name: string }[] } }).raw;
+    raw.entities = raw.entities.filter((entity) => entity.name !== 'Classroom');
+
+    const res = await create(payload);
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('carries the wizard feature toggles into the stored config', async () => {
+    const body = (await create(wizardPayload())).json();
+    expect(body.generationConfig.features).toEqual({
+      search: true,
+      filter: true,
+      sort: true,
+      include: true,
+    });
+  });
+});

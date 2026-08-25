@@ -22,16 +22,34 @@ export interface AuthTokens {
   user: ApiUser;
 }
 
+/** Hosted-API query capabilities (doc 19 §Phase 4). */
+export interface QueryFeatures {
+  search: boolean;
+  filter: boolean;
+  sort: boolean;
+  include: boolean;
+}
+
 export interface GenerationConfig {
   validators: string[];
   types: string[];
   methods: string[];
   mockRecords: number;
+  /**
+   * Optional on the wire because documents written before the query layer have
+   * none. The wizard always sends a complete block: the API treats the config as
+   * a full replacement, so omitting it switches every feature off.
+   */
+  features?: QueryFeatures;
 }
 
 export interface ProjectSummary {
   id: string;
   name: string;
+  kind: 'project' | 'single';
+  publicId: string | null;
+  slug: string | null;
+  description: string | null;
   status: ProjectStatus;
   currentVersion: number;
   inputType: 'json' | 'swagger' | 'builder' | 'docs';

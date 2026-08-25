@@ -392,3 +392,134 @@ export function SchemaTree({ entities }: { entities: SchemaTreeEntity[] }) {
     </div>
   );
 }
+
+/* ── FlowScope ── */
+
+export type Flow = 'project' | 'single';
+
+/**
+ * Re-points the accent token for one creation flow.
+ *
+ * A wrapper rather than a prop on every control: the whole palette hangs off
+ * `--accent`, so scoping it here recolours buttons, tabs, focus rings, the
+ * stepper and the diagram at once, and a new control inherits the flow colour
+ * without being told about it.
+ */
+export function FlowScope({ flow, children }: { flow: Flow; children: ReactNode }) {
+  return (
+    <div data-flow={flow} className="ui-stack" style={{ gap: 'var(--space-6)' }}>
+      {children}
+    </div>
+  );
+}
+
+/* ── Stepper ── */
+
+export interface StepperProps {
+  steps: string[];
+  /** 1-based index of the step being shown. */
+  current: number;
+  /**
+   * Jump to an earlier step. Only completed steps are offered — moving forward
+   * has to go through each step's own validation, so a stepper shortcut would
+   * skip the checks the Next button performs.
+   */
+  onGoTo?: (step: number) => void;
+}
+
+export function Stepper({ steps, current, onGoTo }: StepperProps) {
+  return (
+    <ol className="ui-stepper">
+      {steps.map((label, index) => {
+        const number = index + 1;
+        const done = number < current;
+        const active = number === current;
+        const clickable = done && onGoTo !== undefined;
+        const className = cx(
+          'ui-stepper__step',
+          done && 'ui-stepper__step--done',
+          clickable && 'ui-stepper__step--clickable',
+        );
+        const body = (
+          <>
+            <span className="ui-stepper__num">{done ? '✓' : number}</span>
+            <span>{label}</span>
+          </>
+        );
+        return (
+          <li key={label} style={{ listStyle: 'none' }}>
+            {clickable ? (
+              <button
+                type="button"
+                className={className}
+                onClick={() => onGoTo(number)}
+                aria-current={active ? 'step' : undefined}
+              >
+                {body}
+              </button>
+            ) : (
+              <div className={className} aria-current={active ? 'step' : undefined}>
+                {body}
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/* ── Note ── */
+
+/** An inline explanation or caution attached to a control. */
+export function Note({
+  children,
+  variant = 'info',
+}: {
+  children: ReactNode;
+  variant?: 'info' | 'warning';
+}) {
+  return (
+    <p className={cx('ui-note', variant === 'warning' && 'ui-note--warning')} role="note">
+      {children}
+    </p>
+  );
+}
+
+/* ── Badge ── */
+
+/** Small accent-coloured label, e.g. the `API` marker on an entity row. */
+export function Badge({ children }: { children: ReactNode }) {
+  return <span className="ui-badge">{children}</span>;
+}
+
+/* ── MethodBadge ── */
+
+export type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
+/** Colour-coded HTTP method label for an endpoint row. */
+export function MethodBadge({ method }: { method: ApiMethod }) {
+  return <span className={`ui-method ui-method--${method}`}>{method}</span>;
+}
+
+/* ── Stat ── */
+
+/** A single headline figure, e.g. "12 · Total Entities". */
+export function Stat({ value, label }: { value: ReactNode; label: string }) {
+  return (
+    <div className="ui-stat">
+      <div className="ui-stat__value">{value}</div>
+      <div className="ui-stat__label">{label}</div>
+    </div>
+  );
+}
+
+/* ── SuccessMark ── */
+
+export function SuccessMark() {
+  return (
+    <span className="ui-success-mark" role="img" aria-label="Generated successfully">
+      ✓
+    </span>
+  );
+}

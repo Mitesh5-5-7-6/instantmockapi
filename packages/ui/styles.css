@@ -680,3 +680,272 @@ h3 {
   color: var(--accent);
   border-bottom-color: var(--accent);
 }
+
+/* ---------------------------------------------------------------------------
+ * Flow accent scopes (doc 19 §Phase 5 / sample design)
+ *
+ * The two creation flows are distinguished by colour: Project is purple, Single
+ * API is blue. Rather than threading a colour prop through every control, each
+ * flow re-points the SINGLE `--accent` token on a wrapper. Everything already
+ * built from that token — buttons, tabs, focus rings, the stepper — recolours
+ * with no component changes, and a screen that forgets to set a flow simply
+ * keeps the default.
+ * ------------------------------------------------------------------------- */
+[data-flow='project'] {
+  --accent: #7c5cff;
+  --accent-2: #a78bfa;
+}
+
+[data-flow='single'] {
+  --accent: #5b8cff;
+  --accent-2: #33d6e0;
+}
+
+[data-theme='light'] [data-flow='project'] {
+  --accent: #6d3fe0;
+  --accent-2: #8b5cf6;
+}
+
+/* --------------------------------------------------------------- stepper --- */
+.ui-stepper {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.ui-stepper__step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  /* Buttons for reachable steps, plain divs otherwise — reset either way. */
+  font-family: inherit;
+  text-align: left;
+}
+
+.ui-stepper__step--clickable {
+  cursor: pointer;
+}
+
+.ui-stepper__step--clickable:hover {
+  border-color: var(--accent);
+}
+
+.ui-stepper__step[aria-current='step'] {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--surface-raised);
+}
+
+.ui-stepper__step--done {
+  color: var(--text);
+}
+
+.ui-stepper__num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.ui-stepper__step[aria-current='step'] .ui-stepper__num {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.ui-stepper__step--done .ui-stepper__num {
+  background: var(--status-success);
+  border-color: var(--status-success);
+  color: var(--accent-contrast);
+}
+
+/* ------------------------------------------------------------------ notes --- */
+.ui-note {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.ui-note--warning {
+  border-left-color: var(--status-warning);
+}
+
+.ui-field-error {
+  color: var(--status-error);
+  font-size: var(--text-xs);
+}
+
+/* ------------------------------------------------------------------ badge --- */
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+}
+
+/* --------------------------------------------------------------- ER canvas -- */
+.ui-er {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  padding: var(--space-3);
+}
+
+.ui-er__node {
+  fill: var(--surface-raised);
+  stroke: var(--accent);
+}
+
+.ui-er__node--isolated {
+  stroke: var(--border);
+  stroke-dasharray: 4 3;
+}
+
+.ui-er__label {
+  fill: var(--text);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ui-er__edge {
+  stroke: var(--text-muted);
+  fill: none;
+}
+
+.ui-er__edge-label {
+  fill: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+/* ------------------------------------------------------------ method badge -- */
+.ui-method {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--method-color);
+  border: 1px solid var(--method-color);
+  /* colour-mix keeps one source of truth per method: the tint is derived from
+     the border colour rather than being a second value to keep in step. */
+  background: color-mix(in srgb, var(--method-color) 14%, transparent);
+}
+
+.ui-method--GET {
+  --method-color: var(--status-success);
+}
+.ui-method--POST {
+  --method-color: var(--accent);
+}
+.ui-method--PUT {
+  --method-color: var(--status-warning);
+}
+.ui-method--PATCH {
+  --method-color: var(--status-expired);
+}
+.ui-method--DELETE {
+  --method-color: var(--status-error);
+}
+
+/* ---------------------------------------------------------- endpoint rows -- */
+.ui-endpoint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ui-endpoint:hover {
+  border-color: var(--accent);
+}
+
+.ui-endpoint[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--surface-raised);
+}
+
+.ui-endpoint__path {
+  font-family: var(--font-mono);
+}
+
+/* --------------------------------------------------------------- stat tile -- */
+.ui-stats {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.ui-stat {
+  flex: 1 1 140px;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.ui-stat__value {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ui-stat__label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* ------------------------------------------------------------ success mark -- */
+.ui-success-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: var(--status-success);
+  color: var(--accent-contrast);
+  font-size: 28px;
+  line-height: 1;
+}
