@@ -13,7 +13,7 @@ import {
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from 'react';
-import { Icon } from './icons.js';
+import { Icon, type IconName, type IconSize } from './icons.js';
 
 function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(' ');
@@ -519,12 +519,56 @@ export function MethodBadge({ method }: { method: ApiMethod }) {
 
 /* ── Stat ── */
 
-/** A single headline figure, e.g. "12 · Total Entities". */
-export function Stat({ value, label }: { value: ReactNode; label: string }) {
+export interface StatProps {
+  value: ReactNode;
+  label: string;
+  /**
+   * Promotes the plain figure to a dashboard tile: larger value, an icon in the
+   * top-right corner, room for a delta line.
+   *
+   * The tile treatment is gated on this prop rather than applied unconditionally,
+   * so the four existing call sites on the Ready screen — which pass only
+   * `value` and `label` — keep rendering byte-identically. A parallel
+   * `StatCard` component would have guaranteed the two drifted apart instead.
+   */
+  icon?: IconName;
+  tone?: Tone;
+  /**
+   * Secondary line under the figure.
+   *
+   * `direction` is presentational only: the caller decides whether "fewer
+   * requests" is good news. `null` renders nothing, which is what a percentage
+   * with no comparable previous window should produce — never "+0%" or "+∞%".
+   */
+  delta?: { text: string; direction?: 'up' | 'down' } | null;
+}
+
+/** A single headline figure, e.g. "12 · Total Entities", or a dashboard tile. */
+export function Stat({ value, label, icon, tone = 'accent', delta }: StatProps) {
+  const isTile = icon !== undefined;
+
   return (
-    <div className="ui-stat">
+    <div className={cx('ui-stat', isTile && 'ui-stat--tile')}>
+      {isTile ? (
+        <div className="ui-stat__head">
+          <div className="ui-stat__label">{label}</div>
+          <IconTile icon={icon} tone={tone} size="md" />
+        </div>
+      ) : null}
       <div className="ui-stat__value">{value}</div>
-      <div className="ui-stat__label">{label}</div>
+      {isTile ? null : <div className="ui-stat__label">{label}</div>}
+      {delta ? (
+        <div
+          className={cx(
+            'ui-stat__delta',
+            delta.direction === 'up' && 'ui-stat__delta--up',
+            delta.direction === 'down' && 'ui-stat__delta--down',
+          )}
+        >
+          {delta.direction ? <Icon name="arrow-up" size={14} /> : null}
+          <span>{delta.text}</span>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -538,4 +582,117 @@ export function SuccessMark() {
       <Icon name="check" size={28} />
     </span>
   );
+}
+
+/* ── Tone ── */
+
+/**
+ * Tint vocabulary shared by `IconTile`, `Avatar` and `Stat`.
+ *
+ * Each name maps to an existing design token in `styles.css` rather than to a
+ * literal, so anything the theme re-points follows — `accent` in particular
+ * flips per theme and per `[data-flow]` scope.
+ */
+export type Tone = 'accent' | 'cyan' | 'success' | 'warning' | 'error' | 'violet';
+
+/* ── IconTile ── */
+
+export interface IconTileProps {
+  icon: IconName;
+  tone?: Tone;
+  size?: 'sm' | 'md' | 'lg';
+  /** Only when the tile is the sole content of a control. */
+  label?: string;
+}
+
+/** A coloured rounded square holding one icon. */
+export function IconTile({ icon, tone = 'accent', size = 'md', label }: IconTileProps) {
+  const glyph: IconSize = size === 'lg' ? 24 : size === 'sm' ? 16 : 18;
+  return (
+    <span className={cx('ui-icon-tile', `ui-icon-tile--${size}`, `ui-tone--${tone}`)}>
+      <Icon name={icon} size={glyph} {...(label ? { label } : {})} />
+    </span>
+  );
+}
+
+/* ── Avatar ── */
+
+export interface AvatarProps {
+  /** Pre-computed initials — deriving them from a name is the app's job. */
+  initials: string;
+  tone?: Tone;
+  size?: 'sm' | 'md' | 'lg';
+  /** Shows a presence dot. */
+  online?: boolean;
+  /** Full name or email, so the circle is not announced as two stray letters. */
+  label?: string;
+}
+
+/**
+ * Initials in a tinted circle.
+ *
+ * Deliberately dumb: `initialsOf` and the deterministic tone choice live in the
+ * app, where they can be unit-tested. A project must not change colour between
+ * renders, and that is a property of the derivation, not of the rendering.
+ */
+export function Avatar({ initials, tone = 'accent', size = 'md', online, label }: AvatarProps) {
+  return (
+    <span
+      className={cx('ui-avatar', `ui-avatar--${size}`, `ui-tone--${tone}`)}
+      {...(label ? { role: 'img', 'aria-label': label } : { 'aria-hidden': true })}
+    >
+      {initials}
+      {online ? <span className="ui-avatar__status" /> : null}
+    </span>
+  );
+}
+
+/* ── Kbd ── */
+
+/** A keyboard key, e.g. the `⌘K` hint in the search field. */
+export function Kbd({ children }: { children: ReactNode }) {
+  return <kbd className="ui-kbd">{children}</kbd>;
+}
+
+/* ── ListRow ── */
+
+export interface ListRowProps {
+  /** Avatar, icon tile, or method badge. */
+  leading?: ReactNode;
+  title: ReactNode;
+  meta?: ReactNode;
+  /** Status chips, counts, a kebab — laid out at the end of the row. */
+  trailing?: ReactNode;
+  /** Makes the whole row a button. */
+  onClick?: () => void;
+}
+
+/**
+ * One row of a list: leading slot, a title/meta stack that absorbs the slack,
+ * and trailing slots.
+ *
+ * Generalises the shape `.ui-worker-row` already has. `WorkerRow` itself is left
+ * alone — it is the progress board's signature surface and has no test coverage,
+ * so refactoring it onto this is risk with no return.
+ */
+export function ListRow({ leading, title, meta, trailing, onClick }: ListRowProps) {
+  const body = (
+    <>
+      {leading}
+      <span className="ui-list-row__body">
+        <span className="ui-list-row__title">{title}</span>
+        {meta ? <span className="ui-list-row__meta">{meta}</span> : null}
+      </span>
+      {trailing}
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button type="button" className="ui-list-row ui-list-row--interactive" onClick={onClick}>
+        {body}
+      </button>
+    );
+  }
+  return <div className="ui-list-row">{body}</div>;
 }

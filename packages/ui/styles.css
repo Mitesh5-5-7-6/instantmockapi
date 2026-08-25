@@ -967,3 +967,210 @@ h3 {
   align-items: center;
   gap: var(--space-2);
 }
+
+/* --------------------------------------------------------------- tones ------
+ * Every tinted surface (icon tiles, avatars, stat accents) resolves its colour
+ * through one `--tone` property, set by a `--<name>` modifier. Two reasons:
+ * the tint is derived from the tone with `color-mix` rather than being a second
+ * value to keep in step (same technique as `.ui-method`), and each tone points
+ * at an existing token, so anything the theme re-points follows automatically —
+ * `--accent` in particular flips per theme AND per `[data-flow]` scope.
+ * -------------------------------------------------------------------------- */
+.ui-tone--accent {
+  --tone: var(--accent);
+}
+.ui-tone--cyan {
+  --tone: var(--accent-2);
+}
+.ui-tone--success {
+  --tone: var(--status-success);
+}
+.ui-tone--warning {
+  --tone: var(--status-warning);
+}
+.ui-tone--error {
+  --tone: var(--status-error);
+}
+.ui-tone--violet {
+  --tone: var(--status-expired);
+}
+
+/* -------------------------------------------------------------- icon tile --- */
+.ui-icon-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: var(--radius-md);
+  color: var(--tone, var(--accent));
+  background: color-mix(in srgb, var(--tone, var(--accent)) 16%, transparent);
+}
+
+.ui-icon-tile--sm {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+}
+.ui-icon-tile--md {
+  width: 36px;
+  height: 36px;
+}
+.ui-icon-tile--lg {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-lg);
+}
+
+/* ----------------------------------------------------------------- avatar --- */
+.ui-avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--tone, var(--accent));
+  background: color-mix(in srgb, var(--tone, var(--accent)) 18%, transparent);
+  /* Initials are the one place tabular figures hurt — they are letters. */
+  text-transform: uppercase;
+}
+
+.ui-avatar--sm {
+  width: 28px;
+  height: 28px;
+  font-size: var(--text-xs);
+}
+.ui-avatar--md {
+  width: 36px;
+  height: 36px;
+  font-size: var(--text-sm);
+}
+.ui-avatar--lg {
+  width: 44px;
+  height: 44px;
+  font-size: var(--text-base);
+}
+
+/* The presence dot sits on the avatar, so it needs a ring in the surface colour
+   to read as separate from the circle underneath it. */
+.ui-avatar__status {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--status-success);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+/* -------------------------------------------------------------------- kbd --- */
+.ui-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px var(--space-1);
+  min-width: 18px;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+/* --------------------------------------------------------------- list row --- */
+.ui-list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.ui-list-row:last-child {
+  border-bottom: none;
+}
+
+/* Interactive rows are rendered as buttons; reset the UA chrome. */
+.ui-list-row--interactive {
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ui-list-row--interactive:hover {
+  background: var(--surface-raised);
+}
+
+/* The middle column has to be allowed to shrink, or a long project name pushes
+   the trailing columns out of the row. */
+.ui-list-row__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ui-list-row__title {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-list-row__meta {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* ------------------------------------------------------------- stat tile --- */
+/* Applied ONLY when a Stat is given an icon, so the four existing call sites on
+   the Ready screen keep rendering exactly as they did. */
+.ui-stat--tile {
+  padding: var(--space-4);
+}
+
+.ui-stat__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.ui-stat--tile .ui-stat__value {
+  font-size: var(--text-2xl);
+  /* Tabular figures so a changing number does not shift the tile's width. */
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-stat__delta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.ui-stat__delta--up {
+  color: var(--status-success);
+}
+
+/* Down is the same glyph rotated, so there is one arrow in the icon set. */
+.ui-stat__delta--down {
+  color: var(--status-error);
+}
+
+.ui-stat__delta--down .ui-icon {
+  transform: rotate(180deg);
+}
