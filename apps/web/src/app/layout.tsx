@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { Analytics } from '@vercel/analytics/next';
 import { Providers } from './providers';
 import { AppShell } from '../components/app-shell';
 import '@instantmockapi/ui/styles.css';
@@ -21,6 +22,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <Providers>
           <AppShell>{children}</AppShell>
         </Providers>
+        <Analytics />
       </body>
     </html>
   );
