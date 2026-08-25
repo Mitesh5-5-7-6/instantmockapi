@@ -265,10 +265,7 @@ export default function NewProjectPage() {
           ))}
 
           <div className="ui-row">
-            <Button
-              variant="secondary"
-              onClick={() => setEntities((prev) => [...prev, newEntity()])}
-            >
+            <Button variant="primary" onClick={() => setEntities((prev) => [...prev, newEntity()])}>
               + Add Entity
             </Button>
             <div style={{ flex: 1 }} />

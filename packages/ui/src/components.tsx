@@ -154,7 +154,15 @@ export function CodeViewer({
   downloadLabel = 'Download',
 }: {
   files: Record<string, string> | undefined;
-  onDownload?: () => void;
+  /**
+   * Receives the file the viewer is currently showing.
+   *
+   * Both arguments are load-bearing: a bundle artifact holds several files, so a
+   * download handler that isn't told which tab is active cannot save the right
+   * one. Wiring this straight to `onClick` would instead hand the callback
+   * React's MouseEvent as its first argument.
+   */
+  onDownload?: (filename: string, code: string) => void;
   downloadLabel?: string;
 }) {
   const names = files ? Object.keys(files) : [];
@@ -189,7 +197,11 @@ export function CodeViewer({
           <span className="ui-mono ui-meta">{names[0]}</span>
         )}
         {onDownload ? (
-          <Button variant="secondary" size="sm" onClick={onDownload}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => onDownload(active, files[active] ?? '')}
+          >
             {downloadLabel}
           </Button>
         ) : null}

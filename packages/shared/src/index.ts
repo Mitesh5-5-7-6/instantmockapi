@@ -47,3 +47,20 @@ export {
   slugify,
   isUsableSlug,
 } from './hosting-urls.js';
+export {
+  type IpsField,
+  type IpsRelation,
+  type IpsEntity,
+  type EndpointRow,
+  type SnippetLanguage,
+  type SnippetInput,
+  SNIPPET_LANGUAGES,
+  entityEndpoints,
+  projectEndpoints,
+  countEndpoints,
+  exampleBody,
+  exampleQuery,
+  buildSnippet,
+  pythonLiteral,
+  endpointUrl,
+} from './endpoints.js';
