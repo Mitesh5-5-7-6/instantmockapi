@@ -277,3 +277,42 @@ describe('query layer documentation (doc 19 §Phase 4)', () => {
     ]);
   });
 });
+
+describe('entity descriptions (doc 19 §Phase 7)', () => {
+  const described = {
+    ...goldenFixtureIPS,
+    entities: goldenFixtureIPS.entities.map((entity) => ({
+      ...entity,
+      description: 'Everything published on the blog',
+    })),
+  };
+
+  it('describes the schema and declares a described tag', () => {
+    const spec = JSON.parse(generateOpenAPI(described)['openapi.json'] ?? '{}');
+    expect(spec.components.schemas.BlogPost.description).toBe('Everything published on the blog');
+    expect(spec.tags).toEqual([
+      { name: 'BlogPost', description: 'Everything published on the blog' },
+    ]);
+  });
+
+  it('omits the tags array entirely when nothing is described', () => {
+    // An existing spec must not gain an empty array it never had.
+    const spec = JSON.parse(generateOpenAPI(goldenFixtureIPS)['openapi.json'] ?? '{}');
+    expect(spec).not.toHaveProperty('tags');
+    expect(spec.components.schemas.BlogPost).not.toHaveProperty('description');
+  });
+
+  it('describes the Postman folder', () => {
+    const collection = JSON.parse(
+      generatePostmanCollection(described)['postman_collection.json'] ?? '{}',
+    );
+    expect(collection.item[0].description).toBe('Everything published on the blog');
+  });
+
+  it('leaves the Postman folder undescribed when the entity has no description', () => {
+    const collection = JSON.parse(
+      generatePostmanCollection(goldenFixtureIPS)['postman_collection.json'] ?? '{}',
+    );
+    expect(collection.item[0]).not.toHaveProperty('description');
+  });
+});

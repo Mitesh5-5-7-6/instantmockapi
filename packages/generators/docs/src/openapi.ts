@@ -207,8 +207,17 @@ export function generateOpenAPI(
   const paths: OpenAPISchemaNode = {};
   const schemas: OpenAPISchemaNode = { Error: ERROR_SCHEMA };
 
+  const tags: OpenAPISchemaNode[] = [];
+
   for (const entity of ips.entities) {
-    schemas[entity.name] = entitySchema(entity);
+    const schema = entitySchema(entity);
+    if (entity.description) {
+      schema['description'] = entity.description;
+      // A described entity also becomes a described tag, which is what Swagger
+      // UI renders above its operation group.
+      tags.push({ name: entity.name, description: entity.description });
+    }
+    schemas[entity.name] = schema;
 
     const path = `/${entity.name.toLowerCase()}`;
     const itemPath = `${path}/{recordId}`;
@@ -319,6 +328,9 @@ export function generateOpenAPI(
       description: describeApi(features),
     },
     servers: [{ url: serverUrl(ips, options) }],
+    // Omitted entirely when nothing is described, so an existing spec gains no
+    // empty array.
+    ...(tags.length > 0 ? { tags } : {}),
     paths,
     components: { schemas: schemas },
   };

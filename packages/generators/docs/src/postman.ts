@@ -161,7 +161,11 @@ export function generatePostmanCollection(
       });
     }
 
-    folders.push({ name: entity.name, item: requests });
+    folders.push({
+      name: entity.name,
+      ...(entity.description ? { description: entity.description } : {}),
+      item: requests,
+    });
   }
 
   const collection: PostmanNode = {

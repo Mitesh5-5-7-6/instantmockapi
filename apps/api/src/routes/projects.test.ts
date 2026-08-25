@@ -693,3 +693,110 @@ describe('Project wizard payload (doc 19 §Phase 5)', () => {
     });
   });
 });
+
+describe('Single API wizard payload (doc 19 §Phase 7)', () => {
+  /** What the Define Endpoints step submits: one entity per endpoint. */
+  const singlePayload = () => ({
+    name: 'Weather API',
+    kind: 'single',
+    slug: 'weather',
+    description: 'Get current weather information by city',
+    inputSource: {
+      type: 'builder',
+      raw: {
+        entities: [
+          {
+            name: 'Current',
+            description: 'Get current weather',
+            fields: [
+              {
+                name: 'city',
+                type: 'string',
+                required: true,
+                default: null,
+                children: [],
+                validation: {},
+                meta: { searchable: true },
+              },
+              {
+                name: 'temperature',
+                type: 'integer',
+                required: true,
+                default: null,
+                children: [],
+                validation: {},
+                meta: {},
+              },
+            ],
+            relations: [],
+          },
+          {
+            name: 'Forecast',
+            description: '5 day forecast',
+            fields: [
+              {
+                name: 'city',
+                type: 'string',
+                required: true,
+                default: null,
+                children: [],
+                validation: {},
+                meta: {},
+              },
+            ],
+            relations: [],
+          },
+        ],
+        generationConfig: {
+          validators: ['zod'],
+          types: ['typescript'],
+          methods: ['GET', 'POST'],
+          mockRecords: 20,
+          features: { search: true, filter: true, sort: true, include: false },
+        },
+      },
+    },
+  });
+
+  it('creates a single API addressed with the sng_ prefix and its base path', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(session.accessToken),
+      payload: singlePayload(),
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    // The design's base path is the slug: /p/{sng_id}/weather/{endpoint}.
+    expect(body).toMatchObject({ kind: 'single', slug: 'weather' });
+    expect(body.publicId).toMatch(/^sng_/);
+  });
+
+  it('keeps each endpoint description, so it reaches the generated docs', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(session.accessToken),
+      payload: singlePayload(),
+    });
+    const ips = res.json().ips as { entities: { name: string; description?: string }[] };
+    expect(ips.entities.map((entity) => entity.description)).toEqual([
+      'Get current weather',
+      '5 day forecast',
+    ]);
+  });
+
+  it('accepts entities that declare no relations', async () => {
+    // A single API has nothing to relate; the relation validator must treat an
+    // empty array as fine rather than as a missing field.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(session.accessToken),
+      payload: singlePayload(),
+    });
+    expect(res.statusCode).toBe(201);
+    const ips = res.json().ips as { entities: { relations?: unknown[] }[] };
+    expect(ips.entities.every((entity) => (entity.relations ?? []).length === 0)).toBe(true);
+  });
+});
