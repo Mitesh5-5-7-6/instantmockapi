@@ -104,6 +104,11 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           <Button variant="secondary" size="sm" onClick={() => setSchemaOpen(true)}>
             View schema
           </Button>
+          <Link href="/demo/project-api/ecommerce">
+            <Button variant="ghost" size="sm">
+              View Demo API
+            </Button>
+          </Link>
         </div>
       </div>
 

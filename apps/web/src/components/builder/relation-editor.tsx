@@ -19,6 +19,12 @@ import {
 } from '../../lib/builder';
 import { isOwningKind, previewKeyField, type RelationIssue } from '../../lib/relations';
 
+const DELETE_POLICY_HELP: Record<BuilderRelation['onDelete'], string> = {
+  restrict: 'Protects the parent: deletion is blocked while related records exist.',
+  cascade: 'Removes dependent records automatically when the parent is deleted.',
+  setNull: 'Keeps dependent records, but clears their reference to the deleted parent.',
+};
+
 export function RelationEditor({
   entity,
   targets,
@@ -138,6 +144,9 @@ export function RelationEditor({
             </div>
 
             <div className="ui-row" style={{ gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+              <span className="ui-meta" style={{ flexBasis: '100%' }}>
+                {DELETE_POLICY_HELP[relation.onDelete]}
+              </span>
               {keyField ? (
                 <span className="ui-meta ui-mono">
                   adds {entity.name || 'this entity'}.{keyField}

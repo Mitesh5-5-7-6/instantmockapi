@@ -45,6 +45,7 @@ describe('the nav model', () => {
     expect(VISIBLE_NAV_ITEMS.map((item) => item.href)).toEqual([
       '/',
       '/projects',
+      '/demo/project-api/ecommerce',
       '/templates',
       '/settings',
     ]);

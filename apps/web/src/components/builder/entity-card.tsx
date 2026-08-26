@@ -95,6 +95,10 @@ export function EntityCard({
 
       <hr style={{ border: 0, borderTop: '1px solid var(--border)', width: '100%' }} />
 
+      <p className="ui-meta">
+        Relationships describe how this entity connects to another one. The selected kind controls
+        cardinality; the delete rule controls what happens to related records.
+      </p>
       <RelationEditor entity={entity} targets={targets} issues={issues} onChange={onChange} />
     </Card>
   );

@@ -348,6 +348,26 @@ export function EcommerceDemo() {
           <EntityDetails entity={selected} />
           <RelationshipExplorer selected={selectedEntity} />
         </div>
+        <div className="demo-guide" aria-label="How the project model works">
+          <div>
+            <span className="demo-guide-number">01</span>
+            <strong>Entities are resources</strong>
+            <p>Each card becomes a REST resource with fields, IDs, records, and CRUD endpoints.</p>
+          </div>
+          <div>
+            <span className="demo-guide-number">02</span>
+            <strong>Relationships connect resources</strong>
+            <p>Choose belongs to, has many, or many to many to make related records navigable.</p>
+          </div>
+          <div>
+            <span className="demo-guide-number">03</span>
+            <strong>Delete rules protect data</strong>
+            <p>
+              <b>Restrict</b> blocks deletion, <b>cascade</b> removes dependents, and{' '}
+              <b>set null</b> keeps them without the link.
+            </p>
+          </div>
+        </div>
       </section>
 
       <section className="demo-content demo-content--endpoints" id="endpoints">
@@ -360,6 +380,19 @@ export function EcommerceDemo() {
           </p>
         </div>
         <EndpointExplorer />
+        <div className="demo-cta">
+          <div>
+            <span className="demo-eyebrow">Ready to model yours?</span>
+            <h2>Turn this reference into your Project API.</h2>
+            <p>
+              Start in the builder, define your entities and relationships, then generate the API
+              surface.
+            </p>
+          </div>
+          <a className="demo-primary-action" href="/new/project">
+            Create a Project API <Icon name="chevron-right" size={16} />
+          </a>
+        </div>
       </section>
 
       <footer className="demo-footer">

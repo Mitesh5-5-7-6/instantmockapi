@@ -246,6 +246,10 @@ export default function NewProjectPage() {
                 {included.length} {included.length === 1 ? 'entity' : 'entities'}
               </span>
             </div>
+            <p className="ui-meta">
+              An entity is a resource in your API, such as a customer or product. Add fields to
+              describe its data, then connect entities to make related records navigable.
+            </p>
             <ErDiagram entities={entities} />
             <ErLegend />
           </Card>
