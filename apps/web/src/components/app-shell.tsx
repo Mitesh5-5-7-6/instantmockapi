@@ -188,9 +188,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Icon name={navOpen ? 'x' : 'menu'} size={18} />
           </Button>
           <TopSearch />
-          <Link href="/new">
+          <Link href="/demo-api" style={{ marginLeft: 'var(--space-2)' }}>
             <Button size="sm">
-              <Icon name="plus" size={16} /> New
+              <Icon name="plus" size={16} /> Demo API
             </Button>
           </Link>
         </header>
