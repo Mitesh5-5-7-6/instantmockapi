@@ -13,9 +13,11 @@ vi.mock('@instantmockapi/queue', async (importOriginal) => {
 
 import type { FastifyInstance } from 'fastify';
 import {
+  REFRESH_COOKIE,
   authHeader,
   buildTestServer,
   clearDb,
+  csrfHeader,
   login,
   startTestDb,
   stopTestDb,
@@ -54,10 +56,14 @@ describe('auth contract', () => {
     expect(res.json().error.code).toBe('UNAUTHORIZED');
   });
 
-  it('login issues a token pair and creates the user once', async () => {
+  /**
+   * The development-only route the whole suite signs in with. It is not
+   * registered when `nodeEnv` is production — see the guard in routes/auth.ts.
+   */
+  it('dev-login issues a session and creates the user once', async () => {
     const res = await app.inject({
       method: 'POST',
-      url: '/v1/auth/login',
+      url: '/v1/auth/dev-login',
       payload: { email: 'Dev@Example.com' },
     });
     expect(res.statusCode).toBe(200);
@@ -69,7 +75,7 @@ describe('auth contract', () => {
     // Second login with the same email returns the same user
     const again = await app.inject({
       method: 'POST',
-      url: '/v1/auth/login',
+      url: '/v1/auth/dev-login',
       payload: { email: 'dev@example.com' },
     });
     expect(again.json().user.id).toBe(body.user.id);
@@ -79,7 +85,7 @@ describe('auth contract', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/auth/login',
-      payload: { email: 'not-an-email' },
+      payload: { email: 'not-an-email', password: 'correct horse battery' },
     });
     expect(res.statusCode).toBe(400);
     const body = res.json();
@@ -102,16 +108,24 @@ describe('auth contract', () => {
     });
   });
 
-  it('refresh exchanges a refresh token for a new pair', async () => {
+  /**
+   * The refresh token now arrives as a cookie, not in the body — see
+   * auth-cookies.ts for why. `csrfHeader()` is required on every
+   * cookie-authenticated route.
+   */
+  it('refresh exchanges the cookie for a fresh access token', async () => {
     const session = await login(app, 'refresh@example.com');
     const res = await app.inject({
       method: 'POST',
       url: '/v1/auth/refresh',
-      payload: { refreshToken: session.refreshToken },
+      headers: csrfHeader(),
+      cookies: { [REFRESH_COOKIE]: session.refreshToken },
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.accessToken).toEqual(expect.any(String));
+    // No refresh token in the body: it never leaves the httpOnly cookie.
+    expect(body.refreshToken).toBeUndefined();
 
     const me = await app.inject({
       method: 'GET',
@@ -126,19 +140,33 @@ describe('auth contract', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/auth/refresh',
-      payload: { refreshToken: session.accessToken },
+      headers: csrfHeader(),
+      cookies: { [REFRESH_COOKIE]: session.accessToken },
     });
     expect(res.statusCode).toBe(401);
   });
 
-  it('logout returns 204', async () => {
+  it('refresh with no cookie is a clean 401, which is how a fresh visitor boots', async () => {
+    // The web app calls this on load to find out whether it has a session, so
+    // "no cookie" has to be an ordinary answer rather than an error condition.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/refresh',
+      headers: csrfHeader(),
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('logout returns 204 and clears the cookie', async () => {
     const session = await login(app, 'bye@example.com');
     const res = await app.inject({
       method: 'POST',
       url: '/v1/auth/logout',
-      headers: authHeader(session.accessToken),
+      headers: { ...authHeader(session.accessToken), ...csrfHeader() },
     });
     expect(res.statusCode).toBe(204);
+    expect(String(res.headers['set-cookie'])).toContain(REFRESH_COOKIE);
   });
 });
 

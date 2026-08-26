@@ -105,6 +105,42 @@ const ICONS = {
   x: { p: ['M6 6l12 12', 'M18 6 6 18'] },
   check: { p: ['M4.5 12.5 9 17 19.5 6.5'] },
   clock: { c: [[12, 12, 9]], p: ['M12 7.5V12l3.5 2'] },
+  alert: { c: [[12, 12, 9]], p: ['M12 7.5v5.5', 'M12 16.5h.01'] },
+
+  // ── auth ──
+  mail: { p: ['M3 6.5h18v11H3z', 'M3 7l9 6.5L21 7'] },
+  lock: {
+    p: ['M5.5 11h13v9.5h-13z', 'M8.5 11V7.5a3.5 3.5 0 0 1 7 0V11'],
+  },
+  /** Visibility toggle: an open eye. */
+  eye: {
+    c: [[12, 12, 3]],
+    p: ['M12 5c5 0 9 4.4 9 7s-4 7-9 7-9-4.4-9-7 4-7 9-7z'],
+  },
+  /**
+   * The same eye with a stroke through it. Drawn as the outline plus a slash
+   * rather than a separate shape, so the two states read as one control changing
+   * rather than two unrelated glyphs.
+   */
+  'eye-off': {
+    p: [
+      'M4 8.5C2.9 9.9 3 11.4 3 12c0 2.6 4 7 9 7 1.6 0 3-.4 4.2-1.1',
+      'M9.5 5.4A9.7 9.7 0 0 1 12 5c5 0 9 4.4 9 7 0 1-.9 2.6-2.4 4',
+      'M9.9 9.9a3 3 0 0 0 4.2 4.2',
+      'M4 4l16 16',
+    ],
+  },
+  /**
+   * Google's mark, reduced to its stroked outline.
+   *
+   * Not the four-colour logo: this set is `currentColor` and single-weight, and a
+   * multi-colour raster in the middle of it would be the one element that ignores
+   * the theme. The button carries the word "Google" beside it, which is what
+   * actually identifies the provider.
+   */
+  google: {
+    p: ['M21 12.2H12v3.2h5.2A5.4 5.4 0 1 1 12 6.6c1.4 0 2.6.5 3.5 1.3l2.3-2.3A9 9 0 1 0 21 12.2z'],
+  },
 
   // ── quick start / activity feed ──
   'cloud-upload': {

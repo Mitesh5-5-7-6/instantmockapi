@@ -14,6 +14,10 @@ export {
   extractBearerToken,
 } from './tokens.js';
 
+export { hashPassword, verifyPassword, needsRehash, PASSWORD_COST } from './password.js';
+
+export { verifyGoogleCode, type GoogleIdentity } from './google.js';
+
 export { isOwner, assertOwnership } from './ownership.js';
 
 export { authPlugin, type AuthPluginOptions } from './plugin.js';

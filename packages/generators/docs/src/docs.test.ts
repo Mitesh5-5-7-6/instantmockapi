@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { goldenFixtureIPS } from '../../__tests__/golden-fixture.js';
-import { goldenRelationsIPS } from '../../__tests__/golden-relations-fixture.js';
+import { goldenRelationsIPS } from '../../../ips/__tests__/golden-relations-fixture.js';
 import {
   NO_QUERY_FEATURES,
   materializeRelations,

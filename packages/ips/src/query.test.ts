@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { goldenRelationsIPS } from '../../generators/__tests__/golden-relations-fixture.js';
+import { goldenRelationsIPS } from '../__tests__/golden-relations-fixture.js';
 import { materializeRelations } from './relations.js';
 import {
   ALL_QUERY_FEATURES,

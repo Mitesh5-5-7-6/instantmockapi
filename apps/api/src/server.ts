@@ -7,11 +7,14 @@
 
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
-import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
+import { loadEnvConfig, assertProductionSecrets, type EnvConfig } from '@instantmockapi/config';
 import { authPlugin } from '@instantmockapi/auth';
 import { createStorage, type StorageClient } from '@instantmockapi/storage';
 import { registerErrorHandling } from './error-handler.js';
+import { CSRF_HEADER } from './auth-cookies.js';
+import type { Mailer } from './email.js';
 import { authRoutes } from './routes/auth.js';
 import { projectRoutes } from './routes/projects.js';
 import { generationRoutes } from './routes/generation.js';
@@ -29,10 +32,18 @@ export interface BuildServerOptions {
   sse?: { pollIntervalMs?: number; maxDurationMs?: number };
   /** Object storage for artifact downloads; defaults to S3 from env config. */
   storage?: StorageClient;
+  /** Email transport; defaults to Resend, or the log transport with no API key. */
+  mailer?: Mailer;
 }
 
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
   const config = options.config ?? loadEnvConfig();
+
+  // Before anything is constructed, and here rather than in an entrypoint: there
+  // are two of those (node and the Vercel function) and this is the one path
+  // both take. A no-op outside production.
+  assertProductionSecrets(config);
+
   const storage = options.storage ?? createStorage(config);
 
   const app = Fastify({
@@ -44,10 +55,26 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
 
   // The web app is a separate origin (doc 05: web talks HTTP only). Dev
   // defaults to the local web port; production sets WEB_ORIGIN explicitly.
+  //
+  // `credentials` is what lets the browser send the httpOnly refresh cookie to
+  // /v1/auth. It also means `origin` may never become '*' — a browser rejects a
+  // wildcard outright once credentials are involved, so the exact-origin config
+  // above is load-bearing rather than merely tidy.
   await app.register(cors, {
-    origin: process.env['WEB_ORIGIN'] ?? `http://localhost:${config.webPort}`,
+    origin: config.webOrigin,
+    credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+    // Listed explicitly rather than reflecting whatever is requested.
+    // `x-requested-with` is the CSRF guard (see auth-cookies.ts): it must be
+    // allowed here, because the preflight that CORS performs on account of this
+    // header is exactly what makes the guard work.
+    allowedHeaders: ['authorization', 'content-type', CSRF_HEADER],
   });
+
+  // Parses `request.cookies` and provides reply.setCookie/clearCookie. Only the
+  // /v1/auth routes use it; hand-rolled cookie serialisation is a well-known
+  // source of subtle attribute bugs.
+  await app.register(cookie);
 
   await app.register(authPlugin, { config });
 
@@ -55,17 +82,26 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     await app.register(rateLimit, {
       max: options.rateLimit?.max ?? config.rateLimitPerMinute,
       timeWindow: options.rateLimit?.timeWindowMs ?? 60_000,
-      // Per-user token bucket (doc 08 §8): the bearer token identifies the
-      // user; unauthenticated requests fall back to the client IP.
+      // preHandler, not the plugin's default onRequest, for two reasons:
+      // `request.authUser` is only populated by the `authenticate` onRequest
+      // hook, and the credential routes key their own limits on the submitted
+      // email, which does not exist until the body is parsed.
+      hook: 'preHandler',
+      // Per-user token bucket (doc 08 §8), keyed on the *verified* user id.
+      //
+      // Keying on the raw Authorization header (as this once did) is a bypass:
+      // an unauthenticated client can send a different garbage token on every
+      // request and get a fresh bucket each time. `authUser` is null unless a
+      // signature actually verified, so a forged header falls back to the IP.
+      keyGenerator: (request) => request.authUser?.sub ?? request.ip,
       // The plugin's 429 error flows through the shared error handler, which
       // shapes it into the RATE_LIMIT_EXCEEDED envelope.
-      keyGenerator: (request) => request.headers.authorization ?? request.ip,
     });
   }
 
   app.get('/healthz', async () => ({ status: 'ok' }));
 
-  await app.register(authRoutes, { prefix: '/v1', config });
+  await app.register(authRoutes, { prefix: '/v1', config, mailer: options.mailer });
   await app.register(projectRoutes, { prefix: '/v1', config });
   await app.register(generationRoutes, { prefix: '/v1', config });
   await app.register(jobRoutes, {

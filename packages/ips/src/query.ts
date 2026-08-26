@@ -18,14 +18,20 @@
  */
 
 import { entityRelations } from './relations.js';
-import type { Entity, Field, FieldType, GenerationConfig } from './types.js';
+import { QUERY_FEATURES } from './types.js';
+import type {
+  Entity,
+  Field,
+  FieldType,
+  GenerationConfig,
+  QueryFeature,
+  QueryFeatures,
+} from './types.js';
 
-/** Switchable query capabilities of a hosted API. */
-export const QUERY_FEATURES = ['search', 'filter', 'sort', 'include'] as const;
-
-export type QueryFeature = (typeof QUERY_FEATURES)[number];
-
-export type QueryFeatures = Record<QueryFeature, boolean>;
+// The toggle vocabulary itself lives in types.ts, because `GenerationConfig`
+// carries it — see the note there. Re-exported so this module stays the one
+// place a caller has to import from for anything query-related.
+export { QUERY_FEATURES, type QueryFeature, type QueryFeatures };
 
 /**
  * Query keys the runtime interprets itself, and therefore never treats as a

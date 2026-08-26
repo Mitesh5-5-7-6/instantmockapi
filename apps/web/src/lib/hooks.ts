@@ -7,13 +7,24 @@
 
 import { useEffect, useSyncExternalStore } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch, hasTokens, saveTokens, subscribeJobStream, subscribeTokens } from './api-client';
+import {
+  adoptSession,
+  apiFetch,
+  forgetSession,
+  getAuthState,
+  getServerAuthState,
+  restoreSession,
+  subscribeAuth,
+  subscribeJobStream,
+  type AuthState,
+} from './api-client';
 import type {
   ApiUser,
   ArtifactContent,
   DashboardView,
   ArtifactView,
-  AuthTokens,
+  AuthAcknowledgement,
+  AuthSession,
   GenerationConfig,
   JobView,
   ListEnvelope,
@@ -21,23 +32,159 @@ import type {
   ProjectSummary,
 } from './api-types';
 
-export function useLogin() {
+/**
+ * Everything a screen needs after a session is established.
+ *
+ * The response already carries the user, so `['me']` is seeded rather than
+ * refetched — the shell would otherwise wait on a `/v1/me` round trip before it
+ * could render anything. Everything else was fetched (or skipped) while
+ * unauthenticated, so it is all stale now.
+ */
+function useSessionEstablished() {
   const queryClient = useQueryClient();
+  return (session: AuthSession) => {
+    adoptSession(session);
+    queryClient.setQueryData(['me'], { user: session.user });
+    void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] !== 'me' });
+  };
+}
+
+/**
+ * Sign in with an email and password.
+ *
+ * Resolves to a discriminated result rather than throwing for the
+ * password-not-set case, because that case is not a failure: the account exists,
+ * nothing was wrong with the request, and an email has been sent (doc 13 D3). A
+ * wrong password still throws `ApiError`.
+ */
+export function useLogin() {
+  const onSession = useSessionEstablished();
   return useMutation({
-    mutationFn: async (email: string) => {
-      const tokens = await apiFetch<AuthTokens>('/v1/auth/login', {
+    mutationFn: async (input: { email: string; password: string }) => {
+      const result = await apiFetch<AuthSession | AuthAcknowledgement>('/v1/auth/login', {
+        method: 'POST',
+        body: input,
+        // The response sets the refresh cookie, which the browser only stores on
+        // a credentialed request.
+        withCredentials: true,
+      });
+      if ('accessToken' in result) {
+        onSession(result);
+        return { kind: 'signed-in' as const, user: result.user };
+      }
+      return { kind: 'password-setup-required' as const, message: result.message };
+    },
+  });
+}
+
+/** Create an account. Returns the acknowledgement; there is no session yet. */
+export function useSignup() {
+  return useMutation({
+    mutationFn: (input: { email: string; password: string; name?: string }) =>
+      apiFetch<AuthAcknowledgement>('/v1/auth/signup', { method: 'POST', body: input }),
+  });
+}
+
+/** Redeem an emailed verification link. Signs the user in on success. */
+export function useVerifyEmail() {
+  const onSession = useSessionEstablished();
+  return useMutation({
+    mutationFn: async (token: string) => {
+      const session = await apiFetch<AuthSession>('/v1/auth/verify-email', {
+        method: 'POST',
+        body: { token },
+        withCredentials: true,
+      });
+      onSession(session);
+      return session.user;
+    },
+  });
+}
+
+/**
+ * Ask for a password-reset link.
+ *
+ * The API answers identically whether or not the address exists, so there is
+ * nothing here to branch on — and the screen must not invent a distinction.
+ */
+export function useForgotPassword() {
+  return useMutation({
+    mutationFn: (email: string) =>
+      apiFetch<AuthAcknowledgement>('/v1/auth/forgot-password', {
         method: 'POST',
         body: { email },
+      }),
+  });
+}
+
+/** Same neutrality as forgot-password: one response for every case. */
+export function useResendVerification() {
+  return useMutation({
+    mutationFn: (email: string) =>
+      apiFetch<AuthAcknowledgement>('/v1/auth/resend-verification', {
+        method: 'POST',
+        body: { email },
+      }),
+  });
+}
+
+/** Redeem a reset or set-password link. Signs the user in on success. */
+export function useResetPassword() {
+  const onSession = useSessionEstablished();
+  return useMutation({
+    mutationFn: async (input: { token: string; password: string }) => {
+      const session = await apiFetch<AuthSession>('/v1/auth/reset-password', {
+        method: 'POST',
+        body: input,
+        withCredentials: true,
       });
-      saveTokens({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
-      return tokens.user;
+      onSession(session);
+      return session.user;
     },
-    // The login response already carries the user, so seed ['me'] instead of
-    // making the shell wait on a /v1/me round trip. Everything else was
-    // fetched (or skipped) while unauthenticated, so it is all stale now.
-    onSuccess: (user) => {
-      queryClient.setQueryData(['me'], { user });
-      void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] !== 'me' });
+  });
+}
+
+/**
+ * Change the password of the signed-in user.
+ *
+ * The API bumps `tokenVersion`, which kills every other session including this
+ * browser's refresh cookie — so the response carries a replacement session that
+ * has to be adopted, or the caller is signed out within the access token's
+ * lifetime.
+ */
+export function useChangePassword() {
+  const onSession = useSessionEstablished();
+  return useMutation({
+    mutationFn: async (input: { currentPassword: string; newPassword: string }) => {
+      const session = await apiFetch<AuthSession>('/v1/auth/change-password', {
+        method: 'POST',
+        body: input,
+        withCredentials: true,
+      });
+      onSession(session);
+      return session.user;
+    },
+  });
+}
+
+/**
+ * Exchange a Google authorization code for a session.
+ *
+ * The code and the PKCE verifier go to our API, never to Google from here — the
+ * client secret the exchange needs stays on the server, which is the whole
+ * reason the authorization-code flow is used instead of an implicit one.
+ */
+export function useGoogleSignIn() {
+  const onSession = useSessionEstablished();
+  return useMutation({
+    mutationFn: async (input: { code: string; codeVerifier: string; redirectUri: string }) => {
+      const session = await apiFetch<AuthSession>('/v1/auth/google', {
+        method: 'POST',
+        body: input,
+        withCredentials: true,
+      });
+      onSession(session);
+      return session.user;
     },
   });
 }
@@ -47,32 +194,49 @@ export function useLogout() {
   return useMutation({
     mutationFn: async () => {
       try {
-        await apiFetch('/v1/auth/logout', { method: 'POST' });
+        // withCredentials so the API can clear the cookie it set — a response
+        // without credentials cannot expire one.
+        await apiFetch('/v1/auth/logout', { method: 'POST', withCredentials: true });
       } finally {
-        saveTokens(null);
+        // In the `finally` on purpose: if the request fails, the local session
+        // still has to go. Leaving the user apparently signed in after they
+        // pressed sign out is the worse outcome.
+        forgetSession();
       }
     },
     onSuccess: () => queryClient.clear(),
+    onError: () => queryClient.clear(),
   });
 }
 
-export type AuthState = 'unknown' | 'authenticated' | 'anonymous';
+export type { AuthState };
 
 /**
- * Token presence as reactive state, so login and logout re-render their
- * consumers. Reading localStorage during render instead would never re-render,
- * which would leave the app stuck on the sign-in screen until a manual refresh.
+ * Auth state as reactive state, so signing in and out re-render their consumers.
  *
- * `unknown` is the server/hydration snapshot — localStorage does not exist
- * there, and rendering the sign-in screen on that pass would flash it at
- * already-signed-in visitors on every page load.
+ * `unknown` is both the server/hydration snapshot *and* the real state until the
+ * boot refresh returns — with the access token in memory only, "am I signed in"
+ * cannot be answered synchronously any more. `useRestoreSession` below is what
+ * moves it off `unknown`.
  */
 export function useAuthState(): AuthState {
-  return useSyncExternalStore(
-    subscribeTokens,
-    () => (hasTokens() ? 'authenticated' : 'anonymous'),
-    () => 'unknown',
-  );
+  return useSyncExternalStore(subscribeAuth, getAuthState, getServerAuthState);
+}
+
+/**
+ * Ask the API for a session once, on mount.
+ *
+ * This is the step that replaces reading `localStorage`: the refresh cookie is
+ * the only thing that survived the page load, and it is httpOnly, so the only
+ * way to learn whether it is still valid is to spend a request. Mounted once, by
+ * the shell, above everything that fetches.
+ */
+export function useRestoreSession(): AuthState {
+  const state = useAuthState();
+  useEffect(() => {
+    void restoreSession();
+  }, []);
+  return state;
 }
 
 export function useMe() {
@@ -348,12 +512,12 @@ export async function downloadArtifact(
   artifactType: string,
   version?: number,
 ): Promise<void> {
-  const { apiBaseUrl, loadTokens } = await import('./api-client');
-  const tokens = loadTokens();
+  const { apiBaseUrl, currentAccessToken } = await import('./api-client');
+  const token = currentAccessToken();
   const qs = version !== undefined ? `?version=${version}` : '';
   const response = await fetch(
     `${apiBaseUrl()}/v1/projects/${projectId}/artifacts/${artifactType}/download${qs}`,
-    { headers: tokens ? { authorization: `Bearer ${tokens.accessToken}` } : {} },
+    { headers: token !== null ? { authorization: `Bearer ${token}` } : {} },
   );
   if (!response.ok) {
     throw new Error(`Download failed (${response.status})`);

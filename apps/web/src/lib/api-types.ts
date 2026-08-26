@@ -24,11 +24,29 @@ export interface ApiUser {
   createdAt: string;
 }
 
-export interface AuthTokens {
+/**
+ * What the API returns from every route that establishes a session.
+ *
+ * There is deliberately **no refreshToken field**: the refresh token comes back
+ * as an httpOnly cookie the browser stores and this code cannot read. Adding it
+ * to the body would put a durable credential back where script can reach it,
+ * which is the thing the cookie exists to prevent.
+ */
+export interface AuthSession {
   accessToken: string;
-  refreshToken: string;
   expiresIn: number;
   user: ApiUser;
+}
+
+/** Signup, forgot-password and resend-verification all answer in this shape. */
+export interface AuthAcknowledgement {
+  ok: true;
+  message: string;
+  /**
+   * Present when a sign-in attempt found an account with no password and emailed
+   * a link to set one — neither a success nor a failure (doc 13 D3).
+   */
+  passwordSetupRequired?: boolean;
 }
 
 /** Hosted-API query capabilities (doc 19 §Phase 4). */

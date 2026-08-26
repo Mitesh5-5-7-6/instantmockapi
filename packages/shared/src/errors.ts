@@ -21,6 +21,14 @@ export type ErrorCode =
   | 'PARSE_ERROR'
   | 'NOT_FOUND'
   | 'UNAUTHORIZED'
+  /**
+   * The credentials were right but the address has not been confirmed.
+   *
+   * Distinct from UNAUTHORIZED on purpose: the sign-in screen has something
+   * useful to offer here — a resend button — and cannot tell the two apart from
+   * a status code alone.
+   */
+  | 'EMAIL_NOT_VERIFIED'
   | 'FORBIDDEN'
   | 'CONFLICT'
   | 'RATE_LIMIT_EXCEEDED'
@@ -77,6 +85,9 @@ function errorCodeToStatus(code: ErrorCode): number {
     PARSE_ERROR: 422,
     NOT_FOUND: 404,
     UNAUTHORIZED: 401,
+    // 403, not 401: the password was correct, so re-prompting for credentials
+    // (which is what a 401 asks a client to do) would send the user in a loop.
+    EMAIL_NOT_VERIFIED: 403,
     FORBIDDEN: 403,
     CONFLICT: 409,
     RATE_LIMIT_EXCEEDED: 429,

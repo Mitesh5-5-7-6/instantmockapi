@@ -9,4 +9,10 @@ export {
   canCreateJob,
 } from './plans.js';
 
-export { type EnvConfig, loadEnvConfig } from './env.js';
+export {
+  type EnvConfig,
+  loadEnvConfig,
+  assertProductionSecrets,
+  productionConfigProblems,
+  DEV_JWT_SECRET,
+} from './env.js';
