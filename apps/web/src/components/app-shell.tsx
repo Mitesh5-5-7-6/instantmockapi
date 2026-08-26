@@ -60,6 +60,12 @@ function LoginScreen() {
               {login.error.message}
             </p>
           ) : null}
+          <Link
+            href="/demo/project-api/ecommerce"
+            style={{ textAlign: 'center', fontSize: 'var(--text-sm)' }}
+          >
+            Explore the E-commerce API demo
+          </Link>
         </form>
       </Card>
     </div>
@@ -86,6 +92,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const authState = useAuthState();
   const me = useMe();
   const [navOpen, setNavOpen] = useState(false);
+  const isPublicDemo = pathname === '/demo' || pathname.startsWith('/demo/');
 
   // Close the drawer whenever the route changes. Without this, tapping a nav
   // link on a phone leaves the drawer sitting over the page it just opened.
@@ -107,6 +114,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [navOpen]);
+
+  // Demo routes are public product surfaces and should not be replaced by the
+  // authenticated shell's sign-in screen.
+  if (isPublicDemo) {
+    return <>{children}</>;
+  }
 
   // No token, or the token was rejected (apiFetch clears it after a failed
   // refresh) — back to sign-in. Both flip reactively, so signing in swaps the
