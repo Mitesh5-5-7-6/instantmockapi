@@ -11,6 +11,7 @@ import { apiFetch, hasTokens, saveTokens, subscribeJobStream, subscribeTokens } 
 import type {
   ApiUser,
   ArtifactContent,
+  DashboardView,
   ArtifactView,
   AuthTokens,
   GenerationConfig,
@@ -91,6 +92,39 @@ export interface ProjectListParams {
   status?: string;
   sort?: string;
   q?: string;
+}
+
+/**
+ * Update the current user.
+ *
+ * Writes the response straight into the [me] cache rather than invalidating —
+ * the PATCH already returns the updated user, so a refetch would be a second
+ * round trip for data already in hand.
+ */
+export function useUpdateMe() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { name: string | null }) =>
+      apiFetch<{ user: ApiUser }>('/v1/me', { method: 'PATCH', body: input }),
+    onSuccess: (data) => queryClient.setQueryData(['me'], data),
+  });
+}
+
+/** Windows the dashboard endpoint accepts; anything else is a 400 by design. */
+export type DashboardDays = 7 | 14 | 30;
+
+/**
+ * The whole landing screen in one request.
+ *
+ * One call rather than several because the figures have to agree: the tile total
+ * and the sum of the chart are computed from the same matched set server-side,
+ * and two separate fetches could straddle a bucket boundary and disagree.
+ */
+export function useDashboard(days: DashboardDays = 7) {
+  return useQuery({
+    queryKey: ['dashboard', days],
+    queryFn: () => apiFetch<DashboardView>(`/v1/dashboard?days=${days}`),
+  });
 }
 
 export function useProjects(params: ProjectListParams = {}) {

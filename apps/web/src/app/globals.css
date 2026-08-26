@@ -1,1 +1,24 @@
 /* App-level overrides only — tokens and components live in @instantmockapi/ui. */
+
+/* Dashboard two-column layout.
+ *
+ * Page-local rather than a design-system class: it is the only screen with this
+ * shape, and putting it in the shared stylesheet would invite other pages to
+ * inherit a layout decision that is not theirs.
+ *
+ * Both tracks use minmax(0, 1fr) for the same reason .ui-shell does — a bare 1fr
+ * cannot shrink below its content, so the chart or a long project name would
+ * push the column wide instead of letting its own scroll container handle it. */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+/* Below this the two columns stop being readable side by side and stack. */
+@media (max-width: 1100px) {
+  .dashboard-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

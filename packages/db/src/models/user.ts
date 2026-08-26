@@ -2,6 +2,8 @@ import { Schema, model, Document } from 'mongoose';
 
 export interface IUser extends Document {
   email: string;
+  /** Display name. Absent on every account created before this field existed. */
+  name?: string | null;
   authProvider: 'google' | 'email';
   plan: 'free' | 'pro' | 'enterprise';
   createdAt: Date;
@@ -16,6 +18,12 @@ const userSchema = new Schema<IUser>(
       unique: true,
       trim: true,
       lowercase: true,
+    },
+    name: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 80,
     },
     authProvider: {
       type: String,

@@ -10,6 +10,7 @@ import {
   PROJECT_STATUSES,
   SLUG_MAX_LENGTH,
   SLUG_PATTERN,
+  countEndpoints,
   hostedUrl,
   isUsableSlug,
   unwrap,
@@ -18,6 +19,7 @@ import {
 } from '@instantmockapi/shared';
 import { getPlanConfig, type EnvConfig } from '@instantmockapi/config';
 import {
+  ApiLog,
   Project,
   ensurePublicIdentity,
   hardDeleteProject,
@@ -26,7 +28,7 @@ import {
 import { materializeRelations, validateIPS } from '@instantmockapi/ips';
 import { loadOwnedProject } from '../access.js';
 import { escapeRegExp, listEnvelope, parsePagination, parseSort } from '../pagination.js';
-import { toProjectDetail, toProjectSummary } from '../serializers.js';
+import { toProjectDetail, toProjectSummary, toProjectSummaryWithCounts } from '../serializers.js';
 import { parseInputSource } from '../input-parsing.js';
 import { validateGenerationConfig } from '../generation-config.js';
 
@@ -34,12 +36,21 @@ export interface ProjectRouteOptions {
   config: EnvConfig;
 }
 
+/**
+ * Window for the per-project request count on the list.
+ *
+ * Matches the dashboard default, and both are bounded by the ApiLog 30-day TTL —
+ * so this is a window count, never a lifetime total.
+ */
+const REQUEST_WINDOW_DAYS = 7;
+
 interface ListQuery {
   page?: number;
   limit?: number;
   status?: (typeof PROJECT_STATUSES)[number];
   sort?: string;
   q?: string;
+  include?: 'counts';
 }
 
 /**
@@ -72,6 +83,9 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
             status: { type: 'string', enum: [...PROJECT_STATUSES] },
             sort: { type: 'string', pattern: '^-?(name|status|createdAt|updatedAt)$' },
             q: { type: 'string', maxLength: 200 },
+            // Single-valued enum rather than a CSV list — stay boring until
+            // there is a second thing to include.
+            include: { type: 'string', enum: ['counts'] },
           },
         },
       },
@@ -97,7 +111,39 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
           .limit(pageParams.limit),
       ]);
 
-      return reply.send(listEnvelope(projects.map(toProjectSummary), pageParams, total));
+      if (query.include !== 'counts') {
+        return reply.send(listEnvelope(projects.map(toProjectSummary), pageParams, total));
+      }
+
+      // Counted only for the page in hand, in ONE aggregation — not one
+      // countDocuments per row inside a .map(), which is the N+1 this exists to
+      // avoid. Real ObjectIds: aggregation pipelines are not cast by Mongoose,
+      // so stringified ids would match nothing and every row would read zero.
+      const pageIds = projects.map((project) => project._id);
+      const since = new Date(Date.now() - REQUEST_WINDOW_DAYS * 86_400_000);
+      const counted = await ApiLog.aggregate<{ _id: unknown; count: number }>([
+        { $match: { projectId: { $in: pageIds }, at: { $gte: since } } },
+        { $group: { _id: '$projectId', count: { $sum: 1 } } },
+      ]);
+      const requestsById = new Map(counted.map((row) => [String(row._id), row.count]));
+
+      return reply.send(
+        listEnvelope(
+          projects.map((project) =>
+            toProjectSummaryWithCounts(project, {
+              // `ips` is Schema.Types.Mixed, so an old document can be any shape.
+              endpointCount: countEndpoints(
+                project.ips?.entities ?? [],
+                project.generationConfig?.methods ?? [],
+              ),
+              requestCount: requestsById.get(String(project._id)) ?? 0,
+              requestWindowDays: REQUEST_WINDOW_DAYS,
+            }),
+          ),
+          pageParams,
+          total,
+        ),
+      );
     },
   );
 

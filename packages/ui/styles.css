@@ -49,6 +49,23 @@
   --space-16: 64px;
 
   /* radius */
+  /* Layout.
+   *
+   * Breakpoints are deliberately NOT tokens: `@media` cannot read custom
+   * properties. They are a documented convention instead, enforced by review —
+   *   1280px  the dashboard drops to one column
+   *   1024px  the sidebar collapses to an icon rail
+   *    720px  the sidebar becomes an off-canvas drawer
+   */
+  --sidebar-w: 264px;
+  --sidebar-w-collapsed: 72px;
+  --content-wide: 1440px;
+
+  /* Stacking order, so a new layer never has to guess a number. */
+  --z-dropdown: 20;
+  --z-sticky: 30;
+  --z-modal: 50;
+
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
@@ -382,7 +399,7 @@ h3 {
   align-items: center;
   justify-content: center;
   padding: var(--space-6);
-  z-index: 50;
+  z-index: var(--z-modal);
 }
 
 .ui-modal {
@@ -463,11 +480,26 @@ h3 {
 
 .ui-shell {
   display: grid;
-  grid-template-columns: 232px 1fr;
+  /* `minmax(0, 1fr)`, not a bare `1fr`.
+   *
+   * A bare `1fr` means `minmax(auto, 1fr)`, so the column can never shrink below
+   * the min-content width of what it holds. One long unbreakable line in a
+   * `.ui-codeblock`, or a wide `.ui-er` canvas, therefore pushes the whole grid
+   * past the viewport — and the child's own `overflow-x: auto` never engages,
+   * because its parent handed it all the room it asked for. That is the actual
+   * mechanism behind the horizontal overflow on narrow screens; it is not the
+   * sidebar's fixed width.
+   *
+   * Setting the minimum to 0 lets the column shrink and pushes the overflow back
+   * down to the scroll containers built to handle it. */
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   min-height: 100vh;
 }
 
 .ui-sidebar {
+  /* Scrolls internally now that it carries a plan card and a profile block —
+     without this a short viewport clips the sign-out button. */
+  overflow-y: auto;
   border-right: 1px solid var(--border);
   padding: var(--space-6) var(--space-4);
   display: flex;
@@ -475,7 +507,9 @@ h3 {
   gap: var(--space-8);
   position: sticky;
   top: 0;
-  height: 100vh;
+  /* dvh, not vh: on iOS Safari the URL bar makes 100vh taller than the visible
+     area, which would cut off the sign-out button at the foot of the rail. */
+  height: 100dvh;
 }
 
 .ui-sidebar__brand {
@@ -966,4 +1000,499 @@ h3 {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* --------------------------------------------------------------- tones ------
+ * Every tinted surface (icon tiles, avatars, stat accents) resolves its colour
+ * through one `--tone` property, set by a `--<name>` modifier. Two reasons:
+ * the tint is derived from the tone with `color-mix` rather than being a second
+ * value to keep in step (same technique as `.ui-method`), and each tone points
+ * at an existing token, so anything the theme re-points follows automatically —
+ * `--accent` in particular flips per theme AND per `[data-flow]` scope.
+ * -------------------------------------------------------------------------- */
+.ui-tone--accent {
+  --tone: var(--accent);
+}
+.ui-tone--cyan {
+  --tone: var(--accent-2);
+}
+.ui-tone--success {
+  --tone: var(--status-success);
+}
+.ui-tone--warning {
+  --tone: var(--status-warning);
+}
+.ui-tone--error {
+  --tone: var(--status-error);
+}
+.ui-tone--violet {
+  --tone: var(--status-expired);
+}
+
+/* -------------------------------------------------------------- icon tile --- */
+.ui-icon-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: var(--radius-md);
+  color: var(--tone, var(--accent));
+  background: color-mix(in srgb, var(--tone, var(--accent)) 16%, transparent);
+}
+
+.ui-icon-tile--sm {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+}
+.ui-icon-tile--md {
+  width: 36px;
+  height: 36px;
+}
+.ui-icon-tile--lg {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-lg);
+}
+
+/* ----------------------------------------------------------------- avatar --- */
+.ui-avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--tone, var(--accent));
+  background: color-mix(in srgb, var(--tone, var(--accent)) 18%, transparent);
+  /* Initials are the one place tabular figures hurt — they are letters. */
+  text-transform: uppercase;
+}
+
+.ui-avatar--sm {
+  width: 28px;
+  height: 28px;
+  font-size: var(--text-xs);
+}
+.ui-avatar--md {
+  width: 36px;
+  height: 36px;
+  font-size: var(--text-sm);
+}
+.ui-avatar--lg {
+  width: 44px;
+  height: 44px;
+  font-size: var(--text-base);
+}
+
+/* The presence dot sits on the avatar, so it needs a ring in the surface colour
+   to read as separate from the circle underneath it. */
+.ui-avatar__status {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--status-success);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+/* -------------------------------------------------------------------- kbd --- */
+.ui-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px var(--space-1);
+  min-width: 18px;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+/* --------------------------------------------------------------- list row --- */
+.ui-list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.ui-list-row:last-child {
+  border-bottom: none;
+}
+
+/* Interactive rows are rendered as buttons; reset the UA chrome. */
+.ui-list-row--interactive {
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ui-list-row--interactive:hover {
+  background: var(--surface-raised);
+}
+
+/* The middle column has to be allowed to shrink, or a long project name pushes
+   the trailing columns out of the row. */
+.ui-list-row__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ui-list-row__title {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-list-row__meta {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* ------------------------------------------------------------- stat tile --- */
+/* Applied ONLY when a Stat is given an icon, so the four existing call sites on
+   the Ready screen keep rendering exactly as they did. */
+.ui-stat--tile {
+  padding: var(--space-4);
+}
+
+.ui-stat__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.ui-stat--tile .ui-stat__value {
+  font-size: var(--text-2xl);
+  /* Tabular figures so a changing number does not shift the tile's width. */
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-stat__delta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.ui-stat__delta--up {
+  color: var(--status-success);
+}
+
+/* Down is the same glyph rotated, so there is one arrow in the icon set. */
+.ui-stat__delta--down {
+  color: var(--status-error);
+}
+
+.ui-stat__delta--down .ui-icon {
+  transform: rotate(180deg);
+}
+
+/* ------------------------------------------------------------------ chart ---
+ * Colour lives entirely on these classes, exactly as `.ui-er*` does for the ER
+ * diagram, so the chart themes itself and follows the `[data-flow]` accent
+ * without the renderer knowing any colours.
+ * -------------------------------------------------------------------------- */
+.ui-chart {
+  /* The tooltip is positioned against this in percentages, which is what lets it
+     track a responsive SVG with no measurement. */
+  position: relative;
+}
+
+.ui-chart__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.ui-chart__svg:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.ui-chart__grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.ui-chart__tick {
+  fill: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.ui-chart__line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ui-chart__dot {
+  fill: var(--accent);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+.ui-chart__crosshair {
+  stroke: var(--border);
+  stroke-dasharray: 3 3;
+}
+
+.ui-chart__tooltip {
+  position: absolute;
+  /* Above the point and centred on it. */
+  transform: translate(-50%, calc(-100% - 8px));
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.ui-chart__tooltip strong {
+  display: block;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ----------------------------------------------------------- a11y utility --- */
+/* Off-screen but still announced. The chart pairs `role="img"` with a real table
+   of its values — a single long aria-label is a poor substitute for seven data
+   points. */
+.ui-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ----------------------------------------------------------------- search --- */
+.ui-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 0 1 320px;
+  padding: 0 var(--space-3);
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-muted);
+}
+
+.ui-search:focus-within {
+  border-color: var(--accent);
+}
+
+.ui-search__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+  outline: none;
+}
+
+/* The UA clear button sits at odds with the hairline aesthetic and duplicates
+   the Escape handler. */
+.ui-search__input::-webkit-search-cancel-button {
+  display: none;
+}
+
+/* ----------------------------------------------------------------- footer --- */
+.ui-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-4) var(--space-8);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+/* --------------------------------------------------------- sidebar bottom --- */
+/* `.ui-sidebar` is already a flex column, so one auto margin pins everything
+   from this element down to the bottom of the rail. */
+.ui-sidebar__footer {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* The shell's second column is a flex column so the footer sits below the main
+   content rather than floating at the viewport bottom on a short page. */
+.ui-shell__content {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-width: 0;
+}
+
+.ui-shell__content .ui-main {
+  flex: 1 1 auto;
+}
+
+/* ── 15 · Responsive ─────────────────────────────────────────────────────────
+ *
+ * The only width-based media queries in the system. Everything above this point
+ * is intrinsically fluid (`flex-wrap`, `auto-fill` grids, `minmax(0, 1fr)`), so
+ * these three breakpoints only have to handle the sidebar and the content cap.
+ * -------------------------------------------------------------------------- */
+
+/* Opt-in, per route. Widening the shared `.ui-main` cap instead would stretch
+   every wizard form to 1440px and pull the progress board's status chips away
+   from their artifact names — a legibility regression on the signature surface,
+   in exchange for one screen that wanted the room. */
+.ui-main--wide {
+  max-width: var(--content-wide);
+}
+
+/* Hamburger: only ever visible once the sidebar is a drawer. */
+.ui-navtoggle {
+  display: none;
+}
+
+/* Covers the content while the drawer is open, and closes it on tap. */
+.ui-scrim {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  /* Icon rail. The nav label is a real element precisely so it can be hidden
+     here; a bare text child could not be targeted. Each link keeps an
+     aria-label, so the rail stays announceable. */
+  .ui-shell {
+    grid-template-columns: var(--sidebar-w-collapsed) minmax(0, 1fr);
+  }
+
+  .ui-sidebar {
+    padding: var(--space-6) var(--space-2);
+    align-items: center;
+  }
+
+  .ui-nav {
+    width: 100%;
+  }
+
+  .ui-nav a {
+    justify-content: center;
+  }
+
+  .ui-nav__label,
+  .ui-sidebar__brand,
+  .ui-sidebar__footer .ui-card,
+  .ui-sidebar__footer .ui-list-row__body {
+    display: none;
+  }
+
+  .ui-sidebar__footer {
+    align-items: center;
+  }
+}
+
+@media (max-width: 720px) {
+  /* Off-canvas drawer: the grid collapses to a single column and the sidebar
+     lifts out of flow entirely. */
+  .ui-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ui-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: var(--sidebar-w);
+    padding: var(--space-6) var(--space-4);
+    align-items: stretch;
+    background: var(--bg);
+    z-index: var(--z-sticky);
+    transform: translateX(-100%);
+    transition: transform 200ms ease-out;
+  }
+
+  .ui-shell[data-nav-open='true'] .ui-sidebar {
+    transform: translateX(0);
+  }
+
+  /* Everything the icon rail hid comes back — at this width the drawer is full
+     width and there is room for labels again. */
+  .ui-nav a {
+    justify-content: flex-start;
+  }
+
+  .ui-nav__label,
+  .ui-sidebar__brand,
+  .ui-sidebar__footer .ui-card,
+  .ui-sidebar__footer .ui-list-row__body {
+    display: revert;
+  }
+
+  .ui-shell[data-nav-open='true'] .ui-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgb(0 0 0 / 45%);
+    z-index: var(--z-dropdown);
+  }
+
+  .ui-navtoggle {
+    display: inline-flex;
+  }
+
+  .ui-topbar,
+  .ui-footer {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .ui-main {
+    padding: var(--space-4);
+  }
+
+  /* The search box gives up its fixed basis so the topbar can fit a hamburger
+     and the New button beside it. */
+  .ui-search {
+    flex: 1 1 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-sidebar {
+    transition: none;
+  }
 }
