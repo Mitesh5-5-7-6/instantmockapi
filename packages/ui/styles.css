@@ -49,6 +49,23 @@
   --space-16: 64px;
 
   /* radius */
+  /* Layout.
+   *
+   * Breakpoints are deliberately NOT tokens: `@media` cannot read custom
+   * properties. They are a documented convention instead, enforced by review —
+   *   1280px  the dashboard drops to one column
+   *   1024px  the sidebar collapses to an icon rail
+   *    720px  the sidebar becomes an off-canvas drawer
+   */
+  --sidebar-w: 264px;
+  --sidebar-w-collapsed: 72px;
+  --content-wide: 1440px;
+
+  /* Stacking order, so a new layer never has to guess a number. */
+  --z-dropdown: 20;
+  --z-sticky: 30;
+  --z-modal: 50;
+
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
@@ -382,7 +399,7 @@ h3 {
   align-items: center;
   justify-content: center;
   padding: var(--space-6);
-  z-index: 50;
+  z-index: var(--z-modal);
 }
 
 .ui-modal {
@@ -475,7 +492,7 @@ h3 {
    *
    * Setting the minimum to 0 lets the column shrink and pushes the overflow back
    * down to the scroll containers built to handle it. */
-  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -490,7 +507,9 @@ h3 {
   gap: var(--space-8);
   position: sticky;
   top: 0;
-  height: 100vh;
+  /* dvh, not vh: on iOS Safari the URL bar makes 100vh taller than the visible
+     area, which would cut off the sign-out button at the foot of the rail. */
+  height: 100dvh;
 }
 
 .ui-sidebar__brand {
@@ -1348,4 +1367,132 @@ h3 {
 
 .ui-shell__content .ui-main {
   flex: 1 1 auto;
+}
+
+/* ── 15 · Responsive ─────────────────────────────────────────────────────────
+ *
+ * The only width-based media queries in the system. Everything above this point
+ * is intrinsically fluid (`flex-wrap`, `auto-fill` grids, `minmax(0, 1fr)`), so
+ * these three breakpoints only have to handle the sidebar and the content cap.
+ * -------------------------------------------------------------------------- */
+
+/* Opt-in, per route. Widening the shared `.ui-main` cap instead would stretch
+   every wizard form to 1440px and pull the progress board's status chips away
+   from their artifact names — a legibility regression on the signature surface,
+   in exchange for one screen that wanted the room. */
+.ui-main--wide {
+  max-width: var(--content-wide);
+}
+
+/* Hamburger: only ever visible once the sidebar is a drawer. */
+.ui-navtoggle {
+  display: none;
+}
+
+/* Covers the content while the drawer is open, and closes it on tap. */
+.ui-scrim {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  /* Icon rail. The nav label is a real element precisely so it can be hidden
+     here; a bare text child could not be targeted. Each link keeps an
+     aria-label, so the rail stays announceable. */
+  .ui-shell {
+    grid-template-columns: var(--sidebar-w-collapsed) minmax(0, 1fr);
+  }
+
+  .ui-sidebar {
+    padding: var(--space-6) var(--space-2);
+    align-items: center;
+  }
+
+  .ui-nav {
+    width: 100%;
+  }
+
+  .ui-nav a {
+    justify-content: center;
+  }
+
+  .ui-nav__label,
+  .ui-sidebar__brand,
+  .ui-sidebar__footer .ui-card,
+  .ui-sidebar__footer .ui-list-row__body {
+    display: none;
+  }
+
+  .ui-sidebar__footer {
+    align-items: center;
+  }
+}
+
+@media (max-width: 720px) {
+  /* Off-canvas drawer: the grid collapses to a single column and the sidebar
+     lifts out of flow entirely. */
+  .ui-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ui-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: var(--sidebar-w);
+    padding: var(--space-6) var(--space-4);
+    align-items: stretch;
+    background: var(--bg);
+    z-index: var(--z-sticky);
+    transform: translateX(-100%);
+    transition: transform 200ms ease-out;
+  }
+
+  .ui-shell[data-nav-open='true'] .ui-sidebar {
+    transform: translateX(0);
+  }
+
+  /* Everything the icon rail hid comes back — at this width the drawer is full
+     width and there is room for labels again. */
+  .ui-nav a {
+    justify-content: flex-start;
+  }
+
+  .ui-nav__label,
+  .ui-sidebar__brand,
+  .ui-sidebar__footer .ui-card,
+  .ui-sidebar__footer .ui-list-row__body {
+    display: revert;
+  }
+
+  .ui-shell[data-nav-open='true'] .ui-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgb(0 0 0 / 45%);
+    z-index: var(--z-dropdown);
+  }
+
+  .ui-navtoggle {
+    display: inline-flex;
+  }
+
+  .ui-topbar,
+  .ui-footer {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .ui-main {
+    padding: var(--space-4);
+  }
+
+  /* The search box gives up its fixed basis so the topbar can fit a hamburger
+     and the New button beside it. */
+  .ui-search {
+    flex: 1 1 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-sidebar {
+    transition: none;
+  }
 }
