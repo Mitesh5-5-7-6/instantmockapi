@@ -171,6 +171,34 @@
   .demo-footer > span:nth-child(2) { order: 3; width: 100%; }
 }
 
+/* Authenticated Demo API route: the same builder language as New Project, with
+ * a little extra hierarchy for the guided, preloaded model. */
+.demo-builder-page { padding-bottom: var(--space-8); }
+.demo-builder-heading { align-items: flex-start; margin-bottom: var(--space-6); gap: var(--space-6); }
+.demo-builder-heading h1 { margin-top: 6px; }
+.demo-builder-heading p { margin: 6px 0 0; }
+.demo-builder-heading .ui-stepper { flex: none; }
+.demo-builder-intro { border-color: color-mix(in srgb, var(--accent) 28%, var(--border)); }
+.demo-builder-intro h2 { margin-top: 6px; }
+.demo-builder-intro > p { max-width: 760px; }
+.demo-live-pill { display: inline-flex; align-items: center; gap: 7px; color: var(--status-success); font: 11px var(--font-mono); }
+.demo-live-pill span { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.demo-rule-guide { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); padding: var(--space-4); background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+.demo-rule-guide > div { display: grid; grid-template-columns: 28px 1fr; column-gap: 10px; align-items: start; }
+.demo-rule-guide > div > svg, .demo-rule-symbol { grid-row: span 2; margin-top: 2px; }
+.demo-rule-guide strong { font-size: var(--text-sm); }
+.demo-rule-guide span:not(.demo-rule-symbol) { color: var(--text-muted); font-size: var(--text-xs); line-height: 1.45; margin-top: 3px; }
+.demo-rule-symbol { display: inline-flex; align-items: center; justify-content: center; width: 27px; height: 21px; border: 1px solid currentColor; border-radius: 4px; font: 10px var(--font-mono); }
+.demo-rule-symbol--key { color: var(--status-warning); }
+.demo-rule-symbol--relation { color: var(--accent-2); }
+.demo-builder-actions { padding-top: var(--space-2); }
+.demo-coming-step { min-height: 220px; justify-content: center; align-items: flex-start; }
+
+@media (max-width: 850px) {
+  .demo-builder-heading { flex-direction: column; }
+  .demo-rule-guide { grid-template-columns: 1fr; }
+}
+
 /* Below this the two columns stop being readable side by side and stack. */
 @media (max-width: 1100px) {
   .dashboard-grid {

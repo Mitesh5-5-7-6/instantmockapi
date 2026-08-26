@@ -27,7 +27,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: 'home', status: 'ready' },
   { href: '/projects', label: 'Projects', icon: 'folder', status: 'ready' },
-  { href: '/demo/project-api/ecommerce', label: 'Demo API', icon: 'play', status: 'ready' },
+  { href: '/demo-api', label: 'Demo API', icon: 'play', status: 'ready' },
   { href: '/templates', label: 'Templates', icon: 'file-code', status: 'ready' },
   { href: '/collections', label: 'Collections', icon: 'layers', status: 'planned' },
   { href: '/requests', label: 'Requests', icon: 'inbox', status: 'planned' },
