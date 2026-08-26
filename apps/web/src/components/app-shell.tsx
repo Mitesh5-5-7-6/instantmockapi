@@ -2,73 +2,52 @@
 
 /**
  * App shell (doc 11): sidebar nav + top bar with plan indicator and account.
- * Gates on auth — unauthenticated visitors see the sign-in card instead.
+ *
+ * Gates on auth — an unauthenticated visitor is redirected to `/login`. The
+ * sign-in form used to live *in here* as a card, which meant it had no URL;
+ * see `PUBLIC_PREFIXES` below for why that changed.
  */
 
 import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { Button, Card, Icon, IconTile, Input } from '@instantmockapi/ui';
-import { useAuthState, useLogin, useMe } from '../lib/hooks';
+import { usePathname, useRouter } from 'next/navigation';
+import { Button, Icon, IconTile } from '@instantmockapi/ui';
+import { useMe, useRestoreSession } from '../lib/hooks';
 import { VISIBLE_NAV_ITEMS, isNavActive } from '../lib/nav-items';
 import { SidebarPlanCard } from './sidebar-plan-card';
 import { SidebarProfile } from './sidebar-profile';
 import { TopSearch } from './top-search';
 import { AppFooter } from './app-footer';
 
-function LoginScreen() {
-  const login = useLogin();
-  const [email, setEmail] = useState('');
-  return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <Card className="ui-stack">
-        <div>
-          <h1 style={{ marginBottom: 'var(--space-1)' }}>
-            Instant<span style={{ color: 'var(--accent)' }}>Mock</span>API
-          </h1>
-          <p className="ui-meta">Turn a schema into a working backend in minutes.</p>
-        </div>
-        <form
-          className="ui-stack"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (email) {
-              login.mutate(email);
-            }
-          }}
-        >
-          <Input
-            type="email"
-            required
-            placeholder="you@example.com"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            aria-label="Email"
-          />
-          <Button type="submit" disabled={login.isPending}>
-            {login.isPending ? 'Signing in…' : 'Continue with email'}
-          </Button>
-          {login.isError ? (
-            <p className="ui-error" role="alert">
-              {login.error.message}
-            </p>
-          ) : null}
-          <Link
-            href="/demo/project-api/ecommerce"
-            style={{ textAlign: 'center', fontSize: 'var(--text-sm)' }}
-          >
-            Explore the E-commerce API demo
-          </Link>
-        </form>
-      </Card>
-    </div>
+/**
+ * Paths that render bare, with no shell and no auth gate.
+ *
+ * The sign-in form used to be a card rendered *inside* this component, which
+ * meant it had no URL of its own — nothing could link to it, a failed
+ * verification could not send anyone anywhere, and the browser's back button did
+ * nothing useful. These are real routes instead.
+ *
+ * An allowlist rather than a Next route group (`app/(auth)/` + `app/(app)/`):
+ * the route group is the tidier structure but means moving every existing page
+ * directory, and this is three lines and reversible. The route group stays
+ * available if the auth surface grows.
+ */
+const PUBLIC_PREFIXES = [
+  '/login',
+  '/signup',
+  '/forgot-password',
+  '/reset-password',
+  '/verify-email',
+  '/auth/',
+  // Demo routes are public product surfaces — replacing them with a sign-in
+  // screen would make the marketing link dead for exactly the people it is for.
+  '/demo',
+] as const;
+
+export function isPublicPath(pathname: string): boolean {
+  return PUBLIC_PREFIXES.some(
+    (prefix) =>
+      pathname === prefix || pathname.startsWith(prefix.endsWith('/') ? prefix : `${prefix}/`),
   );
 }
 
@@ -89,10 +68,25 @@ function Splash() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const authState = useAuthState();
+  const router = useRouter();
+  // Mounted here, above everything that fetches: the access token lives in memory
+  // only, so on every page load the app has to spend one request asking the API
+  // whether the refresh cookie is still good.
+  const authState = useRestoreSession();
   const me = useMe();
   const [navOpen, setNavOpen] = useState(false);
-  const isPublicDemo = pathname === '/demo' || pathname.startsWith('/demo/');
+  const isPublic = isPublicPath(pathname);
+
+  // Redirect rather than render a sign-in card in place: an unauthenticated
+  // visitor to /projects should end up at a URL that says /login, so the browser
+  // history and any deep link behave sensibly. `me.isError` is included because a
+  // rejected session looks the same to the user as no session.
+  const shouldRedirect = !isPublic && (authState === 'anonymous' || me.isError);
+  useEffect(() => {
+    if (shouldRedirect) {
+      router.replace('/login');
+    }
+  }, [shouldRedirect, router]);
 
   // Close the drawer whenever the route changes. Without this, tapping a nav
   // link on a phone leaves the drawer sitting over the page it just opened.
@@ -115,21 +109,25 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [navOpen]);
 
-  // Demo routes are public product surfaces and should not be replaced by the
-  // authenticated shell's sign-in screen.
-  if (isPublicDemo) {
+  // Auth pages and demo routes render bare — no shell, no gate. Checked before
+  // anything else so an unauthenticated visitor can actually reach /login rather
+  // than being redirected to it from itself.
+  if (isPublic) {
     return <>{children}</>;
   }
 
-  // No token, or the token was rejected (apiFetch clears it after a failed
-  // refresh) — back to sign-in. Both flip reactively, so signing in swaps the
-  // screen over without a page refresh.
+  // Not signed in, or the session was rejected — send them to the sign-in route.
+  // `router.replace`, not a rendered card: the URL has to change, or a failed
+  // verification link has nowhere to send anyone and the back button does
+  // nothing. The redirect lives in an effect because navigating during render is
+  // not allowed.
   if (authState === 'anonymous' || me.isError) {
-    return <LoginScreen />;
+    return <Splash />;
   }
 
-  // Auth state not resolved yet (server render / pre-hydration), or /v1/me
-  // still in flight.
+  // Auth state not resolved yet — the server render, or the boot refresh still
+  // in flight — or /v1/me still loading. Rendering anything decisive here would
+  // flash a sign-in screen at already-signed-in visitors on every page load.
   if (authState === 'unknown' || !me.data) {
     return <Splash />;
   }

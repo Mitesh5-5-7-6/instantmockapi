@@ -1,11 +1,25 @@
 /**
- * Typed client for the platform API (doc 08). Handles the bearer token,
- * the uniform error envelope, and refresh-token rotation.
+ * Typed client for the platform API (doc 08, doc 13 §1).
+ *
+ * ## Where the tokens live, and why
+ *
+ * The **access token is a module variable** — not `localStorage`, not a cookie
+ * readable by script. It dies with the page, which is the point: an XSS bug can
+ * only steal a credential that is about to expire anyway, and cannot reach into
+ * storage for a durable one.
+ *
+ * The **refresh token is an httpOnly cookie** the API sets and this code never
+ * sees. Because the access token does not survive a reload, the app must ask for
+ * a new one on boot — `restoreSession()` below, which every consumer waits on
+ * before the first authenticated request.
+ *
+ * That makes auth state genuinely asynchronous, which it was not before: the old
+ * client could answer "is the user signed in" synchronously from
+ * `localStorage`. Now the honest answer starts as `unknown` and resolves to
+ * `authenticated` or `anonymous` once the boot refresh returns.
  */
 
-import type { ApiErrorEnvelope, AuthTokens } from './api-types';
-
-const TOKEN_STORAGE_KEY = 'instantmockapi.tokens';
+import type { ApiErrorEnvelope, AuthSession } from './api-types';
 
 export class ApiError extends Error {
   constructor(
@@ -19,76 +33,76 @@ export class ApiError extends Error {
   }
 }
 
-export interface StoredTokens {
-  accessToken: string;
-  refreshToken: string;
-}
-
 export function apiBaseUrl(): string {
   return process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 }
 
-export function loadTokens(): StoredTokens | null {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-  const raw = window.localStorage.getItem(TOKEN_STORAGE_KEY);
-  if (!raw) {
-    return null;
-  }
-  try {
-    return JSON.parse(raw) as StoredTokens;
-  } catch {
-    return null;
-  }
-}
+/**
+ * The header the API demands on every cookie-authenticated route.
+ *
+ * A browser cannot attach a custom header to a cross-origin request without
+ * first passing a CORS preflight, and the preflight fails for any origin the API
+ * does not allow — so this is what makes those routes un-forgeable from another
+ * site. It must match `CSRF_HEADER_VALUE` in the API.
+ */
+const CSRF_HEADERS = { 'x-requested-with': 'instantmockapi' } as const;
 
-const tokenListeners = new Set<() => void>();
+/** Access token, in memory only. Never persisted anywhere. */
+let accessToken: string | null = null;
 
-function handleStorageEvent(event: StorageEvent): void {
-  if (event.key === null || event.key === TOKEN_STORAGE_KEY) {
-    for (const listener of tokenListeners) {
-      listener();
-    }
-  }
-}
+export type AuthState = 'unknown' | 'authenticated' | 'anonymous';
+
+let authState: AuthState = 'unknown';
+
+const authListeners = new Set<() => void>();
 
 /**
- * Subscribe to token changes so components re-render when auth state flips —
- * login, logout, refresh rotation, or a sign-out in another tab. Storage
- * writes in this tab do not fire `storage` events, so `saveTokens` notifies
- * listeners directly. Shaped for `useSyncExternalStore`.
+ * Subscribe to auth-state changes. Shaped for `useSyncExternalStore`.
+ *
+ * No `storage` event listener any more: with nothing in `localStorage` there is
+ * nothing for another tab to observe. Cross-tab agreement now comes from the
+ * shared cookie instead — each tab discovers the same session on its own boot,
+ * and a sign-out in one tab is noticed by the others when their access token
+ * next expires and the refresh is refused.
  */
-export function subscribeTokens(listener: () => void): () => void {
-  tokenListeners.add(listener);
-  if (typeof window !== 'undefined' && tokenListeners.size === 1) {
-    window.addEventListener('storage', handleStorageEvent);
-  }
+export function subscribeAuth(listener: () => void): () => void {
+  authListeners.add(listener);
   return () => {
-    tokenListeners.delete(listener);
-    if (typeof window !== 'undefined' && tokenListeners.size === 0) {
-      window.removeEventListener('storage', handleStorageEvent);
-    }
+    authListeners.delete(listener);
   };
 }
 
-/** Snapshot of auth state — a primitive, so it is referentially stable. */
-export function hasTokens(): boolean {
-  return loadTokens() !== null;
+export function getAuthState(): AuthState {
+  return authState;
 }
 
-export function saveTokens(tokens: StoredTokens | null): void {
-  if (typeof window === 'undefined') {
+/** The server/hydration snapshot. Always `unknown` — there is no session there. */
+export function getServerAuthState(): AuthState {
+  return 'unknown';
+}
+
+function setAuth(state: AuthState, token: string | null): void {
+  accessToken = token;
+  if (authState === state) {
+    // Still notify on a token swap within the same state (a silent refresh), so
+    // nothing caches a stale header — but skip the render churn of an unchanged
+    // state transition.
     return;
   }
-  if (tokens) {
-    window.localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(tokens));
-  } else {
-    window.localStorage.removeItem(TOKEN_STORAGE_KEY);
-  }
-  for (const listener of tokenListeners) {
+  authState = state;
+  for (const listener of authListeners) {
     listener();
   }
+}
+
+/** Record a session the API just handed us. */
+export function adoptSession(session: { accessToken: string }): void {
+  setAuth('authenticated', session.accessToken);
+}
+
+/** Forget the local session. Does not touch the cookie — only the API can. */
+export function forgetSession(): void {
+  setAuth('anonymous', null);
 }
 
 async function parseError(response: Response): Promise<ApiError> {
@@ -106,47 +120,99 @@ async function parseError(response: Response): Promise<ApiError> {
   );
 }
 
-async function tryRefresh(): Promise<boolean> {
-  const tokens = loadTokens();
-  if (!tokens) {
+/**
+ * Ask the API for a fresh access token using the refresh cookie.
+ *
+ * `credentials: 'include'` is mandatory and easy to omit: without it the browser
+ * sends no cookie cross-origin and every refresh fails with a 401 that looks
+ * exactly like an expired session.
+ */
+async function requestRefresh(): Promise<boolean> {
+  try {
+    const response = await fetch(`${apiBaseUrl()}/v1/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: CSRF_HEADERS,
+    });
+    if (!response.ok) {
+      // A 401 here is the ordinary answer for a visitor who is not signed in,
+      // not an error worth surfacing.
+      forgetSession();
+      return false;
+    }
+    const session = (await response.json()) as AuthSession;
+    adoptSession(session);
+    return true;
+  } catch {
+    // Network failure. Deliberately *not* treated as "signed out": a flaky
+    // connection would otherwise dump the user on the sign-in screen and lose
+    // whatever they were doing.
     return false;
   }
-  const response = await fetch(`${apiBaseUrl()}/v1/auth/refresh`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ refreshToken: tokens.refreshToken }),
-  });
-  if (!response.ok) {
-    saveTokens(null);
-    return false;
-  }
-  const fresh = (await response.json()) as AuthTokens;
-  saveTokens({ accessToken: fresh.accessToken, refreshToken: fresh.refreshToken });
-  return true;
 }
 
 /**
- * Authenticated JSON request against the platform API. On a 401 the client
- * attempts one refresh-token rotation before surfacing the error.
+ * In-flight refresh, shared by every caller.
+ *
+ * Without this, a page that fires six queries at once and finds the access token
+ * expired would send six refresh requests. Worse, under the old rotating-cookie
+ * design five of them would have failed. The cookie no longer rotates, but
+ * coalescing is still the difference between one request and a burst that hits
+ * the endpoint's own rate limit.
+ */
+let inFlightRefresh: Promise<boolean> | null = null;
+
+function refreshOnce(): Promise<boolean> {
+  inFlightRefresh ??= requestRefresh().finally(() => {
+    inFlightRefresh = null;
+  });
+  return inFlightRefresh;
+}
+
+/**
+ * Establish auth state at app boot.
+ *
+ * Called once, before anything else fetches. Until it resolves the state is
+ * `unknown` and the shell shows its splash — rendering the sign-in screen during
+ * that window would flash it at every already-signed-in visitor on every page
+ * load.
+ */
+export function restoreSession(): Promise<boolean> {
+  return refreshOnce();
+}
+
+/**
+ * Authenticated JSON request against the platform API.
+ *
+ * On a 401 it refreshes once and retries. The retry is what makes a 900-second
+ * access token invisible: the token expires mid-session, one request pays for a
+ * refresh, and the user notices nothing.
  */
 export async function apiFetch<T>(
   path: string,
-  options: { method?: string; body?: unknown; retryOn401?: boolean } = {},
+  options: {
+    method?: string;
+    body?: unknown;
+    retryOn401?: boolean;
+    /** Send the refresh cookie and the CSRF header. Only /v1/auth needs this. */
+    withCredentials?: boolean;
+  } = {},
 ): Promise<T> {
-  const { method = 'GET', body, retryOn401 = true } = options;
-  const tokens = loadTokens();
+  const { method = 'GET', body, retryOn401 = true, withCredentials = false } = options;
 
   const response = await fetch(`${apiBaseUrl()}${path}`, {
     method,
+    ...(withCredentials ? { credentials: 'include' as const } : {}),
     headers: {
       ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-      ...(tokens ? { authorization: `Bearer ${tokens.accessToken}` } : {}),
+      ...(accessToken !== null ? { authorization: `Bearer ${accessToken}` } : {}),
+      ...(withCredentials ? CSRF_HEADERS : {}),
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
 
-  if (response.status === 401 && retryOn401 && (await tryRefresh())) {
-    return apiFetch<T>(path, { method, body, retryOn401: false });
+  if (response.status === 401 && retryOn401 && (await refreshOnce())) {
+    return apiFetch<T>(path, { method, body, withCredentials, retryOn401: false });
   }
   if (!response.ok) {
     throw await parseError(response);
@@ -158,8 +224,8 @@ export async function apiFetch<T>(
 }
 
 /**
- * Subscribe to a job's SSE progress stream (doc 08 §4). EventSource cannot
- * carry an Authorization header, so this parses the stream via fetch.
+ * Subscribe to a job's SSE progress stream (doc 08 §4). EventSource cannot carry
+ * an Authorization header, so this parses the stream via fetch.
  * Returns an abort function.
  */
 export function subscribeJobStream(
@@ -168,12 +234,11 @@ export function subscribeJobStream(
   onEnd?: () => void,
 ): () => void {
   const controller = new AbortController();
-  const tokens = loadTokens();
 
   void (async () => {
     try {
       const response = await fetch(`${apiBaseUrl()}/v1/jobs/${jobId}/stream`, {
-        headers: tokens ? { authorization: `Bearer ${tokens.accessToken}` } : {},
+        headers: accessToken !== null ? { authorization: `Bearer ${accessToken}` } : {},
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
@@ -212,4 +277,9 @@ export function subscribeJobStream(
   })();
 
   return () => controller.abort();
+}
+
+/** The access token, for the few places that need it directly (artifact downloads). */
+export function currentAccessToken(): string | null {
+  return accessToken;
 }

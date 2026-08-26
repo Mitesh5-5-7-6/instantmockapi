@@ -18,6 +18,15 @@ export interface AuthUser {
   id: string;
   email: string;
   plan: PlanTier;
+  /**
+   * Revocation counter, mirrored from `User.tokenVersion`.
+   *
+   * Bumped on password change, password reset and sign-out, which invalidates
+   * every outstanding refresh token at once without a session store. It is
+   * carried on both token types but **compared only on refresh**, where the
+   * user is loaded anyway — see the note on `verifyToken`.
+   */
+  tokenVersion: number;
 }
 
 /** Verified claims extracted from a token. */
@@ -27,6 +36,7 @@ export interface AuthTokenClaims {
   email: string;
   plan: PlanTier;
   tokenType: TokenType;
+  tokenVersion: number;
 }
 
 /** Refresh tokens outlive access tokens; 30 days pending a session store. */
@@ -43,7 +53,7 @@ async function signToken(
   config: EnvConfig,
 ): Promise<string> {
   const nowSeconds = Math.floor(Date.now() / 1000);
-  return new SignJWT({ email: user.email, plan: user.plan, tokenType })
+  return new SignJWT({ email: user.email, plan: user.plan, tokenType, tv: user.tokenVersion })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(user.id)
     .setIssuedAt(nowSeconds)
@@ -79,6 +89,13 @@ function unauthorized(message: string): AppError {
  * Verify a token's signature, expiry, and claim shape.
  * Returns UNAUTHORIZED for any failure — callers never learn why a token
  * was rejected beyond "invalid or expired".
+ *
+ * **`tokenVersion` is returned but not checked here.** Comparing it against the
+ * stored value needs a database read, and this runs on every authenticated
+ * request — `authenticate` is deliberately stateless. The comparison belongs in
+ * the refresh handler, which loads the user anyway. The consequence, stated so
+ * it is not a surprise: an already-issued access token stays valid for the rest
+ * of its (short) lifetime after a password reset.
  */
 export async function verifyToken(
   token: string,
@@ -97,15 +114,23 @@ export async function verifyToken(
   const email = payload['email'];
   const plan = payload['plan'];
   const tokenType = payload['tokenType'];
+  const tokenVersion = payload['tv'];
 
   if (typeof sub !== 'string' || !sub || typeof email !== 'string' || !isPlanTier(plan)) {
+    return err(unauthorized('Token is missing required claims'));
+  }
+  // Required rather than defaulted to 0: a token minted before this claim
+  // existed must not be treated as version 0 and silently survive a revocation
+  // it predates. Tokens issued before this ships are rejected, which is the same
+  // outcome as the session change that ships alongside it.
+  if (!Number.isInteger(tokenVersion)) {
     return err(unauthorized('Token is missing required claims'));
   }
   if (tokenType !== expectedType) {
     return err(unauthorized(`Expected ${expectedType} token`));
   }
 
-  return ok({ sub, email, plan, tokenType: expectedType });
+  return ok({ sub, email, plan, tokenType: expectedType, tokenVersion: tokenVersion as number });
 }
 
 /** Verify an access token (the `Authorization: Bearer` credential). */

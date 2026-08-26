@@ -1496,3 +1496,245 @@ h3 {
     transition: none;
   }
 }
+
+/* ── 17 · Auth pages ────────────────────────────────────────────────────── */
+
+/* These render outside the shell (see AppShell's PUBLIC_PREFIXES), so the page
+   frame is theirs to provide — there is no sidebar or topbar to sit inside. */
+
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+  padding: var(--space-6) var(--space-4);
+  background: var(--bg);
+}
+
+.auth-card {
+  width: 100%;
+  /* 400px, not the card default: a sign-in form is two fields, and a wide one
+     puts the label and the input at opposite ends of a long line. */
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  /* No shadow: the design system is flat and hairline-bordered throughout (doc
+     12), and one elevated card would be the only thing on the page casting one. */
+}
+
+.auth-card__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  /* Not underlined and not accent-coloured: it is the product mark, not a call
+     to action competing with the submit button. */
+  color: inherit;
+  text-decoration: none;
+  align-self: flex-start;
+}
+
+.auth-card__brand:hover {
+  text-decoration: none;
+}
+
+.auth-card__head h1 {
+  font-size: var(--text-xl);
+  margin-bottom: var(--space-1);
+}
+
+.auth-card__foot {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.auth-page__aside {
+  font-size: var(--text-sm);
+}
+
+.auth-page__aside a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.auth-row {
+  display: flex;
+  justify-content: flex-end;
+  font-size: var(--text-sm);
+  /* Pulled up against the field above: it belongs to the password input, not to
+     the submit button below it. */
+  margin-top: calc(var(--space-3) * -1);
+}
+
+/* ── Password input with its visibility toggle ── */
+
+.auth-password {
+  position: relative;
+}
+
+.auth-password .ui-input {
+  /* Room for the toggle, so a long password does not run underneath it. */
+  padding-right: 40px;
+}
+
+.auth-password__toggle {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 32px is under the 44px touch target ideal, but the control is inside a
+     40px-tall input and enlarging it would overflow the field. The password can
+     always be retyped, so a mis-tap here is cheap. */
+  width: 32px;
+  height: 32px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.auth-password__toggle:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-raised);
+}
+
+.auth-password__toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ── Strength meter and rules checklist ── */
+
+.auth-strength {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.auth-strength__bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.auth-strength__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--status-error);
+  transition:
+    width 160ms ease,
+    background-color 160ms ease;
+}
+
+.auth-strength__bar[data-strength='fair'] span {
+  background: var(--status-warning);
+}
+
+.auth-strength__bar[data-strength='good'] span,
+.auth-strength__bar[data-strength='strong'] span {
+  background: var(--status-success);
+}
+
+.auth-strength__label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  /* Reserved even when empty, so the rules below do not jump on the first
+     keystroke. */
+  min-height: 1em;
+}
+
+.auth-rules {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-xs);
+}
+
+.auth-rules li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-muted);
+}
+
+/* Colour is not the only signal — the icon changes from × to ✓ as well, so the
+   state survives a monochrome display and colour-blindness. */
+.auth-rules li[data-met='true'] {
+  color: var(--status-success);
+}
+
+/* ── Notices ── */
+
+.auth-notice {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.auth-notice .ui-stack--tight {
+  gap: var(--space-2);
+}
+
+/* ── Google button and the "or" rule ── */
+
+.auth-google {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Two rules drawn with pseudo-elements rather than a border on the text, so the
+   line length adapts to the word between them. */
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.ui-field__hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-top: var(--space-1);
+}
+
+.ui-stack--tight {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}

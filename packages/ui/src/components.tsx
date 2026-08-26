@@ -102,11 +102,44 @@ export function Checkbox({ checked, onChange, label, disabled }: CheckboxProps) 
   );
 }
 
-export function Field({ label, children }: { label: string; children: ReactNode }) {
+export interface FieldProps {
+  label: string;
+  children: ReactNode;
+  /**
+   * The id of the control this labels.
+   *
+   * When given, the label is a real `<label htmlFor>` — which is what lets a
+   * screen reader announce the field and what makes clicking the text focus the
+   * input. Without it the text is only visually adjacent, so a placeholder ends
+   * up doing the labelling and disappears on the first keystroke (WCAG 3.3.2).
+   *
+   * Optional so the existing call sites keep working; pass it on anything a
+   * person has to fill in.
+   */
+  htmlFor?: string;
+  /** Small explanatory text under the label — units, formats, constraints. */
+  hint?: ReactNode;
+  /** Validation message. Rendered with role="alert" so it is announced. */
+  error?: string | null;
+}
+
+export function Field({ label, children, htmlFor, hint, error }: FieldProps) {
   return (
     <div>
-      <span className="ui-label">{label}</span>
+      {htmlFor !== undefined ? (
+        <label className="ui-label" htmlFor={htmlFor}>
+          {label}
+        </label>
+      ) : (
+        <span className="ui-label">{label}</span>
+      )}
       {children}
+      {hint !== undefined && hint !== null ? <p className="ui-field__hint">{hint}</p> : null}
+      {error !== undefined && error !== null && error !== '' ? (
+        <p className="ui-error" role="alert">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

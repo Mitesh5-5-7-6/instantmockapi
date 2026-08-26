@@ -6,7 +6,7 @@ import {
   type QueryFeatures,
 } from '@instantmockapi/ips';
 import { goldenFixtureIPS } from '../../__tests__/golden-fixture.js';
-import { goldenRelationsIPS } from '../../__tests__/golden-relations-fixture.js';
+import { goldenRelationsIPS } from '../../../ips/__tests__/golden-relations-fixture.js';
 import { generateHostingConfig, type HostedEntityConfig, type HostingConfig } from './hosting.js';
 
 describe('generateHostingConfig (Worker F)', () => {

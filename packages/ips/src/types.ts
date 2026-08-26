@@ -6,7 +6,22 @@
  */
 
 import type { HttpMethod, ProjectKind } from '@instantmockapi/shared';
-import type { QueryFeatures } from './query.js';
+
+/**
+ * Switchable query capabilities of a hosted API (doc 19 §Phase 4).
+ *
+ * Defined **here rather than in query.ts**, where the logic that reads them
+ * lives, for one structural reason: `GenerationConfig` below carries a `features`
+ * block, so the toggle vocabulary is part of the IPS document shape. Keeping it
+ * in query.ts made types.ts import query.ts while query.ts imported types.ts for
+ * `Entity` and `Field` — a cycle dependency-cruiser rejects, and one that would
+ * eventually bite at module-init time rather than only in a linter.
+ */
+export const QUERY_FEATURES = ['search', 'filter', 'sort', 'include'] as const;
+
+export type QueryFeature = (typeof QUERY_FEATURES)[number];
+
+export type QueryFeatures = Record<QueryFeature, boolean>;
 
 /**
  * Valid primitive and nested field types in the IPS.

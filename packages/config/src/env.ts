@@ -63,8 +63,41 @@ export interface EnvConfig {
   /** JWT signing secret */
   readonly jwtSecret: string;
 
-  /** JWT token lifetime in seconds */
+  /**
+   * Access-token lifetime in seconds.
+   *
+   * Short on purpose (doc 13 §1): revocation via `tokenVersion` is checked on
+   * refresh, not on every request, so an already-issued access token outlives a
+   * password reset by at most this long. Refreshing is cheap; an hour of
+   * exposure is not.
+   */
   readonly jwtExpiresIn: number;
+
+  /**
+   * Exact origin the web app is served from. Used for CORS, which with
+   * credentialed requests may not answer `*` — the browser rejects a wildcard
+   * whenever cookies are involved.
+   */
+  readonly webOrigin: string;
+
+  /**
+   * Public URL of the web app, used to build the links inside emails. Usually
+   * identical to `webOrigin`; kept separate because a link may need to point at
+   * a canonical marketing domain while CORS still names the app origin.
+   */
+  readonly appUrl: string;
+
+  /** Resend API key. Empty ⇒ email is printed to the log instead of sent. */
+  readonly resendApiKey: string;
+
+  /** From address for transactional mail, e.g. `InstantMockAPI <no-reply@…>`. */
+  readonly emailFrom: string;
+
+  /** Google OAuth client id (public; also needed by the web app). */
+  readonly googleClientId: string;
+
+  /** Google OAuth client secret. Never leaves the API. */
+  readonly googleClientSecret: string;
 
   /** Platform API rate limit (requests per minute per user) */
   readonly rateLimitPerMinute: number;
@@ -100,6 +133,16 @@ export interface EnvConfig {
    * built as `${hostedBaseUrl}/${projectId}`. Override per-deployment. */
   readonly hostedBaseUrl: string;
 }
+
+/**
+ * The published default. Named rather than inlined so the production guard can
+ * compare against the same literal the loader falls back to — two copies of the
+ * string would eventually drift and quietly disarm the check.
+ */
+export const DEV_JWT_SECRET = 'dev-secret-change-in-production';
+
+/** Below this a JWT_SECRET is short enough to be worth brute-forcing offline. */
+const MIN_JWT_SECRET_LENGTH = 32;
 
 function envStr(key: string, fallback: string): string {
   return process.env[key] ?? fallback;
@@ -139,11 +182,13 @@ function resolveRedisEnabled(nodeEnv: string): boolean {
  */
 export function loadEnvConfig(): EnvConfig {
   const nodeEnv = envStr('NODE_ENV', 'development');
+  const webPort = envInt('WEB_PORT', 3000);
+  const webOrigin = envStr('WEB_ORIGIN', `http://localhost:${webPort}`);
   return {
     nodeEnv: nodeEnv as EnvConfig['nodeEnv'],
     apiPort: envInt('API_PORT', 4000),
     mockRuntimePort: envInt('MOCK_RUNTIME_PORT', 4001),
-    webPort: envInt('WEB_PORT', 3000),
+    webPort,
     mongoUri: envStr('MONGO_URI', 'mongodb://localhost:27017/instantmockapi'),
     redisUrl: envStr('REDIS_URL', 'redis://localhost:6379'),
     redisEnabled: resolveRedisEnabled(nodeEnv),
@@ -162,8 +207,14 @@ export function loadEnvConfig(): EnvConfig {
     s3Bucket: envStr('S3_BUCKET', 'instantmockapi-artifacts'),
     s3AccessKey: envStr('S3_ACCESS_KEY', ''),
     s3SecretKey: envStr('S3_SECRET_KEY', ''),
-    jwtSecret: envStr('JWT_SECRET', 'dev-secret-change-in-production'),
-    jwtExpiresIn: envInt('JWT_EXPIRES_IN', 3600),
+    jwtSecret: envStr('JWT_SECRET', DEV_JWT_SECRET),
+    jwtExpiresIn: envInt('JWT_EXPIRES_IN', 900),
+    webOrigin,
+    appUrl: envStr('APP_URL', webOrigin),
+    resendApiKey: envStr('RESEND_API_KEY', ''),
+    emailFrom: envStr('EMAIL_FROM', 'InstantMockAPI <no-reply@instantmockapi.dev>'),
+    googleClientId: envStr('GOOGLE_CLIENT_ID', ''),
+    googleClientSecret: envStr('GOOGLE_CLIENT_SECRET', ''),
     rateLimitPerMinute: envInt('RATE_LIMIT_PER_MINUTE', 100),
     mockRateLimitPerMinute: envInt('MOCK_RATE_LIMIT_PER_MINUTE', 200),
     maxNestingDepth: envInt('MAX_NESTING_DEPTH', 10),
@@ -176,4 +227,66 @@ export function loadEnvConfig(): EnvConfig {
     storageMongoBucket: envStr('STORAGE_MONGO_BUCKET', 'artifacts'),
     hostedBaseUrl: envStr('HOSTED_BASE_URL', 'https://api.instantmockapi.dev/p'),
   };
+}
+
+/**
+ * Every way the configuration is unfit for production, or an empty list.
+ *
+ * Split from the thrower so tests can read the reasons without catching, and so
+ * a deployment script can report all of them at once instead of one per restart.
+ *
+ * Returns an empty list for any non-production environment — a developer must be
+ * able to run the whole stack with nothing configured.
+ */
+export function productionConfigProblems(config: EnvConfig): string[] {
+  if (config.nodeEnv !== 'production') {
+    return [];
+  }
+  const problems: string[] = [];
+
+  if (config.jwtSecret === DEV_JWT_SECRET) {
+    // The worst failure mode available: the default is in a public repository,
+    // so anyone can mint a token for any account.
+    problems.push('JWT_SECRET is still the published development default');
+  } else if (config.jwtSecret.length < MIN_JWT_SECRET_LENGTH) {
+    problems.push(
+      `JWT_SECRET is ${config.jwtSecret.length} characters; at least ${MIN_JWT_SECRET_LENGTH} are required`,
+    );
+  }
+
+  if (config.resendApiKey === '') {
+    // Without a mail transport signup and password reset are both dead ends —
+    // the link is only written to the log, where nobody will read it.
+    problems.push('RESEND_API_KEY is empty, so no verification or reset email can be delivered');
+  }
+
+  if (config.googleClientId === '' || config.googleClientSecret === '') {
+    problems.push('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are required for Google sign-in');
+  }
+
+  if (!config.appUrl.startsWith('https://')) {
+    // Email links land in a browser that will drop the auth cookie on http, and
+    // an emailed token over http is readable in transit.
+    problems.push(`APP_URL must be https in production (got "${config.appUrl}")`);
+  }
+
+  return problems;
+}
+
+/**
+ * Throw unless the configuration is fit for production. Called at boot, before
+ * anything listens.
+ *
+ * Refusing to start is deliberately louder than a warning: a warning scrolls
+ * past in a deploy log and the service runs anyway, on a secret everyone knows.
+ */
+export function assertProductionSecrets(config: EnvConfig): void {
+  const problems = productionConfigProblems(config);
+  if (problems.length > 0) {
+    throw new Error(
+      `Refusing to start in production with an unsafe configuration:\n${problems
+        .map((problem) => `  - ${problem}`)
+        .join('\n')}`,
+    );
+  }
 }

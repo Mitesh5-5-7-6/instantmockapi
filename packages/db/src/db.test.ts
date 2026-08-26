@@ -3,6 +3,7 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose, { Types } from 'mongoose';
 import { connectDB, disconnectDB } from './connection.js';
 import { User } from './models/user.js';
+import { AuthToken, AUTH_TOKEN_TTL_SECONDS } from './models/authToken.js';
 import { Project, type IProject } from './models/project.js';
 import { Version } from './models/version.js';
 import { Artifact } from './models/artifact.js';
@@ -71,6 +72,143 @@ describe('models', () => {
     await expect(User.create({ email: 'dup@example.com', authProvider: 'google' })).rejects.toThrow(
       /duplicate key/i,
     );
+  });
+
+  it('defaults the credential fields to "no password, unverified, version 0"', async () => {
+    const user = await User.create({ email: 'new@example.com', authProvider: 'email' });
+    // Null rather than undefined: "password not set" is a state the login flow
+    // reads and acts on, so it has to survive a round trip to the database.
+    expect(await User.findById(user._id).select('+passwordHash').lean()).toMatchObject({
+      passwordHash: null,
+      emailVerifiedAt: null,
+      tokenVersion: 0,
+      googleSub: null,
+    });
+  });
+
+  /**
+   * `select: false` on passwordHash is the last line of defence against a hash
+   * reaching a response body through a serializer written later — an ordinary
+   * read must not carry it.
+   */
+  it('omits passwordHash from an ordinary read', async () => {
+    const user = await User.create({
+      email: 'secret@example.com',
+      authProvider: 'email',
+      passwordHash: 'scrypt$65536$8$1$c2FsdA$aGFzaA',
+    });
+    const plain = await User.findById(user._id).lean();
+    expect(plain).not.toHaveProperty('passwordHash');
+    const explicit = await User.findById(user._id).select('+passwordHash').lean();
+    expect(explicit?.passwordHash).toBe('scrypt$65536$8$1$c2FsdA$aGFzaA');
+  });
+
+  it('enforces unique googleSub', async () => {
+    await User.syncIndexes();
+    await User.create({ email: 'g1@example.com', authProvider: 'google', googleSub: 'sub-1' });
+    await expect(
+      User.create({ email: 'g2@example.com', authProvider: 'google', googleSub: 'sub-1' }),
+    ).rejects.toThrow(/duplicate key/i);
+  });
+
+  /**
+   * Same shape of trap as the project publicId index: every account that predates
+   * Google sign-in has googleSub null, so a plain unique index would reject all
+   * but the first of them. The partial filter is what keeps them writable.
+   */
+  it('tolerates many users with no googleSub', async () => {
+    await User.syncIndexes();
+    await User.create({ email: 'a@example.com', authProvider: 'email' });
+    await User.create({ email: 'b@example.com', authProvider: 'email' });
+    await User.create({ email: 'c@example.com', authProvider: 'email' });
+    expect(await User.countDocuments({ googleSub: null })).toBe(3);
+  });
+
+  it('rejects an unknown auth token kind', async () => {
+    await expect(
+      AuthToken.create({
+        userId: new Types.ObjectId(),
+        kind: 'magic-link',
+        tokenHash: 'a'.repeat(64),
+        expiresAt: new Date(Date.now() + 3600_000),
+      }),
+    ).rejects.toThrow(/validation/i);
+  });
+
+  it('defaults an auth token to unused', async () => {
+    const token = await AuthToken.create({
+      userId: new Types.ObjectId(),
+      kind: 'verify',
+      tokenHash: 'b'.repeat(64),
+      expiresAt: new Date(Date.now() + 3600_000),
+    });
+    expect(token.usedAt).toBeNull();
+    expect(token.createdAt).toBeInstanceOf(Date);
+  });
+
+  /**
+   * The lookup is by hash, so two live tokens can never share one. This also
+   * means a collision surfaces as a write error rather than as one user redeeming
+   * another user's link.
+   */
+  it('enforces unique tokenHash across users', async () => {
+    await AuthToken.syncIndexes();
+    const hash = 'c'.repeat(64);
+    await AuthToken.create({
+      userId: new Types.ObjectId(),
+      kind: 'reset',
+      tokenHash: hash,
+      expiresAt: new Date(Date.now() + 3600_000),
+    });
+    await expect(
+      AuthToken.create({
+        userId: new Types.ObjectId(),
+        kind: 'reset',
+        tokenHash: hash,
+        expiresAt: new Date(Date.now() + 3600_000),
+      }),
+    ).rejects.toThrow(/duplicate key/i);
+  });
+
+  /**
+   * Redemption has to be atomic, because a mail client that prefetches links (or
+   * a user who double-clicks) issues the request twice. Reading then writing
+   * would let both pass; filtering on `usedAt: null` in the update itself means
+   * exactly one wins.
+   */
+  it('redeems an auth token exactly once', async () => {
+    const hash = 'd'.repeat(64);
+    await AuthToken.create({
+      userId: new Types.ObjectId(),
+      kind: 'reset',
+      tokenHash: hash,
+      expiresAt: new Date(Date.now() + 3600_000),
+    });
+    const redeem = () =>
+      AuthToken.findOneAndUpdate(
+        { tokenHash: hash, usedAt: null },
+        { $set: { usedAt: new Date() } },
+        { new: true },
+      );
+    const [first, second] = await Promise.all([redeem(), redeem()]);
+    expect([first, second].filter(Boolean)).toHaveLength(1);
+  });
+
+  it('declares a TTL index on expiresAt', async () => {
+    await AuthToken.syncIndexes();
+    const indexes = (await AuthToken.collection.indexes()) as Array<{
+      key: Record<string, number>;
+      expireAfterSeconds?: number;
+    }>;
+    const ttl = indexes.find((index) => index.key['expiresAt'] === 1);
+    expect(ttl?.expireAfterSeconds).toBe(0);
+  });
+
+  it('gives verify tokens a longer life than reset tokens', async () => {
+    // A verification link has to survive a mail delay and a distracted user; a
+    // reset link is a standing key to the account and should not.
+    expect(AUTH_TOKEN_TTL_SECONDS.verify).toBeGreaterThan(AUTH_TOKEN_TTL_SECONDS.reset);
+    expect(AUTH_TOKEN_TTL_SECONDS['set-password']).toBe(AUTH_TOKEN_TTL_SECONDS.reset);
   });
 
   it('applies project defaults (draft, version 1, unhosted)', async () => {

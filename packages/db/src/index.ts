@@ -8,6 +8,12 @@ export { default as mongoose } from 'mongoose';
 
 // Export Models
 export { User, type IUser } from './models/user.js';
+export {
+  AuthToken,
+  AUTH_TOKEN_TTL_SECONDS,
+  type IAuthToken,
+  type AuthTokenKind,
+} from './models/authToken.js';
 export { Project, type IProject } from './models/project.js';
 export { Version, type IVersion } from './models/version.js';
 export {

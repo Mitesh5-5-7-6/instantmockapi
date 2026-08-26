@@ -15,6 +15,7 @@ const user: AuthUser = {
   id: '507f1f77bcf86cd799439011',
   email: 'dev@example.com',
   plan: 'free',
+  tokenVersion: 0,
 };
 
 describe('JWT issuance and verification', () => {
@@ -96,4 +97,62 @@ describe('extractBearerToken', () => {
       }
     },
   );
+});
+
+describe('the tokenVersion claim', () => {
+  it('round-trips on both token types', async () => {
+    const bumped: AuthUser = { ...user, tokenVersion: 7 };
+    for (const [issue, verify] of [
+      [issueAccessToken, verifyAccessToken],
+      [issueRefreshToken, verifyRefreshToken],
+    ] as const) {
+      const token = await issue(bumped, baseConfig);
+      const res = await verify(token, baseConfig);
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.value.tokenVersion).toBe(7);
+      }
+    }
+  });
+
+  it('rejects a token minted before the claim existed', async () => {
+    // Required rather than defaulted to 0: treating a pre-claim token as version
+    // zero would let it survive a revocation it predates. Signed here by hand,
+    // because the issuer can no longer produce one.
+    const { SignJWT } = await import('jose');
+    const legacy = await new SignJWT({
+      email: user.email,
+      plan: user.plan,
+      tokenType: 'access',
+    })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setSubject(user.id)
+      .setIssuedAt()
+      .setExpirationTime('1h')
+      .sign(new TextEncoder().encode(baseConfig.jwtSecret));
+
+    const res = await verifyAccessToken(legacy, baseConfig);
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe('UNAUTHORIZED');
+    }
+  });
+
+  it('rejects a non-integer version', async () => {
+    const { SignJWT } = await import('jose');
+    for (const tv of ['3', 1.5, null, {}]) {
+      const token = await new SignJWT({
+        email: user.email,
+        plan: user.plan,
+        tokenType: 'access',
+        tv,
+      })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setSubject(user.id)
+        .setIssuedAt()
+        .setExpirationTime('1h')
+        .sign(new TextEncoder().encode(baseConfig.jwtSecret));
+      expect((await verifyAccessToken(token, baseConfig)).ok).toBe(false);
+    }
+  });
 });

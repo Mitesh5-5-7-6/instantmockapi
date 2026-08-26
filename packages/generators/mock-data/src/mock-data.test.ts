@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateMockData } from './mock-data.js';
 import { goldenFixtureIPS } from '../../__tests__/golden-fixture.js';
-import { goldenRelationsIPS } from '../../__tests__/golden-relations-fixture.js';
+import { goldenRelationsIPS } from '../../../ips/__tests__/golden-relations-fixture.js';
 import { materializeRelations, type InternalProjectSchema } from '@instantmockapi/ips';
 
 describe('Mock Data Generator — Golden-File Tests', () => {

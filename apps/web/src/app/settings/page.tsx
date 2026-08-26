@@ -10,15 +10,102 @@
  * Billing/plan changes arrive with the billing integration (post-V1 wiring).
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { Button, Card, Field, Input, Select, StatusChip } from '@instantmockapi/ui';
-import { useMe, useUpdateMe } from '../../lib/hooks';
+import { useChangePassword, useMe, useUpdateMe } from '../../lib/hooks';
+import { passwordProblems } from '../../lib/password';
+import { PasswordField } from '../../components/auth/password-field';
 
 const THEME_KEY = 'instantmockapi.theme';
 
 /** `null` means unlimited on the wire — both server-side sentinels normalise to it. */
 function limitText(limit: number | null, noun: string): string {
   return limit === null ? `Unlimited ${noun}` : `${limit} ${noun}`;
+}
+
+/**
+ * Change the password.
+ *
+ * Requires the current one even though the session is already authenticated —
+ * that is what stops someone at a borrowed laptop from taking the account. The
+ * API bumps `tokenVersion` on success, which signs out every *other* device; this
+ * session survives because the response carries a replacement.
+ */
+function ChangePasswordCard() {
+  const change = useChangePassword();
+  const currentId = useId();
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+
+  const problems = passwordProblems(next);
+  const nextError = submitted && problems.length > 0 ? (problems[0] ?? null) : null;
+  const pending = change.isPending;
+
+  return (
+    <Card className="ui-stack">
+      <h2>Password</h2>
+      {change.isSuccess ? (
+        <p className="ui-meta">Your password is changed. Every other device has been signed out.</p>
+      ) : null}
+      <form
+        className="ui-stack"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setSubmitted(true);
+          if (problems.length > 0) {
+            return;
+          }
+          change.mutate(
+            { currentPassword: current, newPassword: next },
+            {
+              onSuccess: () => {
+                // Cleared on success so the fields are not left holding two
+                // live passwords in the DOM.
+                setCurrent('');
+                setNext('');
+                setSubmitted(false);
+              },
+            },
+          );
+        }}
+      >
+        <Field label="Current password" htmlFor={currentId}>
+          <Input
+            id={currentId}
+            type="password"
+            name="current-password"
+            autoComplete="current-password"
+            required
+            value={current}
+            onChange={(event) => setCurrent(event.target.value)}
+            disabled={pending}
+          />
+        </Field>
+
+        <PasswordField
+          label="New password"
+          value={next}
+          onChange={setNext}
+          autoComplete="new-password"
+          showRules
+          disabled={pending}
+          error={nextError}
+        />
+
+        <div className="ui-row">
+          <Button size="sm" type="submit" disabled={pending || current === '' || next === ''}>
+            {pending ? 'Changing…' : 'Change password'}
+          </Button>
+          {change.isError ? (
+            <span className="ui-error">{change.error.message}</span>
+          ) : (
+            <span className="ui-meta">Signs out every other device.</span>
+          )}
+        </div>
+      </form>
+    </Card>
+  );
 }
 
 export default function SettingsPage() {
@@ -92,6 +179,8 @@ export default function SettingsPage() {
           </ul>
         ) : null}
       </Card>
+
+      <ChangePasswordCard />
 
       <Card className="ui-stack">
         <h2>Appearance</h2>
