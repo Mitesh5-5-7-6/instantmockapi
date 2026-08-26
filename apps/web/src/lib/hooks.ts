@@ -94,6 +94,22 @@ export interface ProjectListParams {
   q?: string;
 }
 
+/**
+ * Update the current user.
+ *
+ * Writes the response straight into the [me] cache rather than invalidating —
+ * the PATCH already returns the updated user, so a refetch would be a second
+ * round trip for data already in hand.
+ */
+export function useUpdateMe() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { name: string | null }) =>
+      apiFetch<{ user: ApiUser }>('/v1/me', { method: 'PATCH', body: input }),
+    onSuccess: (data) => queryClient.setQueryData(['me'], data),
+  });
+}
+
 /** Windows the dashboard endpoint accepts; anything else is a 400 by design. */
 export type DashboardDays = 7 | 14 | 30;
 

@@ -113,4 +113,41 @@ export const authRoutes: FastifyPluginAsync<AuthRouteOptions> = async (app, { co
     }
     return reply.send({ user: toUserView(user) });
   });
+
+  app.patch(
+    '/me',
+    {
+      onRequest: [app.authenticate],
+      schema: {
+        body: {
+          type: 'object',
+          minProperties: 1,
+          additionalProperties: false,
+          properties: {
+            // Nullable so a name can be cleared, not only changed. Without that
+            // the only way back to "no name" would be a blank string, which
+            // would then render as an empty greeting.
+            name: { type: ['string', 'null'], maxLength: 80 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const sub = request.authUser?.sub ?? '';
+      if (!isObjectIdHex(sub)) {
+        throw new AppError({ code: 'UNAUTHORIZED', message: 'Invalid or expired token' });
+      }
+      const body = request.body as { name?: string | null };
+      const user = await User.findById(sub);
+      if (!user) {
+        throw new AppError({ code: 'UNAUTHORIZED', message: 'Invalid or expired token' });
+      }
+      if (body.name !== undefined) {
+        const trimmed = typeof body.name === 'string' ? body.name.trim() : '';
+        user.name = trimmed === '' ? null : trimmed;
+      }
+      await user.save();
+      return reply.send({ user: toUserView(user) });
+    },
+  );
 };

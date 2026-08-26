@@ -1,16 +1,26 @@
 'use client';
 
 /**
- * All projects.
+ * All projects, optionally filtered by `?q=` from the top-bar search.
  *
- * Gives the "Projects" nav item a real destination, gives the dashboard's
- * "View all" a target, and gives `/projects/[id]` a parent so the sidebar can
- * highlight something while a project is open. Sibling to `projects/[id]` in the
- * App Router — a segment and its dynamic child coexist.
+ * `useSearchParams` opts a route into client-side rendering, so the reader sits
+ * behind a Suspense boundary — without one, Next fails the build for this page
+ * rather than degrading quietly.
  */
 
+import { Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { ProjectsView } from '../../components/projects-view';
 
+function ProjectsList() {
+  const query = useSearchParams().get('q') ?? '';
+  return <ProjectsView title={query ? `Projects matching “${query}”` : 'Projects'} query={query} />;
+}
+
 export default function ProjectsPage() {
-  return <ProjectsView title="Projects" />;
+  return (
+    <Suspense fallback={<div className="ui-skeleton" style={{ minHeight: 240 }} />}>
+      <ProjectsList />
+    </Suspense>
+  );
 }

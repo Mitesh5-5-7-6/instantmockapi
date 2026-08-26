@@ -69,8 +69,9 @@ function ProjectCard({ project }: { project: ProjectSummary }) {
   );
 }
 
-export function ProjectsView({ title }: { title: string }) {
-  const projects = useProjects({ sort: '-updatedAt' });
+export function ProjectsView({ title, query }: { title: string; query?: string }) {
+  // The API escapes the regex server-side, so the raw term is safe to forward.
+  const projects = useProjects({ sort: '-updatedAt', ...(query ? { q: query } : {}) });
 
   return (
     <div className="ui-stack" style={{ gap: 'var(--space-8)' }}>
@@ -98,7 +99,16 @@ export function ProjectsView({ title }: { title: string }) {
         </EmptyState>
       ) : null}
 
-      {projects.data && projects.data.data.length === 0 ? (
+      {projects.data && projects.data.data.length === 0 && query ? (
+        <EmptyState title={`No projects match "${query}"`}>
+          <p>Try a different term, or clear the search.</p>
+          <Link href="/projects">
+            <Button variant="secondary">Show all projects</Button>
+          </Link>
+        </EmptyState>
+      ) : null}
+
+      {projects.data && projects.data.data.length === 0 && !query ? (
         <EmptyState title="No projects yet">
           <p>Paste a JSON sample or build a schema — get a working mock API in minutes.</p>
           <Link href="/new">

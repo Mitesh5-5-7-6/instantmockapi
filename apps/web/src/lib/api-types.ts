@@ -7,9 +7,18 @@ export type ProjectStatus = 'draft' | 'generating' | 'active' | 'expired';
 export type ArtifactStatus = 'pending' | 'generating' | 'completed' | 'failed';
 export type JobStatus = 'queued' | 'running' | 'completed' | 'failed_partial';
 
+export interface PlanLimits {
+  /** null means unlimited — both server-side sentinels normalise to it. */
+  maxProjects: number | null;
+  maxConcurrentJobs: number | null;
+  hostedApiLifetimeDays: number;
+}
+
 export interface ApiUser {
   id: string;
   email: string;
+  name: string | null;
+  limits: PlanLimits;
   plan: 'free' | 'pro' | 'enterprise';
   authProvider: 'google' | 'email';
   createdAt: string;

@@ -3,15 +3,43 @@
  * Keeps _id/internal fields out of responses and list payloads light.
  */
 
+import { getPlanConfig } from '@instantmockapi/config';
 import type { IArtifact, IJob, IProject, IUser, IVersion } from '@instantmockapi/db';
+
+/**
+ * A plan limit on the wire.
+ *
+ * `PlanConfig` carries two different sentinels for "unlimited" —
+ * `maxConcurrentJobs: Infinity` and `maxProjects: 0`. `JSON.stringify(Infinity)`
+ * is `null`, so without normalising both the client would see one as null and
+ * the other as a hard limit of zero.
+ */
+function planLimit(value: number): number | null {
+  return !Number.isFinite(value) || value <= 0 ? null : value;
+}
 
 export function toUserView(user: IUser) {
   return {
     id: String(user._id),
     email: user.email,
+    name: user.name ?? null,
     plan: user.plan,
     authProvider: user.authProvider,
     createdAt: user.createdAt,
+    // Served rather than duplicated client-side: the settings screen used to
+    // carry its own copy of this table, which drifts from packages/config the
+    // first time a limit changes.
+    limits: planLimits(user.plan),
+  };
+}
+
+/** What the caller's plan allows. Usage counts live on the dashboard payload. */
+export function planLimits(tier: IUser['plan']) {
+  const plan = getPlanConfig(tier);
+  return {
+    maxProjects: planLimit(plan.maxProjects),
+    maxConcurrentJobs: planLimit(plan.maxConcurrentJobs),
+    hostedApiLifetimeDays: plan.hostedApiLifetimeDays,
   };
 }
 
@@ -32,6 +60,20 @@ export function toProjectSummary(project: IProject) {
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
   };
+}
+
+/**
+ * A summary plus the figures the dashboard's project rows need.
+ *
+ * Kept separate rather than folded into `toProjectSummary` so the default list
+ * payload stays byte-identical — every other caller (the wizard, the project
+ * picker) would otherwise pay for a projection it does not read.
+ */
+export function toProjectSummaryWithCounts(
+  project: IProject,
+  counts: { endpointCount: number; requestCount: number; requestWindowDays: number },
+) {
+  return { ...toProjectSummary(project), ...counts };
 }
 
 export function toProjectDetail(project: IProject) {

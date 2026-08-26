@@ -20,7 +20,6 @@ import { RequestsOverviewCard } from '../components/dashboard/requests-overview-
 import { RecentProjectsCard } from '../components/dashboard/recent-projects-card';
 import { QuickStartCard } from '../components/dashboard/quick-start-card';
 import { RecentActivityCard } from '../components/dashboard/recent-activity-card';
-import { initialsOf } from '../lib/avatar';
 
 export default function DashboardPage() {
   const [days, setDays] = useState<DashboardDays>(7);
@@ -28,10 +27,10 @@ export default function DashboardPage() {
   const projects = useProjects({ sort: '-updatedAt', limit: 4 });
   const me = useMe();
 
-  // The email local part is the only name the system has today, so the greeting
-  // uses initials rather than guessing at a first name — "Welcome back, Info"
-  // for info@acme.com is worse than no name at all.
-  const greeting = me.data ? `Welcome back, ${initialsOf(me.data.email)}` : 'Welcome back';
+  // Uses the display name when one is set, and no name at all otherwise.
+  // Deriving a first name from the email local part would greet info@acme.com
+  // as "Info", which is worse than a plain greeting.
+  const greeting = me.data?.name ? `Welcome back, ${me.data.name}` : 'Welcome back';
 
   return (
     <div className="ui-stack" style={{ gap: 'var(--space-6)' }}>

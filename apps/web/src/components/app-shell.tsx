@@ -8,9 +8,13 @@
 import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Button, Card, Icon, Input, StatusChip } from '@instantmockapi/ui';
-import { useAuthState, useLogin, useLogout, useMe } from '../lib/hooks';
+import { Button, Card, Icon, IconTile, Input } from '@instantmockapi/ui';
+import { useAuthState, useLogin, useMe } from '../lib/hooks';
 import { VISIBLE_NAV_ITEMS, isNavActive } from '../lib/nav-items';
+import { SidebarPlanCard } from './sidebar-plan-card';
+import { SidebarProfile } from './sidebar-profile';
+import { TopSearch } from './top-search';
+import { AppFooter } from './app-footer';
 
 function LoginScreen() {
   const login = useLogin();
@@ -81,7 +85,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const authState = useAuthState();
   const me = useMe();
-  const logout = useLogout();
 
   // No token, or the token was rejected (apiFetch clears it after a failed
   // refresh) — back to sign-in. Both flip reactively, so signing in swaps the
@@ -99,8 +102,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="ui-shell">
       <aside className="ui-sidebar">
-        <div className="ui-sidebar__brand">
-          Instant<span>Mock</span>API
+        <div className="ui-row" style={{ gap: 'var(--space-2)', alignItems: 'center' }}>
+          <IconTile icon="code" tone="accent" size="sm" />
+          <span className="ui-sidebar__brand">
+            Instant<span>Mock</span>API
+          </span>
         </div>
         <nav className="ui-nav" aria-label="Primary">
           {VISIBLE_NAV_ITEMS.map((item) => (
@@ -119,18 +125,24 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Link>
           ))}
         </nav>
+
+        {/* Pinned to the bottom of the rail by one auto margin. */}
+        <div className="ui-sidebar__footer">
+          <SidebarPlanCard />
+          <SidebarProfile />
+        </div>
       </aside>
-      <div>
+      <div className="ui-shell__content">
         <header className="ui-topbar">
-          <span className="ui-meta ui-mono">{me.data.email}</span>
-          <div className="ui-row">
-            <StatusChip status="active" label={`${me.data.plan} plan`} />
-            <Button variant="ghost" size="sm" onClick={() => logout.mutate()}>
-              Sign out
+          <TopSearch />
+          <Link href="/new">
+            <Button size="sm">
+              <Icon name="plus" size={16} /> New
             </Button>
-          </div>
+          </Link>
         </header>
         <main className="ui-main">{children}</main>
+        <AppFooter />
       </div>
     </div>
   );

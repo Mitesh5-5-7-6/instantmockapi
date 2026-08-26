@@ -221,8 +221,7 @@ export interface PlanUsage {
  * denominator anywhere in the system, and shipping an unenforced quota is worse
  * than shipping none: people plan around a number nothing honours.
  */
-export function toPlanUsage(view: DashboardView): PlanUsage {
-  const { used, limit } = view.plan.projects;
+export function toPlanUsage(used: number, limit: number | null): PlanUsage {
   return {
     label: 'Projects',
     used,

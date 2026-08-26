@@ -1,29 +1,46 @@
 'use client';
 
 /**
- * S8 · Settings (doc 11): account + plan overview and theme preference.
+ * S8 · Settings (doc 11): account, display name, plan overview, theme.
+ *
+ * The plan limits are **served**, not hardcoded here. This page used to carry its
+ * own copy of the table, which drifts from `packages/config` the first time a
+ * limit changes — and `apps/web` cannot import that package, so a local copy was
+ * the only alternative until `/v1/me` started returning them.
  * Billing/plan changes arrive with the billing integration (post-V1 wiring).
  */
 
 import { useEffect, useState } from 'react';
-import { Card, Field, Select, StatusChip } from '@instantmockapi/ui';
-import { useMe } from '../../lib/hooks';
+import { Button, Card, Field, Input, Select, StatusChip } from '@instantmockapi/ui';
+import { useMe, useUpdateMe } from '../../lib/hooks';
 
 const THEME_KEY = 'instantmockapi.theme';
-const PLAN_LIMITS: Record<string, { lifetime: string; jobs: string; projects: string }> = {
-  free: { lifetime: '2 days', jobs: '1 concurrent job', projects: '10 projects' },
-  pro: { lifetime: '7 days', jobs: '3 concurrent jobs', projects: '100 projects' },
-  enterprise: { lifetime: '30 days', jobs: 'Unlimited jobs', projects: 'Unlimited projects' },
-};
+
+/** `null` means unlimited on the wire — both server-side sentinels normalise to it. */
+function limitText(limit: number | null, noun: string): string {
+  return limit === null ? `Unlimited ${noun}` : `${limit} ${noun}`;
+}
 
 export default function SettingsPage() {
   const me = useMe();
+  const updateMe = useUpdateMe();
   const [theme, setTheme] = useState('dark');
+  const [name, setName] = useState('');
+  const [nameLoaded, setNameLoaded] = useState(false);
 
   useEffect(() => {
     const stored = window.localStorage.getItem(THEME_KEY) ?? 'dark';
     setTheme(stored);
   }, []);
+
+  // Seed the field once, then leave it alone — re-syncing on every refetch would
+  // discard whatever the user is part-way through typing.
+  useEffect(() => {
+    if (me.data && !nameLoaded) {
+      setName(me.data.name ?? '');
+      setNameLoaded(true);
+    }
+  }, [me.data, nameLoaded]);
 
   function applyTheme(next: string) {
     setTheme(next);
@@ -31,7 +48,7 @@ export default function SettingsPage() {
     document.documentElement.setAttribute('data-theme', next);
   }
 
-  const limits = PLAN_LIMITS[me.data?.plan ?? 'free'];
+  const limits = me.data?.limits;
 
   return (
     <div className="ui-stack" style={{ gap: 'var(--space-6)', maxWidth: 560 }}>
@@ -43,11 +60,35 @@ export default function SettingsPage() {
           <span className="ui-mono">{me.data?.email ?? '…'}</span>
           {me.data ? <StatusChip status="active" label={`${me.data.plan} plan`} /> : null}
         </div>
+
+        <Field label="Display name">
+          <Input
+            value={name}
+            placeholder="Your name"
+            maxLength={80}
+            onChange={(event) => setName(event.target.value)}
+          />
+        </Field>
+        <div className="ui-row">
+          <Button
+            size="sm"
+            disabled={updateMe.isPending || !nameLoaded || name === (me.data?.name ?? '')}
+            onClick={() => updateMe.mutate({ name: name.trim() === '' ? null : name.trim() })}
+          >
+            {updateMe.isPending ? 'Saving…' : 'Save'}
+          </Button>
+          {updateMe.isError ? (
+            <span className="ui-error">{updateMe.error.message}</span>
+          ) : (
+            <span className="ui-meta">Used to greet you on the dashboard.</span>
+          )}
+        </div>
+
         {limits ? (
           <ul className="ui-meta" style={{ margin: 0, paddingLeft: 'var(--space-4)' }}>
-            <li>Hosted API lifetime: {limits.lifetime}</li>
-            <li>{limits.jobs}</li>
-            <li>{limits.projects}</li>
+            <li>Hosted API lifetime: {limits.hostedApiLifetimeDays} days</li>
+            <li>{limitText(limits.maxConcurrentJobs, 'concurrent jobs')}</li>
+            <li>{limitText(limits.maxProjects, 'projects')}</li>
           </ul>
         ) : null}
       </Card>

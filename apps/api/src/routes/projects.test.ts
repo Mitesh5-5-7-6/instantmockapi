@@ -12,7 +12,7 @@ vi.mock('@instantmockapi/queue', async (importOriginal) => {
 });
 
 import type { FastifyInstance } from 'fastify';
-import { Project } from '@instantmockapi/db';
+import { ApiLog, Project } from '@instantmockapi/db';
 import {
   authHeader,
   buildTestServer,
@@ -798,5 +798,177 @@ describe('Single API wizard payload (doc 19 §Phase 7)', () => {
     expect(res.statusCode).toBe(201);
     const ips = res.json().ips as { entities: { relations?: unknown[] }[] };
     expect(ips.entities.every((entity) => (entity.relations ?? []).length === 0)).toBe(true);
+  });
+});
+
+describe('GET /v1/projects?include=counts', () => {
+  it('leaves the default payload byte-identical when include is omitted', async () => {
+    // The guard that matters: every other caller (wizard, project picker) reads
+    // this shape, and none of them should pay for a projection they do not use.
+    await createProjectViaApi(app, session.accessToken);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/projects',
+      headers: authHeader(session.accessToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const row = res.json().data[0];
+    expect(row).not.toHaveProperty('endpointCount');
+    expect(row).not.toHaveProperty('requestCount');
+    expect(row).not.toHaveProperty('requestWindowDays');
+  });
+
+  it('adds endpoint and request counts when asked', async () => {
+    const created = await createProjectViaApi(app, session.accessToken);
+    const projectId = created.json().id as string;
+    await ApiLog.insertMany([
+      { projectId, method: 'GET', path: '/p/x/customer', status: 200, at: new Date() },
+      { projectId, method: 'GET', path: '/p/x/customer', status: 200, at: new Date() },
+    ]);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/projects?include=counts',
+      headers: authHeader(session.accessToken),
+    });
+    expect(res.statusCode).toBe(200);
+    // One entity from sampleRaw with all five methods: 6 rows + 1 discovery doc,
+    // the same figure countEndpoints gives the Ready screen.
+    expect(res.json().data[0]).toMatchObject({
+      endpointCount: 7,
+      requestCount: 2,
+      requestWindowDays: 7,
+    });
+  });
+
+  it('reports zero for a project with no traffic, not undefined', async () => {
+    await createProjectViaApi(app, session.accessToken);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/projects?include=counts',
+      headers: authHeader(session.accessToken),
+    });
+    expect(res.json().data[0].requestCount).toBe(0);
+  });
+
+  it('excludes requests older than the window', async () => {
+    const created = await createProjectViaApi(app, session.accessToken);
+    const projectId = created.json().id as string;
+    await ApiLog.insertMany([
+      { projectId, method: 'GET', path: '/p/x/c', status: 200, at: new Date() },
+      {
+        projectId,
+        method: 'GET',
+        path: '/p/x/c',
+        status: 200,
+        at: new Date(Date.now() - 9 * 86_400_000),
+      },
+    ]);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/projects?include=counts',
+      headers: authHeader(session.accessToken),
+    });
+    expect(res.json().data[0].requestCount).toBe(1);
+  });
+
+  it('rejects an unknown include value', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/projects?include=everything',
+      headers: authHeader(session.accessToken),
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('GET and PATCH /v1/me', () => {
+  it('serves the plan limits rather than making the client hardcode them', async () => {
+    // The settings page used to carry its own copy of this table, which drifts
+    // from packages/config the moment a limit changes.
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/me',
+      headers: authHeader(session.accessToken),
+    });
+    expect(res.json().user.limits).toEqual({
+      maxProjects: 10,
+      maxConcurrentJobs: 1,
+      hostedApiLifetimeDays: 2,
+    });
+  });
+
+  it('starts with no display name', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/me',
+      headers: authHeader(session.accessToken),
+    });
+    expect(res.json().user.name).toBeNull();
+  });
+
+  it('sets and trims a display name, returning the updated user', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/me',
+      headers: authHeader(session.accessToken),
+      payload: { name: '  Mitesh Sonagra  ' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user.name).toBe('Mitesh Sonagra');
+  });
+
+  it('clears the name with null, and with a blank string', async () => {
+    // Both paths matter: without the blank-string case the only way back to "no
+    // name" would leave an empty greeting rendered as though it were a name.
+    const set = () =>
+      app.inject({
+        method: 'PATCH',
+        url: '/v1/me',
+        headers: authHeader(session.accessToken),
+        payload: { name: 'Ada' },
+      });
+
+    await set();
+    const cleared = await app.inject({
+      method: 'PATCH',
+      url: '/v1/me',
+      headers: authHeader(session.accessToken),
+      payload: { name: null },
+    });
+    expect(cleared.json().user.name).toBeNull();
+
+    await set();
+    const blanked = await app.inject({
+      method: 'PATCH',
+      url: '/v1/me',
+      headers: authHeader(session.accessToken),
+      payload: { name: '   ' },
+    });
+    expect(blanked.json().user.name).toBeNull();
+  });
+
+  it('rejects an over-long name and an empty body', async () => {
+    const tooLong = await app.inject({
+      method: 'PATCH',
+      url: '/v1/me',
+      headers: authHeader(session.accessToken),
+      payload: { name: 'x'.repeat(81) },
+    });
+    expect(tooLong.statusCode).toBe(400);
+
+    const empty = await app.inject({
+      method: 'PATCH',
+      url: '/v1/me',
+      headers: authHeader(session.accessToken),
+      payload: {},
+    });
+    expect(empty.statusCode).toBe(400);
+  });
+
+  it('requires authentication', async () => {
+    const res = await app.inject({ method: 'PATCH', url: '/v1/me', payload: { name: 'x' } });
+    expect(res.statusCode).toBe(401);
   });
 });
