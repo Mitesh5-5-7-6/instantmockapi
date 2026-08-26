@@ -11,6 +11,7 @@ import { apiFetch, hasTokens, saveTokens, subscribeJobStream, subscribeTokens } 
 import type {
   ApiUser,
   ArtifactContent,
+  DashboardView,
   ArtifactView,
   AuthTokens,
   GenerationConfig,
@@ -91,6 +92,23 @@ export interface ProjectListParams {
   status?: string;
   sort?: string;
   q?: string;
+}
+
+/** Windows the dashboard endpoint accepts; anything else is a 400 by design. */
+export type DashboardDays = 7 | 14 | 30;
+
+/**
+ * The whole landing screen in one request.
+ *
+ * One call rather than several because the figures have to agree: the tile total
+ * and the sum of the chart are computed from the same matched set server-side,
+ * and two separate fetches could straddle a bucket boundary and disagree.
+ */
+export function useDashboard(days: DashboardDays = 7) {
+  return useQuery({
+    queryKey: ['dashboard', days],
+    queryFn: () => apiFetch<DashboardView>(`/v1/dashboard?days=${days}`),
+  });
 }
 
 export function useProjects(params: ProjectListParams = {}) {

@@ -119,3 +119,61 @@ export interface ApiErrorEnvelope {
     details?: { path: string; issue: string }[];
   };
 }
+
+/* ── Dashboard (GET /v1/dashboard) ── */
+
+export interface RequestSeriesBucket {
+  date: string;
+  count: number;
+  serverErrors: number;
+  /** True for today, whose day has not finished — so the last point always dips. */
+  partial: boolean;
+}
+
+export type ActivityType =
+  'project.created' | 'project.imported' | 'project.built' | 'version.generated' | 'job.failed';
+
+export interface ActivityEvent {
+  id: string;
+  type: ActivityType;
+  at: string;
+  projectId: string;
+  projectName: string;
+  text: string;
+}
+
+/**
+ * The dashboard payload.
+ *
+ * Every rate is `number | null`, and `null` means "no comparable data" rather
+ * than zero — a window with no traffic has no success rate, and "up from
+ * nothing" has no percentage. Rendering those as 0% or +∞% is the failure this
+ * shape exists to prevent.
+ */
+export interface DashboardView {
+  window: { days: number; from: string; to: string; tz: 'UTC'; retentionDays: number };
+  projects: { total: number; createdInWindow: number; byStatus: Record<string, number> };
+  endpoints: { total: number; inProjectsCreatedThisMonth: number };
+  requests: {
+    total: number;
+    previousTotal: number;
+    changePercent: number | null;
+    successRate: number | null;
+    clientErrorRate: number | null;
+    serverErrorRate: number | null;
+    avgDurationMs: number | null;
+    /** How many rows carried a duration. Older rows predate the field. */
+    durationSampleCount: number;
+    series: RequestSeriesBucket[];
+    byProject: Record<string, number>;
+    note: string;
+  };
+  hosted: { live: number; total: number; soonestExpiresAt: string | null };
+  plan: {
+    tier: 'free' | 'pro' | 'enterprise';
+    projects: { used: number; limit: number | null };
+    concurrentJobs: { used: number; limit: number | null };
+    hostedApiLifetimeDays: number;
+  };
+  activity: ActivityEvent[];
+}
