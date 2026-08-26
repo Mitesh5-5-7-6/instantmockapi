@@ -60,6 +60,12 @@ function LoginScreen() {
               {login.error.message}
             </p>
           ) : null}
+          <Link
+            href="/demo/project-api/ecommerce"
+            style={{ textAlign: 'center', fontSize: 'var(--text-sm)' }}
+          >
+            Explore the E-commerce API demo
+          </Link>
         </form>
       </Card>
     </div>
