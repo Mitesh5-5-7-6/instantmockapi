@@ -14,7 +14,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button, Field, Input } from '@instantmockapi/ui';
 import { ApiError } from '../../lib/api-client';
-import { useAuthState, useSignup } from '../../lib/hooks';
+import { useAuthState, useResendVerification, useSignup } from '../../lib/hooks';
 import { passwordProblems } from '../../lib/password';
 import { AuthCard, AuthNotice } from '../../components/auth/auth-card';
 import { PasswordField } from '../../components/auth/password-field';
@@ -30,6 +30,7 @@ export default function SignupPage() {
   const nameId = useId();
   const emailId = useId();
   const signup = useSignup();
+  const resend = useResendVerification();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,6 +41,11 @@ export default function SignupPage() {
       router.replace('/');
     }
   }, [authState, router]);
+
+  const error = signup.error instanceof ApiError ? signup.error : null;
+  // The account exists and only the email failed, so this is the one failure
+  // with a useful next action rather than just a message.
+  const emailFailed = error?.code === 'EMAIL_SEND_FAILED';
 
   const problems = passwordProblems(password, email);
   // Only after a submit attempt: flagging a half-typed password as too short on
@@ -141,10 +147,44 @@ export default function SignupPage() {
           {pending ? 'Creating your account…' : 'Create account'}
         </Button>
 
-        {signup.error instanceof ApiError ? (
+        {error !== null && !emailFailed ? (
           <p className="ui-error" role="alert">
-            {signup.error.message}
+            {error.message}
           </p>
+        ) : null}
+
+        {/* The retry lives here, next to the address that was just typed. An
+            earlier version of the API message sent people to the sign-in page
+            for a "Resend the link" control that only appears there *after* a
+            rejected login — instructions to somewhere they were not. */}
+        {emailFailed ? (
+          <AuthNotice tone="warning" icon="alert" title="We could not send the confirmation email">
+            <p className="ui-meta">{error?.message} Your password is saved — nothing is lost.</p>
+            {resend.isSuccess ? (
+              <p className="ui-meta">{resend.data.message}</p>
+            ) : (
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => resend.mutate(email)}
+                  disabled={resend.isPending}
+                >
+                  {resend.isPending ? 'Sending…' : 'Resend the link'}
+                </Button>
+                {/* Honest about the limit: this endpoint answers the same way
+                    whether or not the send worked (it has to — see
+                    resendVerification in auth-service.ts), so a second failure
+                    would look like a success. Better to say so than to imply
+                    the button proves anything. */}
+                <p className="ui-meta">
+                  If it fails again the problem is on our side. You can also sign in later — the
+                  sign-in page will offer the link again.
+                </p>
+              </>
+            )}
+          </AuthNotice>
         ) : null}
       </form>
     </AuthCard>

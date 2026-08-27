@@ -859,11 +859,19 @@ describe('when email delivery is broken', () => {
     async () => {
       const res = await post('/auth/signup', { email: 'ada@example.com', password: PASSWORD });
 
-      expect(res.statusCode).toBe(500);
-      // Names what to do next. A bare "internal error" would read as "signup
-      // failed", and retrying is exactly what the rate limit then refuses.
+      // 502: an upstream service refused, rather than anything here being broken.
+      expect(res.statusCode).toBe(502);
+      // Its own code, so the signup screen can render a retry button instead of
+      // matching on message text that will eventually be reworded.
+      expect(res.json().error.code).toBe('EMAIL_SEND_FAILED');
+      // Says the account survived — without that, someone assumes the signup
+      // itself failed and submits again, which the rate limit then refuses.
+      expect(res.json().error.message).toMatch(/account was created/i);
       expect(res.json().error.message).toMatch(/could not send the confirmation email/i);
-      expect(res.json().error.message).toMatch(/resend the link/i);
+      // And names no button or page: the API cannot know what the client
+      // renders, and an earlier version sent people to a control that only
+      // appeared after a separate failed login.
+      expect(res.json().error.message).not.toMatch(/sign-in page|resend the link/i);
     },
     SLOW,
   );

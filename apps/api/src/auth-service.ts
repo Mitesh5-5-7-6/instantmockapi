@@ -153,21 +153,25 @@ async function sendOrFail(mailer: Mailer, message: EmailMessage, reason: string)
       to: message.to,
       error: error instanceof Error ? error.message : String(error),
     });
-    throw new AppError({ code: 'INTERNAL_ERROR', message: reason });
+    throw new AppError({ code: 'EMAIL_SEND_FAILED', message: reason });
   }
 }
 
 /**
  * What the user is told when the send failed.
  *
- * Phrased so it is clear the account is not lost and what to do next. A bare
- * "internal error" would leave someone assuming the signup itself failed and
- * submitting again — which the rate limit would then refuse, turning one
- * misconfiguration into a dead end.
+ * States the outcome and stops. It deliberately does **not** name a button or a
+ * page: the API cannot know what the client renders, and an earlier version
+ * that said `Use "Resend the link" on the sign-in page` pointed at a control
+ * that only appeared after a separate failed login — directions to somewhere
+ * the reader was not. Offering the retry is the screen's job; `EMAIL_SEND_FAILED`
+ * is what tells it to.
+ *
+ * Saying the account survived still matters, though: without it someone assumes
+ * the signup itself failed and submits again, which the rate limit then refuses.
  */
 const SIGNUP_EMAIL_FAILED =
-  'Your account was created, but we could not send the confirmation email. ' +
-  'Use "Resend the link" on the sign-in page in a few minutes.';
+  'Your account was created, but we could not send the confirmation email.';
 
 const SETUP_EMAIL_FAILED =
   'We could not send the password-setup email. Please try again in a few minutes.';
