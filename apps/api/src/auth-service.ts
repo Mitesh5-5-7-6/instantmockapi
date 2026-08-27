@@ -26,6 +26,7 @@ import { issueAuthToken, redeemAuthToken, revokeAuthTokens } from './auth-tokens
 import { sendQuietly, type Mailer } from './email.js';
 import {
   authLink,
+  type EmailMessage,
   verifyEmailMessage,
   resetPasswordMessage,
   setPasswordMessage,
@@ -123,18 +124,79 @@ function normaliseName(name: string | null | undefined): string | null {
   return trimmed === '' ? null : trimmed;
 }
 
-/** Send the verification email for a user, ignoring delivery failures. */
-async function sendVerification(user: IUser, deps: AuthServiceDeps): Promise<void> {
+/**
+ * Send a message whose failure the caller *should* surface.
+ *
+ * The counterpart to `sendQuietly`, and the choice between them is not about how
+ * important the email is — it is about whether reporting a failure would leak
+ * whether an account exists.
+ *
+ * **Safe here (signup, and login’s set-password branch):** every branch of those
+ * endpoints sends exactly one email, so a failure produces the same error
+ * whichever branch ran, and nothing is distinguishable.
+ *
+ * **Not safe on forgot-password or resend-verification:** there the
+ * "no such address" branch sends nothing at all and cannot fail, so a loud
+ * failure on the other branch would answer the exact question those endpoints
+ * exist to refuse — broken mail plus an error means the account exists. Those
+ * keep `sendQuietly`.
+ */
+async function sendOrFail(mailer: Mailer, message: EmailMessage, reason: string): Promise<void> {
+  try {
+    await mailer.send(message);
+  } catch (error) {
+    // The underlying cause (a 422 from an unverified sending domain, a rejected
+    // API key) is already logged by the transport with its status and detail.
+    // What reaches the user is deliberately vaguer: it is our misconfiguration,
+    // and there is nothing they can act on beyond retrying.
+    logger.error('Surfacing an email failure to the caller', {
+      to: message.to,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw new AppError({ code: 'INTERNAL_ERROR', message: reason });
+  }
+}
+
+/**
+ * What the user is told when the send failed.
+ *
+ * Phrased so it is clear the account is not lost and what to do next. A bare
+ * "internal error" would leave someone assuming the signup itself failed and
+ * submitting again — which the rate limit would then refuse, turning one
+ * misconfiguration into a dead end.
+ */
+const SIGNUP_EMAIL_FAILED =
+  'Your account was created, but we could not send the confirmation email. ' +
+  'Use "Resend the link" on the sign-in page in a few minutes.';
+
+const SETUP_EMAIL_FAILED =
+  'We could not send the password-setup email. Please try again in a few minutes.';
+
+/**
+ * Send the verification email for a user.
+ *
+ * `loud` is the caller's to decide, and the two callers genuinely differ:
+ *
+ * - **signup** passes true. Both of its branches send exactly one email, so a
+ *   failure reads the same either way, and without the link the new account is
+ *   unusable — answering "check your inbox" when nothing was sent strands the
+ *   user with no way to tell a delivery failure from a slow mailbox.
+ * - **resend-verification** passes false. Its "unknown or already-verified
+ *   address" branch sends nothing and cannot fail, so a loud failure would say
+ *   that the address exists *and* is unverified — precisely what that endpoint
+ *   returns an identical response to conceal.
+ */
+async function sendVerification(user: IUser, deps: AuthServiceDeps, loud: boolean): Promise<void> {
   const issued = await issueAuthToken(user._id as Types.ObjectId, 'verify');
-  await sendQuietly(
-    deps.mailer,
-    verifyEmailMessage({
-      to: user.email,
-      name: user.name,
-      url: authLink(deps.config.appUrl, VERIFY_PATH, issued.token),
-      expiresInSeconds: issued.expiresInSeconds,
-    }),
-  );
+  const message = verifyEmailMessage({
+    to: user.email,
+    name: user.name,
+    url: authLink(deps.config.appUrl, VERIFY_PATH, issued.token),
+    expiresInSeconds: issued.expiresInSeconds,
+  });
+  await (loud
+    ? sendOrFail(deps.mailer, message, SIGNUP_EMAIL_FAILED)
+    : sendQuietly(deps.mailer, message));
 }
 
 /**
@@ -153,7 +215,11 @@ export async function signUp(
 
   const existing = await User.findOne({ email });
   if (existing) {
-    await sendQuietly(
+    // Loud, exactly like the create branch below. If only one branch reported a
+    // failure, a broken mail configuration would turn signup back into the
+    // account-existence oracle this whole function is shaped to avoid: unknown
+    // address errors, known address answers 202.
+    await sendOrFail(
       deps.mailer,
       accountExistsMessage({
         to: existing.email,
@@ -161,6 +227,7 @@ export async function signUp(
         signInUrl: authLinkBase(deps.config.appUrl, LOGIN_PATH),
         resetUrl: authLinkBase(deps.config.appUrl, FORGOT_PATH),
       }),
+      SIGNUP_EMAIL_FAILED,
     );
     // Hashing anyway, even though nothing is written. Skipping it would make the
     // "already exists" path measurably faster — a timing oracle that hands back
@@ -176,7 +243,7 @@ export async function signUp(
     passwordHash: await hashPassword(input.password),
     emailVerifiedAt: null,
   });
-  await sendVerification(user, deps);
+  await sendVerification(user, deps, true);
 }
 
 /** A link into the web app with no token attached. */
@@ -219,7 +286,10 @@ export async function logIn(
   if (!user.passwordHash) {
     // The migration path: no password to check, so offer to set one (doc 13 §1).
     const issued = await issueAuthToken(user._id as Types.ObjectId, 'set-password');
-    await sendQuietly(
+    // Loud is safe here: login already answers 401 for an unknown address and
+    // 202 for a passwordless one, so reporting a send failure tells an attacker
+    // nothing the status code has not already told them.
+    await sendOrFail(
       deps.mailer,
       setPasswordMessage({
         to: user.email,
@@ -227,6 +297,7 @@ export async function logIn(
         url: authLink(deps.config.appUrl, RESET_PATH, issued.token),
         expiresInSeconds: issued.expiresInSeconds,
       }),
+      SETUP_EMAIL_FAILED,
     );
     return { kind: 'emailed-set-password' };
   }
@@ -322,7 +393,9 @@ export async function resendVerification(email: string, deps: AuthServiceDeps): 
   if (!user || user.emailVerifiedAt) {
     return;
   }
-  await sendVerification(user, deps);
+  // Quiet: see the `loud` note on sendVerification — a loud failure here would
+  // reveal that the address exists and is unverified.
+  await sendVerification(user, deps, false);
 }
 
 /** Redeem a verification token. Returns the now-verified user. */

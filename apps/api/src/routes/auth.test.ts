@@ -18,6 +18,7 @@ import {
   buildTestServer,
   clearDb,
   createCapturingMailer,
+  createFailingMailer,
   csrfHeader,
   startTestDb,
   stopTestDb,
@@ -827,6 +828,131 @@ describe('credential rate limits', () => {
       // Unbounded, this endpoint is a way to flood somebody's inbox using our
       // sending domain — which gets the domain blocklisted.
       expect((await send()).statusCode).toBe(429);
+    },
+    SLOW,
+  );
+});
+
+/**
+ * What happens when the mail transport is misconfigured — an unverified sending
+ * domain, a bad API key. This used to be invisible: signup answered
+ * "202 Check your inbox" and only logged the rejection, so a deployment with a
+ * wrong EMAIL_FROM looked healthy while no user could ever verify an account.
+ */
+describe('when email delivery is broken', () => {
+  let broken: FastifyInstance;
+
+  beforeAll(async () => {
+    broken = await buildTestServer({ mailer: createFailingMailer() });
+  });
+
+  afterAll(async () => {
+    await broken.close();
+  });
+
+  function post(url: string, payload: unknown) {
+    return broken.inject({ method: 'POST', url: `/v1${url}`, payload });
+  }
+
+  it(
+    'tells the user signup could not email them, instead of claiming it did',
+    async () => {
+      const res = await post('/auth/signup', { email: 'ada@example.com', password: PASSWORD });
+
+      expect(res.statusCode).toBe(500);
+      // Names what to do next. A bare "internal error" would read as "signup
+      // failed", and retrying is exactly what the rate limit then refuses.
+      expect(res.json().error.message).toMatch(/could not send the confirmation email/i);
+      expect(res.json().error.message).toMatch(/resend the link/i);
+    },
+    SLOW,
+  );
+
+  it(
+    'still creates the account, so the resend path can recover it',
+    async () => {
+      // Failing the request must not roll the user back — otherwise the address
+      // is left half-registered and the next attempt hits the unique index.
+      await post('/auth/signup', { email: 'ada@example.com', password: PASSWORD });
+      const user = await User.findOne({ email: 'ada@example.com' });
+      expect(user).not.toBeNull();
+      expect(user?.emailVerifiedAt).toBeNull();
+    },
+    SLOW,
+  );
+
+  /**
+   * The property that is easy to break while making failures loud, and the
+   * reason both signup branches report identically: if only the create branch
+   * errored, a broken mailer would turn signup into the account-existence
+   * oracle the whole endpoint is shaped to avoid — unknown address 500s, known
+   * address answers 202.
+   */
+  it(
+    'still answers identically for a new and an existing address',
+    async () => {
+      await User.create({
+        email: 'taken@example.com',
+        authProvider: 'email',
+        emailVerifiedAt: new Date(),
+      });
+
+      const fresh = await post('/auth/signup', { email: 'new@example.com', password: PASSWORD });
+      const existing = await post('/auth/signup', {
+        email: 'taken@example.com',
+        password: PASSWORD,
+      });
+
+      expect(existing.statusCode).toBe(fresh.statusCode);
+      expect(existing.json()).toEqual(fresh.json());
+    },
+    SLOW,
+  );
+
+  /**
+   * The opposite call, and it is not inconsistency. Here the "no such address"
+   * branch sends nothing and cannot fail, so surfacing a failure on the other
+   * branch would answer the question this endpoint returns a fixed response to
+   * refuse: an error means the account exists.
+   */
+  it(
+    'stays silent on forgot-password, whether or not the address exists',
+    async () => {
+      await User.create({
+        email: 'known@example.com',
+        authProvider: 'email',
+        passwordHash: 'scrypt$65536$8$1$c2FsdA$aGFzaA',
+        emailVerifiedAt: new Date(),
+      });
+
+      const known = await post('/auth/forgot-password', { email: 'known@example.com' });
+      const unknown = await post('/auth/forgot-password', { email: 'nobody@example.com' });
+
+      expect(known.statusCode).toBe(202);
+      expect(unknown.statusCode).toBe(202);
+      expect(known.json()).toEqual(unknown.json());
+    },
+    SLOW,
+  );
+
+  it(
+    'stays silent on resend-verification too',
+    async () => {
+      // Same reasoning as forgot-password. A loud failure would reveal that the
+      // address exists *and* has not been verified.
+      await User.create({
+        email: 'unverified@example.com',
+        authProvider: 'email',
+        emailVerifiedAt: null,
+      });
+
+      const pending = await post('/auth/resend-verification', {
+        email: 'unverified@example.com',
+      });
+      const unknown = await post('/auth/resend-verification', { email: 'nobody@example.com' });
+
+      expect(pending.statusCode).toBe(202);
+      expect(pending.json()).toEqual(unknown.json());
     },
     SLOW,
   );

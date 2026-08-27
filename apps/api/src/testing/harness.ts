@@ -113,6 +113,19 @@ export function createCapturingMailer(): CapturingMailer {
   };
 }
 
+/**
+ * A mailer that always fails, for the misconfiguration cases — an unverified
+ * sending domain, a rejected API key. What matters about these is not that the
+ * send fails but *what the endpoint answers* when it does.
+ */
+export function createFailingMailer(): Mailer {
+  return {
+    kind: 'resend',
+    async send() {
+      throw new Error('Email send failed with status 422');
+    },
+  };
+}
 export function buildTestServer(overrides: BuildServerOptions = {}): Promise<FastifyInstance> {
   return buildServer({ config: testConfig, rateLimit: false, storage: testStorage, ...overrides });
 }
