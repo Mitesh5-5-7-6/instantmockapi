@@ -29,6 +29,13 @@ export type ErrorCode =
    * a status code alone.
    */
   | 'EMAIL_NOT_VERIFIED'
+  /**
+   * The request succeeded but an email we owed the user could not be sent.
+   *
+   * Its own code so a screen can offer to try again — the alternative is
+   * matching on the message text, which breaks the first time it is reworded.
+   */
+  | 'EMAIL_SEND_FAILED'
   | 'FORBIDDEN'
   | 'CONFLICT'
   | 'RATE_LIMIT_EXCEEDED'
@@ -88,6 +95,10 @@ function errorCodeToStatus(code: ErrorCode): number {
     // 403, not 401: the password was correct, so re-prompting for credentials
     // (which is what a 401 asks a client to do) would send the user in a loop.
     EMAIL_NOT_VERIFIED: 403,
+    // 502, not 500: nothing here is broken — an upstream service we depend on
+    // refused. Worth distinguishing in logs and dashboards, because the fix is
+    // a configuration change rather than a code one.
+    EMAIL_SEND_FAILED: 502,
     FORBIDDEN: 403,
     CONFLICT: 409,
     RATE_LIMIT_EXCEEDED: 429,
