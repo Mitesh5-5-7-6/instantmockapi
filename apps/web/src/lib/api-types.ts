@@ -204,3 +204,93 @@ export interface DashboardView {
   };
   activity: ActivityEvent[];
 }
+
+/* ── Project metrics (GET /v1/projects/:id/metrics) ── */
+
+/**
+ * Which URL shape a request addressed. Mirrors `ApiLog.shape`.
+ *
+ * Null on rows logged before per-endpoint attribution existed, and on a request
+ * that resolved to the project but not to an entity.
+ */
+export type ApiLogShape = 'index' | 'collection' | 'record';
+
+export interface EndpointUsage {
+  method: string;
+  /** Canonical entity path; null for the discovery document. */
+  entity: string | null;
+  shape: ApiLogShape | null;
+  count: number;
+  avgDurationMs: number | null;
+  durationSampleCount: number;
+  serverErrors: number;
+}
+
+/**
+ * One project's traffic.
+ *
+ * Same null discipline as `DashboardView`: every rate is `number | null`, and null
+ * means "nothing comparable to measure" rather than zero. A project with no
+ * traffic has no success rate, and 0% would read as "everything failed".
+ */
+export interface ProjectMetricsView {
+  window: { days: number; from: string; to: string; tz: 'UTC'; retentionDays: number };
+  /** Derived from the current schema × enabled methods, not from traffic. */
+  endpoints: { total: number; entities: number };
+  requests: {
+    total: number;
+    previousTotal: number;
+    changePercent: number | null;
+    successRate: number | null;
+    clientErrorRate: number | null;
+    serverErrorRate: number | null;
+    avgDurationMs: number | null;
+    previousAvgDurationMs: number | null;
+    /** Signed; negative is faster. Null unless both windows were sampled. */
+    durationChangeMs: number | null;
+    /** How many requests carried a duration — the mean is over these only. */
+    durationSampleCount: number;
+    series: RequestSeriesBucket[];
+  };
+  topEndpoints: EndpointUsage[];
+  /** Counted in `requests.total` but absent from `topEndpoints`. */
+  unattributedRequests: number;
+  /** Set only when `unattributedRequests > 0`, explaining the gap. */
+  endpointNote: string | null;
+  activity: ActivityEvent[];
+}
+
+/* ── Project logs (GET /v1/projects/:id/logs) ── */
+
+export type LogStatusClass = '2xx' | '3xx' | '4xx' | '5xx';
+
+export interface ApiLogRow {
+  id: string;
+  at: string;
+  method: string;
+  /** The URL exactly as requested — query string and record id included. */
+  path: string;
+  status: number;
+  /** Null on rows predating the field. Render as `—`, never `0ms`. */
+  durationMs: number | null;
+  entity: string | null;
+  shape: string | null;
+  ip: string | null;
+  userAgent: string | null;
+}
+
+export interface ProjectLogsParams {
+  page?: number;
+  limit?: number;
+  days?: number;
+  method?: string;
+  status?: LogStatusClass;
+  entity?: string;
+  /** Prefix match on the path. */
+  q?: string;
+}
+
+export interface ProjectLogsEnvelope {
+  data: ApiLogRow[];
+  meta: { page: number; limit: number; total: number; retentionDays: number };
+}

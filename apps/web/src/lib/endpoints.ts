@@ -3,7 +3,7 @@
  * `@instantmockapi/shared` so the platform API can compute the same figures.
  *
  * This barrel exists so the move stayed a move: the four consumers
- * (`snippet-tabs`, `explore/page`, `ready/page`, and this module's own test
+ * (`snippet-tabs`, `apis/page`, `ready/page`, and this module's own test
  * suite) keep importing from `../lib/endpoints` and needed no edits. Prefer
  * importing from `@instantmockapi/shared` directly in new code.
  *

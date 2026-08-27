@@ -9,6 +9,7 @@ import {
   useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
+  type KeyboardEvent,
   type ReactNode,
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
@@ -574,10 +575,19 @@ export interface StatProps {
    * with no comparable previous window should produce — never "+0%" or "+∞%".
    */
   delta?: { text: string; direction?: 'up' | 'down' } | null;
+  /**
+   * Qualifying text under the figure — what it covers, or why it is absent.
+   *
+   * Distinct from `delta`, which is a comparison. This carries the caveats that
+   * keep a figure honest: "timed for 412 of 5.2K requests", "no requests yet".
+   * Without somewhere to put those, a mean taken over a subset of rows renders
+   * as though it covered all of them.
+   */
+  hint?: string;
 }
 
 /** A single headline figure, e.g. "12 · Total Entities", or a dashboard tile. */
-export function Stat({ value, label, icon, tone = 'accent', delta }: StatProps) {
+export function Stat({ value, label, icon, tone = 'accent', delta, hint }: StatProps) {
   const isTile = icon !== undefined;
 
   return (
@@ -602,6 +612,7 @@ export function Stat({ value, label, icon, tone = 'accent', delta }: StatProps) 
           <span>{delta.text}</span>
         </div>
       ) : null}
+      {hint !== undefined ? <div className="ui-stat__hint">{hint}</div> : null}
     </div>
   );
 }
@@ -728,4 +739,144 @@ export function ListRow({ leading, title, meta, trailing, onClick }: ListRowProp
     );
   }
   return <div className="ui-list-row">{body}</div>;
+}
+
+/* ── Tabs ── */
+
+export interface TabItem<T extends string = string> {
+  id: T;
+  label: string;
+  /** Optional count or badge rendered after the label. */
+  hint?: ReactNode;
+}
+
+export interface TabsProps<T extends string = string> {
+  items: readonly TabItem<T>[];
+  active: T;
+  onChange: (id: T) => void;
+  /** Accessible name for the tablist. */
+  label: string;
+}
+
+/**
+ * A controlled tab strip.
+ *
+ * Replaces five hand-rolled copies of the `.ui-tabs` pattern, which had drifted:
+ * some set `role="tablist"`, none supported the keyboard, and one used buttons
+ * with `aria-selected` and no list role at all. The styling already lived in
+ * `styles.css`; only the component was missing.
+ *
+ * **Arrow keys move between tabs**, which is what the ARIA tabs pattern requires
+ * and what none of the copies did — without it a keyboard user tabs through every
+ * tab individually to reach the panel, and on an eight-tab strip that is eight
+ * stops before the content.
+ *
+ * `roving tabindex`: only the active tab is reachable by Tab, and Left/Right move
+ * the selection. That is the whole point of the pattern — Tab should land on the
+ * strip once and then move into the panel.
+ */
+export function Tabs<T extends string>({ items, active, onChange, label }: TabsProps<T>) {
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    if (delta === 0) {
+      return;
+    }
+    event.preventDefault();
+    const index = items.findIndex((item) => item.id === active);
+    // Wraps, so Right on the last tab returns to the first — the ARIA pattern's
+    // default and what stops the strip feeling like a dead end.
+    const next = items[(index + delta + items.length) % items.length];
+    if (next) {
+      onChange(next.id);
+    }
+  };
+
+  return (
+    <div
+      className="ui-tabs ui-tabs--scroll"
+      role="tablist"
+      aria-label={label}
+      onKeyDown={onKeyDown}
+    >
+      {items.map((item) => {
+        const selected = item.id === active;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            id={`tab-${item.id}`}
+            aria-selected={selected}
+            aria-controls={`panel-${item.id}`}
+            // Roving tabindex: the strip is one tab stop, not N.
+            tabIndex={selected ? 0 : -1}
+            onClick={() => onChange(item.id)}
+          >
+            {item.label}
+            {item.hint !== undefined ? <span className="ui-tabs__hint">{item.hint}</span> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The panel a `Tabs` strip controls. Wires up the aria relationship both ways. */
+export function TabPanel({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <div role="tabpanel" id={`panel-${id}`} aria-labelledby={`tab-${id}`} tabIndex={0}>
+      {children}
+    </div>
+  );
+}
+
+export interface NavTabItem {
+  href: string;
+  label: string;
+  hint?: ReactNode;
+}
+
+export interface NavTabsProps {
+  items: readonly NavTabItem[];
+  /** Which href is current. Compared exactly. */
+  activeHref: string;
+  label: string;
+  /** Rendered per item — the router's Link, which this package cannot import. */
+  renderLink: (item: NavTabItem, props: NavTabLinkProps) => ReactNode;
+}
+
+export interface NavTabLinkProps {
+  className: string;
+  'aria-current': 'page' | undefined;
+  children: ReactNode;
+}
+
+/**
+ * Tabs that are navigation rather than in-page state.
+ *
+ * **Not `role="tablist"`.** These are links that change the URL, so a screen
+ * reader should hear "link", not "tab" — announcing a tab implies the content
+ * swaps in place and the back button will not help. `aria-current="page"` carries
+ * the selection, exactly as the sidebar nav does.
+ *
+ * `renderLink` is a callback because `packages/ui` has no dependencies and cannot
+ * import `next/link`; a plain `<a>` would full-page-reload between tabs.
+ */
+export function NavTabs({ items, activeHref, label, renderLink }: NavTabsProps) {
+  return (
+    <nav className="ui-tabs ui-tabs--scroll" aria-label={label}>
+      {items.map((item) =>
+        renderLink(item, {
+          className: item.href === activeHref ? 'ui-tabs__link is-active' : 'ui-tabs__link',
+          'aria-current': item.href === activeHref ? 'page' : undefined,
+          children: (
+            <>
+              {item.label}
+              {item.hint !== undefined ? <span className="ui-tabs__hint">{item.hint}</span> : null}
+            </>
+          ),
+        }),
+      )}
+    </nav>
+  );
 }

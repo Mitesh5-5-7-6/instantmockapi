@@ -30,6 +30,19 @@ export async function buildMockRuntime(options: BuildRuntimeOptions): Promise<Fa
     logger: false,
     // Payload caps stop memory-exhaustion via giant writes (doc 13 §4)
     bodyLimit: config.maxRequestBodySize,
+    /**
+     * Trust exactly one reverse proxy, so `request.ip` is the caller rather than
+     * the load balancer.
+     *
+     * Needed here for two reasons: the per-project rate limit keys on the client
+     * address, and the request log records it — a hosted mock URL is public and
+     * unauthenticated, so "who is calling this" is a question the owner can
+     * reasonably ask, and a column full of one proxy address answers nothing.
+     *
+     * `1`, not `true`: `true` trusts the whole `X-Forwarded-For` chain, letting a
+     * caller choose the address that gets recorded and rate-limited.
+     */
+    trustProxy: 1,
   });
 
   app.setErrorHandler((error: FastifyError, request, reply) => {

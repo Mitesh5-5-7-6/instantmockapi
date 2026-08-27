@@ -4,8 +4,11 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
+// Type-only: `mongoose` is not a dependency of this app.
+import type { Types } from 'mongoose';
 import {
   AppError,
+  HTTP_METHODS,
   PROJECT_KINDS,
   PROJECT_STATUSES,
   SLUG_MAX_LENGTH,
@@ -31,6 +34,14 @@ import { escapeRegExp, listEnvelope, parsePagination, parseSort } from '../pagin
 import { toProjectDetail, toProjectSummary, toProjectSummaryWithCounts } from '../serializers.js';
 import { parseInputSource } from '../input-parsing.js';
 import { validateGenerationConfig } from '../generation-config.js';
+import { buildProjectMetrics } from '../project-metrics-service.js';
+import {
+  LOG_PAGE_DEFAULT,
+  LOG_PAGE_MAX,
+  LOG_STATUS_CLASSES,
+  listProjectLogs,
+  type ProjectLogsQuery,
+} from '../project-logs-service.js';
 
 export interface ProjectRouteOptions {
   config: EnvConfig;
@@ -241,6 +252,81 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
     const project = await loadOwnedProject(id, request.authUser?.sub ?? '');
     return reply.send(toProjectDetail(project));
   });
+
+  /**
+   * Per-project traffic, in the shape `/v1/dashboard` uses.
+   *
+   * Same `days` enum and `activityLimit` bounds on purpose: the two screens
+   * answer the same question at different scopes, and a reader comparing them
+   * should not have to wonder whether the windows match.
+   *
+   * `days` is capped at the ApiLog TTL — asking for 90 would return 30 days of
+   * data under a "90 days" heading, which is worse than refusing.
+   */
+  app.get(
+    '/projects/:id/metrics',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            days: { type: 'integer', enum: [7, 14, 30], default: 7 },
+            activityLimit: { type: 'integer', minimum: 1, maximum: 20, default: 8 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const query = request.query as { days: number; activityLimit: number };
+      const project = await loadOwnedProject(id, request.authUser?.sub ?? '');
+      return reply.send(await buildProjectMetrics(project, query));
+    },
+  );
+
+  /**
+   * The request log itself, newest first.
+   *
+   * Distinct from `/metrics` rather than folded into it: this one is paged and
+   * filtered per view, so combining them would make every filter change refetch
+   * the aggregates too.
+   */
+  app.get(
+    '/projects/:id/logs',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            page: { type: 'integer', minimum: 1, default: 1 },
+            limit: {
+              type: 'integer',
+              minimum: 1,
+              maximum: LOG_PAGE_MAX,
+              default: LOG_PAGE_DEFAULT,
+            },
+            days: { type: 'integer', enum: [1, 7, 14, 30], default: 7 },
+            method: { type: 'string', enum: [...HTTP_METHODS] },
+            status: { type: 'string', enum: [...LOG_STATUS_CLASSES] },
+            entity: { type: 'string', maxLength: 120 },
+            // Bounded because it reaches a `$regex`. The service escapes it and
+            // anchors it; the length cap keeps even a pathological pattern cheap.
+            q: { type: 'string', maxLength: 200 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const project = await loadOwnedProject(id, request.authUser?.sub ?? '');
+      const query = request.query as ProjectLogsQuery;
+      // A real ObjectId, not String(project._id) — see the note in
+      // project-metrics-service.ts.
+      return reply.send(await listProjectLogs(project._id as Types.ObjectId, query));
+    },
+  );
 
   app.patch(
     '/projects/:id',

@@ -226,4 +226,68 @@ describe('rate limiting', () => {
       await limited.close();
     }
   });
+
+  /**
+   * The bug this pins down was live in production.
+   *
+   * The limiter keys unauthenticated requests on `request.ip`, and behind a load
+   * balancer that is the balancer's address unless `trustProxy` is set — so every
+   * caller on the internet shared one bucket. `SIGNUP_LIMIT` is 5/hour, which
+   * made it five signups an hour *for the entire platform*.
+   *
+   * Note what is asserted: that two different forwarded addresses get
+   * **separate budgets**. A test that only checked `request.ip` was non-empty
+   * passed the whole time the bug existed, because the proxy's address is a
+   * perfectly valid non-empty string.
+   */
+  it('gives two different client addresses separate budgets', async () => {
+    const limited = await buildTestServer({ rateLimit: { max: 1, timeWindowMs: 60_000 } });
+    try {
+      const get = (forwardedFor: string) =>
+        limited.inject({
+          method: 'GET',
+          url: '/healthz',
+          headers: { 'x-forwarded-for': forwardedFor },
+        });
+
+      expect((await get('203.0.113.1')).statusCode).toBe(200);
+      // Same caller, budget spent.
+      expect((await get('203.0.113.1')).statusCode).toBe(429);
+      // Different caller, untouched budget. Without trustProxy this is a 429,
+      // because both requests resolve to the proxy's address.
+      expect((await get('198.51.100.7')).statusCode).toBe(200);
+    } finally {
+      await limited.close();
+    }
+  });
+
+  /**
+   * `trustProxy: 1` rather than `true`.
+   *
+   * `true` walks the whole `X-Forwarded-For` chain to its leftmost entry, which
+   * is attacker-controlled: prepending a fresh fake address to every request
+   * yields a fresh bucket every time and defeats the limit entirely. Trusting one
+   * hop means only the address the real proxy appended is believed.
+   */
+  it('ignores forged entries prepended to the forwarded chain', async () => {
+    const limited = await buildTestServer({ rateLimit: { max: 1, timeWindowMs: 60_000 } });
+    try {
+      const spoof = (fake: string) =>
+        limited.inject({
+          method: 'GET',
+          url: '/healthz',
+          // The rightmost entry is what the proxy appended; everything left of it
+          // came from the client.
+          headers: { 'x-forwarded-for': `${fake}, 203.0.113.1` },
+        });
+
+      expect((await spoof('1.1.1.1')).statusCode).toBe(200);
+      // A new fake address must NOT buy a new budget — the trusted hop is
+      // unchanged, so this is the same caller.
+      expect((await spoof('2.2.2.2')).statusCode).toBe(429);
+      expect((await spoof('3.3.3.3')).statusCode).toBe(429);
+    } finally {
+      await limited.close();
+    }
+  });
 });

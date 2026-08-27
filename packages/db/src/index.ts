@@ -24,7 +24,7 @@ export {
 } from './models/artifact.js';
 export { Job, type IJob, type IJobWorker } from './models/job.js';
 export { MockStore, type IMockStore } from './models/mockStore.js';
-export { ApiLog, type IApiLog } from './models/apiLog.js';
+export { ApiLog, USER_AGENT_MAX_LENGTH, type IApiLog, type ApiLogShape } from './models/apiLog.js';
 
 // Export Queries
 export {

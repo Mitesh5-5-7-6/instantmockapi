@@ -107,6 +107,43 @@ const ICONS = {
   clock: { c: [[12, 12, 9]], p: ['M12 7.5V12l3.5 2'] },
   alert: { c: [[12, 12, 9]], p: ['M12 7.5v5.5', 'M12 16.5h.01'] },
 
+  // ── project workspace ──
+  download: { p: ['M12 4v11', 'M7.5 10.5 12 15l4.5-4.5', 'M4.5 19.5h15'] },
+  copy: {
+    p: [
+      'M9 9h10.5v10.5H9z',
+      'M15 5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15',
+    ],
+  },
+  trash: {
+    p: ['M4.5 7h15', 'M9.5 7V4.5h5V7', 'M6.5 7l1 12.5h9L17.5 7', 'M10.5 11v5', 'M13.5 11v5'],
+  },
+  /** Regenerate. Two arcs with arrowheads, so it reads as a cycle rather than a circle. */
+  refresh: {
+    p: [
+      'M20 12a8 8 0 0 1-13.7 5.6',
+      'M4 12a8 8 0 0 1 13.7-5.6',
+      'M20 5.5V10h-4.5',
+      'M4 18.5V14h4.5',
+    ],
+  },
+  'external-link': {
+    p: [
+      'M14 4.5h5.5V10',
+      'M19.5 4.5 11 13',
+      'M17 14.5v4A1.5 1.5 0 0 1 15.5 20h-10A1.5 1.5 0 0 1 4 18.5v-10A1.5 1.5 0 0 1 5.5 7h4',
+    ],
+  },
+  /** Three stacked ellipses — the conventional datastore glyph. */
+  database: {
+    p: [
+      'M12 3c4.4 0 8 1.1 8 2.5S16.4 8 12 8 4 6.9 4 5.5 7.6 3 12 3z',
+      'M4 5.5v13C4 19.9 7.6 21 12 21s8-1.1 8-2.5v-13',
+      'M4 12c0 1.4 3.6 2.5 8 2.5s8-1.1 8-2.5',
+    ],
+  },
+  filter: { p: ['M4 6h16', 'M7 12h10', 'M10 18h4'] },
+
   // ── auth ──
   mail: { p: ['M3 6.5h18v11H3z', 'M3 7l9 6.5L21 7'] },
   lock: {
