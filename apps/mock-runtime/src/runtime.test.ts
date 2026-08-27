@@ -3,6 +3,7 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import type { FastifyInstance } from 'fastify';
 import {
   ApiLog,
+  USER_AGENT_MAX_LENGTH,
   Artifact,
   MockStore,
   Project,
@@ -517,6 +518,122 @@ describe('request logging (doc 13 §9)', () => {
     expect(typeof entry?.durationMs).toBe('number');
     expect(entry?.durationMs).toBeGreaterThanOrEqual(0);
     expect(Number.isInteger(entry?.durationMs)).toBe(true);
+  });
+
+  /**
+   * `entity` + `shape` are the grouping keys for per-endpoint reporting, and this
+   * is the only place they can be captured.
+   *
+   * The whole hosted surface is one wildcard route (`/p/*`), so
+   * `request.routeOptions.url` is always `/p/*`; and `path` stores the raw URL, so
+   * `/customer/c-1` and `/customer/c-2` are different values. Grouping on `path`
+   * would produce one bucket per record id.
+   */
+  it('records the entity and URL shape each request resolved to', async () => {
+    const projectId = await stageHostedProject({ methods: ['GET', 'POST'] });
+    await app.inject({ method: 'GET', url: `/p/${projectId}` });
+    await app.inject({ method: 'GET', url: `/p/${projectId}/customer` });
+    await app.inject({ method: 'GET', url: `/p/${projectId}/customer/c-1` });
+    await app.inject({
+      method: 'POST',
+      url: `/p/${projectId}/customer`,
+      payload: { name: 'Ada', email: 'ada@example.com', age: 36 },
+    });
+
+    expect(await waitForLogs(projectId, 4)).toBeGreaterThanOrEqual(4);
+    const rows = await ApiLog.find({ projectId }).lean();
+    const shapes = rows.map((row) => `${row.method} ${row.entity ?? '-'} ${row.shape ?? '-'}`);
+
+    expect(shapes).toContain('GET - index');
+    expect(shapes).toContain('GET customer collection');
+    expect(shapes).toContain('GET customer record');
+    expect(shapes).toContain('POST customer collection');
+  });
+
+  /**
+   * Two requests to the same endpoint with different record ids must group as one
+   * endpoint. This is the property that makes "Top endpoints" possible and the
+   * reason `path` alone is not enough.
+   */
+  it('groups two different record ids under one endpoint', async () => {
+    const projectId = await stageHostedProject({});
+    await app.inject({ method: 'GET', url: `/p/${projectId}/customer/c-1` });
+    await app.inject({ method: 'GET', url: `/p/${projectId}/customer/c-2` });
+
+    expect(await waitForLogs(projectId, 2)).toBeGreaterThanOrEqual(2);
+    const rows = await ApiLog.find({ projectId }).lean();
+    // Distinct raw paths...
+    expect(new Set(rows.map((row) => row.path)).size).toBe(2);
+    // ...one endpoint.
+    expect(new Set(rows.map((row) => `${row.method} ${row.entity} ${row.shape}`)).size).toBe(1);
+  });
+
+  it('leaves attribution null when the project resolves but the entity does not', async () => {
+    // The row still counts toward totals and error rates; it is not an endpoint,
+    // so it must not appear in a per-endpoint breakdown.
+    const projectId = await stageHostedProject({});
+    await app.inject({ method: 'GET', url: `/p/${projectId}/nosuchthing` });
+
+    expect(await waitForLogs(projectId)).toBeGreaterThanOrEqual(1);
+    const entry = await ApiLog.findOne({ projectId, status: 404 });
+    expect(entry?.entity).toBeNull();
+    expect(entry?.shape).toBeNull();
+    expect(entry?.status).toBe(404);
+  });
+
+  it('normalises the entity casing so one endpoint is one bucket', async () => {
+    // Entity lookup is case-insensitive, so the URL segment can be any casing.
+    // Grouping on the URL would split one endpoint across several buckets.
+    const projectId = await stageHostedProject({});
+    await app.inject({ method: 'GET', url: `/p/${projectId}/customer` });
+    await app.inject({ method: 'GET', url: `/p/${projectId}/CUSTOMER` });
+
+    expect(await waitForLogs(projectId, 2)).toBeGreaterThanOrEqual(2);
+    const rows = await ApiLog.find({ projectId }).lean();
+    expect(new Set(rows.map((row) => row.entity)).size).toBe(1);
+    expect(rows[0]?.entity).toBe('customer');
+  });
+
+  it('records the forwarded client address, not the proxy', async () => {
+    // Only meaningful because the server sets trustProxy: without it every row
+    // carries the load balancer's address and the column answers nothing.
+    const projectId = await stageHostedProject({});
+    await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/customer`,
+      headers: { 'x-forwarded-for': '203.0.113.42' },
+    });
+
+    expect(await waitForLogs(projectId)).toBeGreaterThanOrEqual(1);
+    expect((await ApiLog.findOne({ projectId }))?.ip).toBe('203.0.113.42');
+  });
+
+  it('stores a long user-agent truncated rather than dropping the row', async () => {
+    // Truncated at write time, not by the schema's maxlength validator: the write
+    // is fire-and-forget with a swallowed rejection, so a validation failure
+    // would silently lose the whole log entry instead of shortening one field.
+    const projectId = await stageHostedProject({});
+    await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/customer`,
+      headers: { 'user-agent': 'x'.repeat(400) },
+    });
+
+    expect(await waitForLogs(projectId)).toBeGreaterThanOrEqual(1);
+    const entry = await ApiLog.findOne({ projectId });
+    expect(entry?.userAgent).toHaveLength(USER_AGENT_MAX_LENGTH);
+  });
+
+  it('stores a null user-agent when the caller sends none', async () => {
+    const projectId = await stageHostedProject({});
+    await app.inject({
+      method: 'GET',
+      url: `/p/${projectId}/customer`,
+      headers: { 'user-agent': '' },
+    });
+
+    expect(await waitForLogs(projectId)).toBeGreaterThanOrEqual(1);
+    expect((await ApiLog.findOne({ projectId }))?.userAgent).toBeNull();
   });
 });
 

@@ -15,7 +15,7 @@ import { randomUUID } from 'crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { AppError, HTTP_METHODS, hostedUrl, type HttpMethod } from '@instantmockapi/shared';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
-import { ApiLog } from '@instantmockapi/db';
+import { ApiLog, USER_AGENT_MAX_LENGTH, type ApiLogShape } from '@instantmockapi/db';
 import type { StorageClient } from '@instantmockapi/storage';
 import { enabledQueryFeatures, type EntityQueryFields } from '@instantmockapi/ips';
 import type { HostedEntityConfig } from '@instantmockapi/generator-hosting';
@@ -45,11 +45,26 @@ import { validateRecord } from './validate.js';
 declare module 'fastify' {
   interface FastifyRequest {
     /**
-     * Canonical project the request resolved to. Set by the dispatcher and read
-     * by the apiLogs hook, which needs the ObjectId — a pretty URL carries only
-     * the public id, and `ApiLog.projectId` is an ObjectId ref.
+     * What the request resolved to. Set by the dispatcher, read by the apiLogs
+     * hook.
+     *
+     * `projectId` because the hook needs the ObjectId and a pretty URL carries
+     * only the public id. `entity` and `shape` because they are the grouping keys
+     * for per-endpoint reporting, and the *only* place they can be captured is
+     * here: the whole hosted surface is one wildcard route (`/p/*`), so
+     * `request.routeOptions.url` is always `/p/*` and the grammar lives in
+     * `parseHostedPath`. By the time this hook runs, that parse has already
+     * happened — recording its result is free, re-deriving it later is not
+     * possible.
+     *
+     * Both are null until an entity resolves, so a request that finds the project
+     * but not the entity logs a row with a status and no endpoint attribution.
      */
-    hosted: { projectId: string } | null;
+    hosted: {
+      projectId: string;
+      entity: string | null;
+      shape: ApiLogShape | null;
+    } | null;
   }
 }
 
@@ -168,6 +183,23 @@ function sendIndex(reply: FastifyReply, ctx: HostedContext, env: EnvConfig): Fas
   });
 }
 
+/**
+ * Caller's user-agent, truncated, or null.
+ *
+ * Truncated at write time rather than left to the schema's `maxlength`: that
+ * validator *rejects* an over-long value, and because the log write is
+ * fire-and-forget with a swallowed rejection, a long user-agent would silently
+ * drop the entire row instead of storing a shortened one.
+ */
+function userAgentOf(request: FastifyRequest): string | null {
+  const raw = request.headers['user-agent'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (value === undefined || value === '') {
+    return null;
+  }
+  return value.slice(0, USER_AGENT_MAX_LENGTH);
+}
+
 export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): void {
   const env = deps.config ?? loadEnvConfig();
 
@@ -191,6 +223,15 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
         // sub-nanosecond float that would be stored at full precision for no
         // benefit.
         durationMs: Math.round(reply.elapsedTime),
+        // Grouping keys for per-endpoint reporting. Null when the request found
+        // the project but no entity — that row still counts toward totals and
+        // error rates, and is excluded from endpoint breakdowns.
+        entity: hosted.entity,
+        shape: hosted.shape,
+        // Meaningful only because the server sets `trustProxy` — otherwise this
+        // is the load balancer on every row.
+        ip: request.ip,
+        userAgent: userAgentOf(request),
       }).catch(() => undefined);
     }
     done();
@@ -420,9 +461,12 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
     }
 
     const ctx = await resolveHostedProject(target.ref, deps);
-    request.hosted = { projectId: ctx.projectId };
+    // Set as soon as the project resolves, so a request that gets no further
+    // still logs against the right project with a status and no attribution.
+    request.hosted = { projectId: ctx.projectId, entity: null, shape: null };
 
     if (target.kind === 'index') {
+      request.hosted.shape = 'index';
       return sendIndex(reply, ctx, env);
     }
 
@@ -430,6 +474,12 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
     if (!entity) {
       throw notFound('Entity not found');
     }
+    // `entity.path` from the config, not `target.entity` from the URL: the lookup
+    // is case-insensitive, so the URL segment may be any casing and grouping on
+    // it would split one endpoint across several buckets.
+    request.hosted.entity = entity.path;
+    request.hosted.shape = target.kind;
+
     const method = request.method as HttpMethod;
     // Unselected-method 405 wins over the wrong-shape 405, as it always has.
     if (!entity.methods.includes(method)) {

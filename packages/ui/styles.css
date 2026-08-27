@@ -1738,3 +1738,440 @@ h3 {
   flex-direction: column;
   gap: var(--space-2);
 }
+
+/* ── 18 · Tabs ──────────────────────────────────────────────────────────── */
+
+/**
+ * Horizontal scrolling, because the project workspace has eight tabs.
+ *
+ * Eight tabs is roughly 640px of strip. That fits the 1100px content measure,
+ * but once the sidebar becomes a drawer at 720px there is about 360px available —
+ * without this the last three tabs are simply unreachable on a phone.
+ */
+.ui-tabs--scroll {
+  overflow-x: auto;
+  /* Stops the strip growing the page horizontally when it overflows. */
+  max-width: 100%;
+  scrollbar-width: thin;
+  /* Snapping makes a swiped strip settle on a tab rather than mid-label. */
+  scroll-snap-type: x proximity;
+  /* A flex row's items shrink by default; tabs must keep their label width and
+     let the container scroll instead. */
+  flex-wrap: nowrap;
+}
+
+.ui-tabs--scroll > * {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+}
+
+/* The scrollbar sits directly under the 1px bottom border and doubles it
+   visually. Thin and dim is enough of an affordance next to the clipped tab. */
+.ui-tabs--scroll::-webkit-scrollbar {
+  height: 3px;
+}
+
+.ui-tabs--scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+
+/* Links, not buttons: NavTabs renders navigation, so it needs the button
+   treatment applied to anchors — including undoing the global anchor colour. */
+.ui-tabs__link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ui-tabs__link:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+
+/* `aria-current` is the source of truth for selection, so the style cannot
+   drift from what a screen reader announces. */
+.ui-tabs__link[aria-current='page'] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.ui-tabs__hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The panel takes focus when arrow keys move the selection, and an outline on a
+   whole page region is noise — the tab itself already shows focus. */
+[role='tabpanel']:focus {
+  outline: none;
+}
+
+[role='tabpanel']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+/* ── 19 · Project workspace ─────────────────────────────────────────────── */
+
+.project-workspace {
+  gap: var(--space-6);
+}
+
+.project-header {
+  gap: var(--space-3);
+}
+
+/* Breadcrumb: an <ol>, so position and depth are announced rather than read as
+   punctuation. The separator is a pseudo-element for the same reason — it must
+   not end up in the accessibility tree. */
+.project-crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.project-crumbs li + li::before {
+  content: '/';
+  margin-right: var(--space-2);
+  color: var(--border);
+}
+
+.project-crumbs li[aria-current='page'] {
+  color: var(--text);
+}
+
+.project-header__title {
+  align-items: flex-start;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+/* ── The ⋯ menu ── */
+
+.project-menu {
+  position: relative;
+}
+
+.project-menu__list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-1));
+  min-width: 200px;
+  padding: var(--space-1);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  /* Above sticky content but below a modal — the tokens exist so a new layer
+     never has to invent a number. */
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column;
+}
+
+.project-menu__list button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.project-menu__list button:hover {
+  background: var(--surface);
+}
+
+/* The one item here that cannot be undone, separated and tinted so it is not
+   selected by momentum. */
+.project-menu__danger {
+  color: var(--status-error) !important;
+  margin-top: var(--space-1);
+  border-top: 1px solid var(--border) !important;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm) !important;
+}
+
+/* ── 20 · Project overview + logs ───────────────────────────────────────── */
+
+/* Two columns, both `minmax(0, 1fr)`: the default `1fr` is `minmax(auto, 1fr)`,
+   and a wide table or a long URL in either column would then push the grid past
+   the viewport instead of scrolling inside its own cell. */
+.project-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .project-overview-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ── Hosted API card ── */
+
+.hosted-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.hosted-card__head {
+  align-items: center;
+}
+
+/* The URL is meant to be read character by character and pasted, so it gets the
+   full width and a monospace face rather than a truncated cell. */
+.hosted-card__url {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.hosted-card__url code {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  /* Breaks anywhere rather than overflowing: a hosted URL has no spaces, so
+     normal wrapping cannot break it at all. */
+  overflow-wrap: anywhere;
+}
+
+.hosted-card__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.hosted-card__facts dt {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: var(--space-1);
+}
+
+.hosted-card__facts dd {
+  margin: 0;
+}
+
+/* ── Endpoint bars (Top endpoints) ── */
+
+.endpoint-bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.endpoint-bars li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'label count'
+    'track count';
+  gap: var(--space-1) var(--space-3);
+  align-items: center;
+}
+
+.endpoint-bars__label {
+  grid-area: label;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.endpoint-bars__label code {
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An endpoint the schema no longer has. Traffic against it is real and counted,
+   so the row stays and says why it looks orphaned. */
+.endpoint-bars__gone {
+  flex: none;
+  font-size: 11px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--status-warning) 18%, transparent);
+  color: var(--status-warning);
+}
+
+.endpoint-bars__track {
+  grid-area: track;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.endpoint-bars__track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.endpoint-bars__count {
+  grid-area: count;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Tables ── */
+
+.endpoint-table,
+.log-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.endpoint-table th,
+.log-table th {
+  text-align: left;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: var(--space-2) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.endpoint-table td,
+.log-table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.endpoint-table tr:last-child td,
+.log-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* Tabular figures and right alignment, so counts compare down the column. */
+.endpoint-table__num,
+.log-table__num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The path is the column that can be arbitrarily long, so it is the one that
+   truncates — the full value is in the expanded detail. */
+.log-table__path {
+  max-width: 320px;
+}
+
+.log-table__path code {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+}
+
+/* The table scrolls inside its own container rather than widening the page. */
+.log-table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.log-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-2);
+}
+
+/* ── Log status + detail ── */
+
+.log-status {
+  display: inline-block;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.log-status--success {
+  background: color-mix(in srgb, var(--status-success) 16%, transparent);
+  color: var(--status-success);
+}
+
+.log-status--warning {
+  background: color-mix(in srgb, var(--status-warning) 18%, transparent);
+  color: var(--status-warning);
+}
+
+.log-status--error {
+  background: color-mix(in srgb, var(--status-error) 16%, transparent);
+  color: var(--status-error);
+}
+
+.log-detail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--bg);
+  border-radius: var(--radius-md);
+}
+
+.log-detail dt {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: var(--space-1);
+}
+
+.log-detail dd {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+/* Both hold values with no spaces (a URL, a user-agent string), so they need
+   `anywhere` — normal wrapping would leave them overflowing the cell. */
+.log-detail__path,
+.log-detail__ua {
+  overflow-wrap: anywhere;
+}

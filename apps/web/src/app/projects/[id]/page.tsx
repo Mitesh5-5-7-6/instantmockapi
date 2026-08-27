@@ -1,185 +1,83 @@
 'use client';
 
 /**
- * S6 · Project page + S7 · Expired state (doc 11).
- * Hosted API card with countdown, artifact grid with downloads, regenerate,
- * version history with restore. Expired projects keep the shell and offer
- * Generate Again (doc 07 §6).
+ * The Overview tab.
+ *
+ * Replaces the old flat-scrolling project page, whose content is now spread across
+ * the workspace tabs — artifacts to Files, versions to Activity, the schema modal
+ * to Schema, the playground to Mock Data. What is left here is the summary: where
+ * the API lives, how much it is being used, and what to look at next.
+ *
+ * Two requests: the project (shared with the layout via the `['project', id]` key)
+ * and its metrics. Nothing else, so switching to this tab does not pull artifacts
+ * and versions it will not render.
  */
 
-import { use, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import {
   Button,
   Card,
-  CodeBlock,
-  CodeViewer,
-  CountdownBadge,
   EmptyState,
-  Modal,
-  SchemaTree,
-  StatusChip,
-  type SchemaTreeEntity,
+  MethodBadge,
+  Note,
+  Select,
+  Stat,
+  type ApiMethod,
 } from '@instantmockapi/ui';
-import {
-  downloadArtifact,
-  downloadTextFile,
-  useArtifactContent,
-  useArtifacts,
-  useGenerate,
-  useGenerateAgain,
-  useProject,
-  useRegenerate,
-  useRestoreVersion,
-  useVersions,
-} from '../../../lib/hooks';
-import { HostedPlayground } from '../../../components/hosted-playground';
+import { useGenerate, useProject, useProjectMetrics, type MetricsDays } from '../../../lib/hooks';
+import { projectEndpoints, type IpsEntity } from '../../../lib/endpoints';
+import { toEndpointRows, toProjectStatTiles, toRequestPoints } from '../../../lib/project-metrics';
+import { formatCompact } from '../../../lib/area-chart';
+import { HostedApiCard } from '../../../components/project/hosted-api-card';
+import { TopEndpointsCard } from '../../../components/project/top-endpoints-card';
+import { RequestsChart } from '../../../components/dashboard/requests-chart';
+import { ActivityRow } from '../../../components/dashboard/activity-row';
 
-const REGENERATABLE = [
-  'json_schema',
-  'zod',
-  'yup',
-  'typescript',
-  'mock_data',
-  'openapi',
-  'postman',
-  'hosted_api',
-  'export_zip',
+/** Windows the metrics endpoint accepts — capped by the log's 30-day retention. */
+const WINDOWS: { value: MetricsDays; label: string }[] = [
+  { value: 7, label: 'Last 7 days' },
+  { value: 14, label: 'Last 14 days' },
+  { value: 30, label: 'Last 30 days' },
 ];
 
-// Binary bundle — no inline text view (download only).
-const NON_VIEWABLE = ['export_zip'];
+/** How many endpoints the Overview lists before deferring to the APIs tab. */
+const ENDPOINT_PREVIEW = 5;
 
-export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function ProjectOverviewPage() {
+  const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const project = useProject(id);
-  const artifacts = useArtifacts(id);
-  const versions = useVersions(id);
-  const generate = useGenerate(id);
-  const generateAgain = useGenerateAgain(id);
-  const regenerate = useRegenerate(id);
-  const restore = useRestoreVersion(id);
-  const [regenOpen, setRegenOpen] = useState(false);
-  const [selected, setSelected] = useState<string[]>(['zod']);
-  const [schemaOpen, setSchemaOpen] = useState(false);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
-  const [view, setView] = useState<{ type: string; version: number } | null>(null);
-  const content = useArtifactContent(id, view?.type ?? null, view?.version);
+  const [days, setDays] = useState<MetricsDays>(7);
 
-  if (project.isLoading) {
+  const project = useProject(id);
+  const metrics = useProjectMetrics(id, days);
+  const generate = useGenerate(id);
+
+  if (!project.data) {
     return <div className="ui-skeleton" style={{ minHeight: 320 }} />;
-  }
-  if (project.isError || !project.data) {
-    return (
-      <EmptyState title="Project not found">
-        <Button variant="secondary" onClick={() => router.push('/')}>
-          Back to dashboard
-        </Button>
-      </EmptyState>
-    );
   }
 
   const detail = project.data;
-  const isExpired = detail.status === 'expired';
-  // Entity path = name.toLowerCase(), mirroring generator-hosting's
-  // generateHostingConfig so the playground hits the same routes the runtime serves.
-  const ipsEntities = ((detail.ips as { entities?: { name: string }[] })?.entities ?? []).map(
-    (entity) => ({ name: entity.name, path: entity.name.toLowerCase() }),
-  );
+  const entities = ((detail.ips as { entities?: IpsEntity[] })?.entities ?? []) as IpsEntity[];
+  const methods = detail.generationConfig.methods;
+  const view = metrics.data;
+
+  // Derived from the schema, so the endpoint list is complete before any traffic
+  // exists — request counts are then layered on where there are any.
+  const allEndpoints = projectEndpoints(entities, methods);
+  const usageRows = view ? toEndpointRows(view.topEndpoints, entities, methods) : [];
+  const countByKey = new Map(usageRows.map((row) => [`${row.method}|${row.path}`, row.count]));
 
   return (
-    <div className="ui-stack" style={{ gap: 'var(--space-6)' }}>
-      <div className="ui-row ui-row--between">
-        <div>
-          <h1>{detail.name}</h1>
-          <p className="ui-meta ui-mono">
-            v{detail.currentVersion} · {detail.inputType} · methods{' '}
-            {detail.generationConfig.methods.join(',')}
-          </p>
-        </div>
-        <div className="ui-row">
-          <StatusChip status={detail.status} />
-          <Button variant="secondary" size="sm" onClick={() => setSchemaOpen(true)}>
-            View schema
-          </Button>
-          <Link href="/demo/project-api/ecommerce">
-            <Button variant="ghost" size="sm">
-              View Demo API
-            </Button>
-          </Link>
-        </div>
-      </div>
-
-      {isExpired ? (
-        /* S7 — hosted assets deleted, shell kept */
+    <div className="ui-stack">
+      {detail.status === 'expired' ? (
         <Card className="ui-stack">
           <h2>Hosting expired</h2>
           <p className="ui-meta">
-            The hosted mock API and generated files for this project were cleaned up on schedule.
-            Your schema and configuration are intact — regenerate to bring everything back under a
-            fresh version.
+            The hosted mock API and generated files were cleaned up on schedule. The schema and
+            configuration are intact — regenerate to bring everything back under a fresh version.
           </p>
-          <div className="ui-row">
-            <Button
-              disabled={generateAgain.isPending}
-              onClick={() =>
-                generateAgain.mutate(undefined, {
-                  onSuccess: (job) => router.push(`/projects/${id}/progress/${job.jobId}`),
-                })
-              }
-            >
-              {generateAgain.isPending ? 'Starting…' : 'Generate again'}
-            </Button>
-            {generateAgain.isError ? (
-              <span className="ui-error">{generateAgain.error.message}</span>
-            ) : null}
-          </div>
-        </Card>
-      ) : (
-        <Card className="ui-stack">
-          <div className="ui-row ui-row--between">
-            <h2>Hosted mock API</h2>
-            {detail.hosted.expiresAt ? (
-              <CountdownBadge expiresAt={detail.hosted.expiresAt} />
-            ) : null}
-          </div>
-          {detail.hosted.url ? (
-            <>
-              <CodeBlock code={detail.hosted.url} />
-              <div className="ui-row">
-                <Link href={`/projects/${id}/explore`}>
-                  <Button variant="secondary" size="sm">
-                    Explore endpoints &amp; snippets
-                  </Button>
-                </Link>
-              </div>
-            </>
-          ) : (
-            <p className="ui-meta">
-              Not hosted yet — generate to bring the mock API up
-              {detail.generationConfig.methods.length === 0 ? ' (select methods first)' : ''}.
-            </p>
-          )}
-          {detail.generationConfig.methods.length > 0 ? (
-            <div className="ui-row" style={{ gap: 'var(--space-1)' }}>
-              {detail.generationConfig.methods.map((verb) => (
-                <span key={verb} className="ui-mono ui-meta">
-                  {verb}
-                </span>
-              ))}
-            </div>
-          ) : null}
-          {detail.hosted.url &&
-          ipsEntities.length > 0 &&
-          detail.generationConfig.methods.length > 0 ? (
-            <HostedPlayground
-              baseUrl={detail.hosted.url}
-              entities={ipsEntities}
-              methods={detail.generationConfig.methods}
-            />
-          ) : null}
           <div className="ui-row">
             <Button
               disabled={generate.isPending}
@@ -189,187 +87,156 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                 })
               }
             >
-              {generate.isPending
-                ? 'Starting…'
-                : detail.status === 'draft'
-                  ? 'Generate'
-                  : 'Regenerate all'}
+              {generate.isPending ? 'Starting…' : 'Generate again'}
             </Button>
-            <Button variant="secondary" onClick={() => setRegenOpen(true)}>
-              Regenerate selected…
-            </Button>
-            {generate.isError ? <span className="ui-error">{generate.error.message}</span> : null}
           </div>
         </Card>
+      ) : (
+        <HostedApiCard
+          detail={detail}
+          generating={generate.isPending}
+          onGenerate={() =>
+            generate.mutate(undefined, {
+              onSuccess: (job) => router.push(`/projects/${id}/progress/${job.jobId}`),
+            })
+          }
+        />
       )}
 
-      <Card className="ui-stack">
-        <div className="ui-row ui-row--between">
-          <h2>Artifacts</h2>
-          <span className="ui-meta ui-mono">v{artifacts.data?.meta.version ?? '…'}</span>
-        </div>
-        {downloadError ? <p className="ui-error">{downloadError}</p> : null}
-        {artifacts.data && artifacts.data.data.length === 0 ? (
-          <p className="ui-meta">Nothing generated yet for this version.</p>
-        ) : null}
-        <div className="ui-grid-cards">
-          {artifacts.data?.data.map((artifact) => (
-            <Card key={artifact.id} className="ui-stack">
-              <div className="ui-row ui-row--between">
-                <span className="ui-mono">{artifact.artifactType}</span>
-                <StatusChip
-                  status={artifact.status}
-                  label={artifact.status === 'generating' ? 'generating' : artifact.status}
-                />
-              </div>
-              <span className="ui-meta ui-mono">
-                v{artifact.version}
-                {artifact.generatedAt
-                  ? ` · ${new Date(artifact.generatedAt).toLocaleString()}`
-                  : ''}
-              </span>
-              {artifact.errorMessage ? (
-                <span className="ui-error">{artifact.errorMessage}</span>
-              ) : null}
-              {artifact.workerId ? (
-                <span className="ui-meta ui-mono">worker {artifact.workerId}</span>
-              ) : null}
-              <div className="ui-row">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={
-                    artifact.status !== 'completed' || NON_VIEWABLE.includes(artifact.artifactType)
-                  }
-                  onClick={() =>
-                    setView({ type: artifact.artifactType, version: artifact.version })
-                  }
-                >
-                  View
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={artifact.status !== 'completed'}
-                  onClick={() => {
-                    setDownloadError(null);
-                    downloadArtifact(id, artifact.artifactType, artifact.version).catch(
-                      (cause: Error) => setDownloadError(cause.message),
-                    );
-                  }}
-                >
-                  Download
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={regenerate.isPending}
-                  onClick={() =>
-                    regenerate.mutate([artifact.artifactType], {
-                      onSuccess: (job) => router.push(`/projects/${id}/progress/${job.jobId}`),
-                    })
-                  }
-                >
-                  Regenerate
-                </Button>
-              </div>
-            </Card>
-          ))}
-        </div>
-      </Card>
-
-      <Card className="ui-stack">
-        <h2>Versions</h2>
-        {versions.data?.data.length ? (
-          <div>
-            {versions.data.data.map((version) => (
-              <div className="ui-row ui-row--between ui-worker-row" key={version.id}>
-                <span className="ui-mono">v{version.version}</span>
-                {version.note ? <span className="ui-meta">{version.note}</span> : null}
-                <span className="ui-meta">{new Date(version.createdAt).toLocaleString()}</span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={restore.isPending || version.version === detail.currentVersion}
-                  onClick={() => restore.mutate(version.version)}
-                >
-                  {version.version === detail.currentVersion ? 'Current' : 'Restore'}
-                </Button>
-              </div>
+      {/* Four tiles, not the design's five — the base URL is the card above rather
+          than a tile repeated inside it. */}
+      <div className="ui-stats">
+        {view ? (
+          toProjectStatTiles(view).map((tile) => (
+            <Stat
+              key={tile.label}
+              label={tile.label}
+              value={tile.value}
+              // `hint` carries the caveats — which requests were timed, why a
+              // rate is absent — so they sit with the figure they qualify.
+              {...(tile.hint !== undefined ? { hint: tile.hint } : {})}
+              {...(tile.delta ? { delta: tile.delta } : {})}
+            />
+          ))
+        ) : (
+          <>
+            {[0, 1, 2, 3].map((slot) => (
+              <div key={slot} className="ui-skeleton" style={{ minHeight: 96 }} />
             ))}
-          </div>
-        ) : (
-          <p className="ui-meta">No snapshots yet — versions appear when you generate.</p>
+          </>
         )}
-      </Card>
+      </div>
 
-      <Modal open={schemaOpen} onClose={() => setSchemaOpen(false)} title="Schema (IPS)">
-        <SchemaTree entities={(detail.ips as { entities: SchemaTreeEntity[] }).entities ?? []} />
-      </Modal>
-
-      <Modal
-        open={view !== null}
-        onClose={() => setView(null)}
-        title={view ? `View ${view.type} · v${view.version}` : 'View'}
-      >
-        {content.isLoading ? (
-          <div className="ui-skeleton" style={{ minHeight: 200 }} />
-        ) : content.isError ? (
-          <p className="ui-error">{content.error.message}</p>
-        ) : (
-          <CodeViewer
-            files={content.data?.files}
-            onDownload={(filename, code) => {
-              setDownloadError(null);
-              downloadTextFile(filename, code);
-            }}
-          />
-        )}
-      </Modal>
-
-      <Modal open={regenOpen} onClose={() => setRegenOpen(false)} title="Regenerate artifacts">
+      <div className="project-overview-grid">
         <div className="ui-stack">
-          <p className="ui-meta">
-            Only the selected artifacts re-run; completed siblings are untouched.
-          </p>
-          <div className="ui-grid-cards">
-            {REGENERATABLE.map((artifactType) => (
-              <label className="ui-checkbox" key={artifactType}>
-                <input
-                  type="checkbox"
-                  checked={selected.includes(artifactType)}
-                  onChange={() =>
-                    setSelected((current) =>
-                      current.includes(artifactType)
-                        ? current.filter((v) => v !== artifactType)
-                        : [...current, artifactType],
-                    )
-                  }
-                />
-                <span className="ui-mono">{artifactType}</span>
-              </label>
-            ))}
-          </div>
-          <div className="ui-row">
-            <Button
-              disabled={selected.length === 0 || regenerate.isPending}
-              onClick={() =>
-                regenerate.mutate(selected, {
-                  onSuccess: (job) => {
-                    setRegenOpen(false);
-                    router.push(`/projects/${id}/progress/${job.jobId}`);
-                  },
-                })
-              }
-            >
-              {regenerate.isPending ? 'Starting…' : `Regenerate ${selected.length}`}
-            </Button>
-            {regenerate.isError ? (
-              <span className="ui-error">{regenerate.error.message}</span>
+          <Card className="ui-stack">
+            <div className="ui-row ui-row--between">
+              <h2>Requests</h2>
+              <Select
+                aria-label="Time window"
+                value={String(days)}
+                onChange={(event) => setDays(Number(event.target.value) as MetricsDays)}
+              >
+                {WINDOWS.map((window) => (
+                  <option key={window.value} value={window.value}>
+                    {window.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            {view ? (
+              <RequestsChart points={toRequestPoints(view)} unit="requests" />
+            ) : (
+              <div className="ui-skeleton" style={{ minHeight: 220 }} />
+            )}
+          </Card>
+
+          <Card className="ui-stack">
+            <div className="ui-row ui-row--between">
+              <h2>Endpoints</h2>
+              <Link href={`/projects/${id}/apis`}>View all APIs →</Link>
+            </div>
+
+            {allEndpoints.length === 0 ? (
+              <EmptyState title="No endpoints yet">
+                Define entities and select HTTP methods, then generate.
+              </EmptyState>
+            ) : (
+              <table className="endpoint-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Method</th>
+                    <th scope="col">Endpoint</th>
+                    <th scope="col" className="endpoint-table__num">
+                      Requests
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allEndpoints.slice(0, ENDPOINT_PREVIEW).map((endpoint) => {
+                    const count = countByKey.get(`${endpoint.method}|${endpoint.path || '/'}`);
+                    return (
+                      <tr key={`${endpoint.method}|${endpoint.path}`}>
+                        <td>
+                          <MethodBadge method={endpoint.method as ApiMethod} />
+                        </td>
+                        <td>
+                          <code>{endpoint.path || '/'}</code>
+                        </td>
+                        {/* A dash, not 0: with no metrics loaded the count is
+                            unknown, and an endpoint with genuinely no traffic in
+                            the window reads the same way — either is honest, and
+                            neither is "zero requests, definitively". */}
+                        <td className="endpoint-table__num">
+                          {count === undefined ? '—' : formatCompact(count)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+
+            {allEndpoints.length > ENDPOINT_PREVIEW ? (
+              <p className="ui-meta">
+                Showing {ENDPOINT_PREVIEW} of {allEndpoints.length}.{' '}
+                <Link href={`/projects/${id}/apis`}>See them all</Link>, or{' '}
+                <Link href={`/projects/${id}/logs`}>read the request log</Link>.
+              </p>
             ) : null}
-          </div>
+          </Card>
         </div>
-      </Modal>
+
+        <div className="ui-stack">
+          <TopEndpointsCard rows={usageRows} note={view?.endpointNote ?? null} />
+
+          <Card className="ui-stack">
+            <div className="ui-row ui-row--between">
+              <h2>Activity</h2>
+              <Link href={`/projects/${id}/activity`}>View all</Link>
+            </div>
+            {view && view.activity.length > 0 ? (
+              <div>
+                {view.activity.slice(0, 5).map((event) => (
+                  <ActivityRow key={event.id} event={event} />
+                ))}
+              </div>
+            ) : (
+              <EmptyState title="Nothing yet">
+                Generating this project records its first event.
+              </EmptyState>
+            )}
+          </Card>
+
+          {/* Stated once, here, rather than beside every figure on the page. */}
+          {view ? (
+            <Note variant="info">
+              Request figures come from hosted-request logs, kept for {view.window.retentionDays}{' '}
+              days.
+            </Note>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }

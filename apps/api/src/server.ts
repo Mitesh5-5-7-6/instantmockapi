@@ -49,6 +49,22 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   const app = Fastify({
     logger: false,
     bodyLimit: config.maxRequestBodySize,
+    /**
+     * Trust exactly one reverse proxy, so `request.ip` is the caller rather than
+     * the load balancer.
+     *
+     * This is load-bearing, not hygiene. The rate limiter keys on
+     * `request.authUser?.sub ?? request.ip`, and the credential routes that do
+     * not name an email — signup, and the token-redemption routes — fall through
+     * to the IP. Without this, every caller behind the platform's load balancer
+     * shares one address, so `SIGNUP_LIMIT` (5/hour) becomes five signups an hour
+     * *for the whole platform* and the sixth person of the hour gets a 429.
+     *
+     * `1`, not `true`: `true` trusts the entire `X-Forwarded-For` chain, which
+     * lets a caller pick their own bucket by prepending an entry. `1` reads the
+     * single hop the proxy actually appended and ignores anything before it.
+     */
+    trustProxy: 1,
   });
 
   registerErrorHandling(app);

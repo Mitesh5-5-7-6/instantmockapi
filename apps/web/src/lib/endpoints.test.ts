@@ -35,7 +35,7 @@ describe('endpoints barrel', () => {
   };
 
   it('re-exports every symbol its consumers import, and they work', () => {
-    // snippet-tabs, explore/page and ready/page between them use all of these.
+    // snippet-tabs, apis/page and ready/page between them use all of these.
     expect(countEndpoints([student], ['GET'])).toBe(3);
     expect(projectEndpoints([student], [])).toHaveLength(1);
     expect(entityEndpoints(student, ['GET']).map((row) => row.path)).toEqual([

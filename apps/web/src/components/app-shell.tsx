@@ -188,7 +188,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <TopSearch />
           <Link href="/demo-api" style={{ marginLeft: 'var(--space-2)' }}>
             <Button size="sm">
-              <Icon name="plus" size={16} /> Demo API
+              <Icon name="play" size={16} /> Demo API
             </Button>
           </Link>
         </header>

@@ -78,7 +78,7 @@ export default function ReadyPage({ params }: { params: Promise<{ id: string }> 
         </div>
 
         <div className="ui-row">
-          <Link href={`/projects/${id}/explore`}>
+          <Link href={`/projects/${id}/apis`}>
             <Button>{isProject ? 'Explore APIs' : 'Use your API'}</Button>
           </Link>
           <Link href={`/projects/${id}`}>

@@ -29,6 +29,9 @@ import type {
   JobView,
   ListEnvelope,
   ProjectDetail,
+  ProjectLogsEnvelope,
+  ProjectLogsParams,
+  ProjectMetricsView,
   ProjectSummary,
 } from './api-types';
 
@@ -310,6 +313,61 @@ export function useProject(projectId: string | null) {
     queryKey: ['project', projectId],
     queryFn: () => apiFetch<ProjectDetail>(`/v1/projects/${projectId}`),
     enabled: projectId !== null,
+  });
+}
+
+/** Windows the metrics endpoint accepts; anything else is a 400 by design. */
+export type MetricsDays = 7 | 14 | 30;
+
+/**
+ * One project's traffic, in a single request.
+ *
+ * One call rather than several because the figures have to agree: the tiles, the
+ * chart and the endpoint breakdown are computed from the same matched set
+ * server-side, and separate fetches could straddle a bucket boundary and
+ * disagree — which a reader can only read as a bug.
+ */
+export function useProjectMetrics(projectId: string, days: MetricsDays = 7, activityLimit = 8) {
+  return useQuery({
+    queryKey: ['project-metrics', projectId, days, activityLimit],
+    queryFn: () =>
+      apiFetch<ProjectMetricsView>(
+        `/v1/projects/${projectId}/metrics?days=${days}&activityLimit=${activityLimit}`,
+      ),
+  });
+}
+
+/**
+ * A page of the request log.
+ *
+ * `refetchInterval` is the caller’s choice, not a default: the Logs tab polls
+ * while unfiltered and stops once a filter is applied, because a list that
+ * reshuffles under you while you are reading it is worse than a stale one.
+ */
+export function useProjectLogs(
+  projectId: string,
+  params: ProjectLogsParams = {},
+  options: { refetchInterval?: number | false } = {},
+) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    // Empty strings are dropped rather than sent: `?q=` would be a prefix
+    // filter matching everything, which is the same as no filter but costs a
+    // regex on every row.
+    if (value !== undefined && value !== '') {
+      search.set(key, String(value));
+    }
+  }
+  const query = search.toString();
+
+  return useQuery({
+    queryKey: ['project-logs', projectId, query],
+    queryFn: () =>
+      apiFetch<ProjectLogsEnvelope>(`/v1/projects/${projectId}/logs${query ? `?${query}` : ''}`),
+    refetchInterval: options.refetchInterval ?? false,
+    // Keeps the previous page visible while the next one loads, so paging does
+    // not blank the table on every click.
+    placeholderData: (previous) => previous,
   });
 }
 
