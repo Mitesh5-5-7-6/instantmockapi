@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { PROJECT_TABS, activeProjectTab, projectTabHref } from './project-tabs';
 
 const ID = '6a8e85c01cd07f3a6413b60a';
@@ -22,6 +24,27 @@ describe('PROJECT_TABS', () => {
   it('gives generated artifacts a home', () => {
     // Real and useful, and absent from the target design entirely.
     expect(PROJECT_TABS.map((tab) => tab.label)).toContain('Files');
+  });
+});
+
+/**
+ * The guard that was missing.
+ *
+ * `PROJECT_TABS` listed a Settings tab for which no `page.tsx` was ever written,
+ * so the strip rendered a link straight to a Next 404. Every other test in this
+ * file passed — they check the pure href/segment round trip, which cannot know
+ * whether a file exists on disk.
+ *
+ * Touching the filesystem in a unit test is a deliberate exception: the thing
+ * being asserted *is* a filesystem fact, and nothing cheaper catches it.
+ */
+describe('every tab has a route', () => {
+  const ROUTES = join(process.cwd(), 'src', 'app', 'projects', '[id]');
+
+  it.each([...PROJECT_TABS])('$label resolves to a page file', (tab) => {
+    const file =
+      tab.segment === '' ? join(ROUTES, 'page.tsx') : join(ROUTES, tab.segment, 'page.tsx');
+    expect(existsSync(file), `${tab.label} tab points at a route with no page: ${file}`).toBe(true);
   });
 });
 

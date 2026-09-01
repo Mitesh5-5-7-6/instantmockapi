@@ -523,6 +523,32 @@ export function useRetryWorker(jobId: string) {
   });
 }
 
+/**
+ * Update a project's settings.
+ *
+ * Writes the response into the `['project', id]` cache rather than
+ * invalidating: the PATCH already returns the full detail, so a refetch would
+ * be a second round trip for data already in hand — and the header, which reads
+ * the same key, updates in the same tick.
+ *
+ * `['projects']` IS invalidated, because a rename changes the list.
+ */
+export function useUpdateProject(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      name?: string;
+      slug?: string;
+      description?: string;
+      generationConfig?: GenerationConfig;
+    }) => apiFetch<ProjectDetail>(`/v1/projects/${projectId}`, { method: 'PATCH', body: input }),
+    onSuccess: (detail) => {
+      queryClient.setQueryData(['project', projectId], detail);
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
 export function useDeleteProject() {
   const queryClient = useQueryClient();
   return useMutation({

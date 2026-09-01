@@ -7,7 +7,13 @@
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
-import { getErrorMessage, logger, AppError, OBJECT_ID_PATTERN } from '@instantmockapi/shared';
+import {
+  getErrorMessage,
+  logger,
+  AppError,
+  HTTP_METHODS,
+  OBJECT_ID_PATTERN,
+} from '@instantmockapi/shared';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import type { StorageClient } from '@instantmockapi/storage';
 import type { CacheService } from './cache.js';
@@ -79,7 +85,16 @@ export async function buildMockRuntime(options: BuildRuntimeOptions): Promise<Fa
   // The hosted mock API is public and browser-facing — the web playground and
   // any consumer app call it cross-origin. It carries no cookies/credentials,
   // so reflect any origin. (Rate limiting below still bounds abuse.)
-  await app.register(cors, { origin: true });
+  //
+  // `methods` is NOT optional here. @fastify/cors defaults to 'GET,HEAD,POST',
+  // so omitting it makes the preflight for PUT, PATCH and DELETE answer 204
+  // while advertising only those three — the browser then blocks the real
+  // request with an opaque CORS error, and every write method is unusable from
+  // a browser. curl is unaffected, which is exactly why this hid for so long.
+  //
+  // Taken from HTTP_METHODS, the same list the wildcard route is registered
+  // with, so CORS cannot advertise less than the runtime actually serves.
+  await app.register(cors, { origin: true, methods: [...HTTP_METHODS] });
 
   if (options.rateLimit !== false) {
     // Per-PROJECT rate limit (doc 13 §5): a public mock URL must not become
