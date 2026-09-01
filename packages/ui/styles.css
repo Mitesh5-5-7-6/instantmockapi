@@ -2175,3 +2175,19 @@ h3 {
 .log-detail__ua {
   overflow-wrap: anywhere;
 }
+
+/* ── 21 · Project settings ──────────────────────────────────────────────── */
+
+/* Method checkboxes sit on one line where there is room, and wrap rather than
+   scroll — five short labels, so a scroll container would be overkill. */
+.settings-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
+/* Tinted border, not a tinted fill: the card holds explanatory text that has to
+   stay readable, and a red panel makes body copy hard work. */
+.settings-danger {
+  border-color: color-mix(in srgb, var(--status-error) 35%, var(--border));
+}
