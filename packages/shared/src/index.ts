@@ -64,3 +64,23 @@ export {
   pythonLiteral,
   endpointUrl,
 } from './endpoints.js';
+
+/**
+ * Runtime readiness and the promotion policy (Phase 1).
+ *
+ * The separation these encode: a job settles → artifact statuses change → the
+ * version's runtime readiness is recalculated → the promotion policy decides →
+ * the live pointer moves. `hosted_api` is the only artifact the runtime reads, so
+ * a failed OpenAPI or Postman generator degrades a version rather than blocking
+ * it. A failed generation can never disable the currently live version.
+ */
+export {
+  RUNTIME_REQUIRED_ARTIFACTS,
+  evaluatePromotion,
+  evaluateRuntimeReadiness,
+  isRuntimeRequiredArtifact,
+  type ArtifactOutcome,
+  type PromotionDecision,
+  type RuntimeReadiness,
+  type RuntimeRequiredArtifact,
+} from './promotion.js';

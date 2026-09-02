@@ -73,3 +73,19 @@ export {
   type BackfillResult,
   type SchemaElementKind,
 } from './ids.js';
+
+/**
+ * Change detection (Phase 1): what differs between the active definition and a
+ * draft, with the severity a user needs before committing and the read/write
+ * aspect that keeps impact analysis precise.
+ */
+export {
+  CHANGE_KINDS,
+  diffSchemas,
+  hasBreakingChanges,
+  summariseChanges,
+  type ChangeAspect,
+  type ChangeKind,
+  type ChangeSeverity,
+  type SchemaChange,
+} from './changes.js';

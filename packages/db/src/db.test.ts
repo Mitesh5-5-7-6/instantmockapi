@@ -10,6 +10,7 @@ import {
   publishedVersionOf,
 } from './published-version.js';
 import { Project, type IProject } from './models/project.js';
+import { ProjectDraft } from './models/projectDraft.js';
 import { Version } from './models/version.js';
 import { Artifact } from './models/artifact.js';
 import { Job } from './models/job.js';
@@ -576,5 +577,142 @@ describe('the publishedVersion schema path', () => {
 
     const reloaded = await Project.findById(project._id);
     expect(reloaded?.publishedVersion).toBe(3);
+  });
+});
+
+/**
+ * The draft store (Phase 1).
+ *
+ * One draft per project, enforced by the database rather than by convention —
+ * "a user discovers a mistake and fixes it" is one edit session, not a branching
+ * model, and multiple drafts would make "is this project pending regeneration"
+ * ambiguous.
+ */
+describe('ProjectDraft', () => {
+  it('stores an edited copy alongside the untouched project', async () => {
+    const project = await makeProject();
+    const draft = await ProjectDraft.create({
+      projectId: project._id,
+      ips: project.ips,
+      generationConfig: project.generationConfig,
+      baseVersion: project.currentVersion,
+    });
+
+    expect(draft.baseVersion).toBe(1);
+    // The point of the whole model: the active definition is not touched.
+    const reloaded = await Project.findById(project._id);
+    expect(reloaded?.currentVersion).toBe(1);
+  });
+
+  it('allows only one draft per project', async () => {
+    await ProjectDraft.syncIndexes();
+    const project = await makeProject();
+    const payload = {
+      projectId: project._id,
+      ips: project.ips,
+      generationConfig: project.generationConfig,
+      baseVersion: 1,
+    };
+    await ProjectDraft.create(payload);
+
+    // Fails loudly rather than quietly creating a rival definition.
+    await expect(ProjectDraft.create(payload)).rejects.toThrow(/duplicate key/i);
+  });
+
+  it('allows a draft on each of two different projects', async () => {
+    await ProjectDraft.syncIndexes();
+    const [a, b] = await Promise.all([makeProject(), makeProject()]);
+    for (const project of [a, b]) {
+      await ProjectDraft.create({
+        projectId: project._id,
+        ips: project.ips,
+        generationConfig: project.generationConfig,
+        baseVersion: 1,
+      });
+    }
+    expect(await ProjectDraft.countDocuments({})).toBe(2);
+  });
+
+  /**
+   * `minimize: false` is load-bearing here, exactly as it is on the Version
+   * snapshot. An IPS is full of deliberately empty objects (`validation: {}`,
+   * `meta: {}`); mongoose strips them by default, so a round-tripped draft would
+   * differ from its source and `diffSchemas` would report changes the user never
+   * made.
+   */
+  it('preserves empty validation and meta objects through a round trip', async () => {
+    const project = await makeProject();
+    const ips = {
+      projectId: 'p1',
+      version: 1,
+      entities: [
+        {
+          name: 'User',
+          fields: [
+            {
+              name: 'email',
+              type: 'string',
+              required: true,
+              default: null,
+              children: [],
+              validation: {},
+              meta: {},
+            },
+          ],
+        },
+      ],
+      generationConfig,
+    };
+
+    await ProjectDraft.create({
+      projectId: project._id,
+      ips,
+      generationConfig,
+      baseVersion: 1,
+    });
+
+    const reloaded = await ProjectDraft.findOne({ projectId: project._id }).lean();
+    const field = (reloaded?.ips as typeof ips).entities[0]?.fields[0];
+    expect(field?.validation).toEqual({});
+    expect(field?.meta).toEqual({});
+    expect(field?.children).toEqual([]);
+  });
+
+  it('tracks the version it was forked from', async () => {
+    // The diff is only meaningful against the baseline the user started from,
+    // and the active definition can move underneath an open draft.
+    const project = await makeProject({ currentVersion: 4 });
+    const draft = await ProjectDraft.create({
+      projectId: project._id,
+      ips: project.ips,
+      generationConfig: project.generationConfig,
+      baseVersion: project.currentVersion,
+    });
+
+    await Project.updateOne({ _id: project._id }, { $set: { currentVersion: 5 } });
+
+    const current = await Project.findById(project._id);
+    // Detectably stale: showing this draft's diff would describe changes against
+    // a definition that no longer exists.
+    expect(draft.baseVersion).not.toBe(current?.currentVersion);
+  });
+
+  /**
+   * The hazard the inspection flagged for any new collection: a draft left
+   * behind still holds the unique index on projectId, so a later project reusing
+   * that id could not create one.
+   */
+  it('is removed by hardDeleteProject', async () => {
+    const project = await makeProject();
+    await ProjectDraft.create({
+      projectId: project._id,
+      ips: project.ips,
+      generationConfig: project.generationConfig,
+      baseVersion: 1,
+    });
+
+    await hardDeleteProject(String(project._id));
+
+    expect(await ProjectDraft.countDocuments({ projectId: project._id })).toBe(0);
   });
 });
