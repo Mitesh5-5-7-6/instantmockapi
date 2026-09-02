@@ -82,10 +82,41 @@ export {
 export {
   CHANGE_KINDS,
   diffSchemas,
-  hasBreakingChanges,
+  highestRisk,
+  needsAttention,
   summariseChanges,
+  CHANGE_RISKS,
   type ChangeAspect,
   type ChangeKind,
-  type ChangeSeverity,
+  type ChangeRisk,
   type SchemaChange,
 } from './changes.js';
+
+// ---------------------------------------------------------------------------
+// Dependency graph and impact analysis (Phase 1)
+// ---------------------------------------------------------------------------
+export {
+  buildDependencyGraph,
+  edgeFacet,
+  endpointNode,
+  entityNode,
+  fieldNode,
+  generatorNode,
+  relationNode,
+  PROJECT_NODE,
+  type DependencyEdge,
+  type DependencyGraph,
+  type EdgeAspect,
+  type GraphNode,
+  type NodeKind,
+} from './graph.js';
+
+export {
+  analyseDraftImpact,
+  analyseImpact,
+  type AffectedEndpoint,
+  type ImpactReason,
+  type ImpactReport,
+  type UnaffectedEndpoint,
+  type UnattributedChange,
+} from './impact.js';

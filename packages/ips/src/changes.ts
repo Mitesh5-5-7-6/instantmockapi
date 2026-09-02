@@ -76,15 +76,50 @@ export const CHANGE_KINDS = [
 
 export type ChangeKind = (typeof CHANGE_KINDS)[number];
 
-/** Whether existing callers of the hosted API break. */
-export type ChangeSeverity = 'breaking' | 'compatible' | 'cosmetic';
+/**
+ * How much attention a change deserves before it is committed.
+ *
+ * Five levels rather than a breaking/non-breaking flag, because the middle of
+ * that range is where the useful information lives:
+ *
+ * - `SAFE` — strictly additive. Nothing that worked stops working. A new
+ *   optional field, a widened enum, a relaxed rule.
+ * - `INFO` — no effect on anything callable. Descriptions, which generators to
+ *   emit, how many records to seed.
+ * - `WARNING` — breaks *some* callers, depending on what they send. Making a
+ *   field required breaks only requests that omitted it; tightening `max`
+ *   breaks only values above the new bound. Distinguishing this from BREAKING
+ *   is the difference between "check your clients" and "your clients are down".
+ * - `BREAKING` — breaks callers unconditionally. A type change, a removed field,
+ *   a removed enum value.
+ * - `ROUTING` — the endpoint still works but has MOVED. Its own category
+ *   because the remedy is different: callers update a URL rather than a payload.
+ */
+export const CHANGE_RISKS = ['SAFE', 'INFO', 'WARNING', 'ROUTING', 'BREAKING'] as const;
+
+export type ChangeRisk = (typeof CHANGE_RISKS)[number];
+
+/**
+ * Ranking, worst last, for "the highest risk in this set".
+ *
+ * `ROUTING` sits just below `BREAKING` — both demand action, and the ordering
+ * between them is presentational rather than a claim that a moved URL hurts less
+ * than a changed payload.
+ */
+const RISK_RANK: Record<ChangeRisk, number> = {
+  INFO: 0,
+  SAFE: 1,
+  WARNING: 2,
+  ROUTING: 3,
+  BREAKING: 4,
+};
 
 /** Which side of an endpoint a change can reach. */
 export type ChangeAspect = 'read' | 'write' | 'both' | 'routing' | 'none';
 
 export interface SchemaChange {
   kind: ChangeKind;
-  severity: ChangeSeverity;
+  risk: ChangeRisk;
   aspect: ChangeAspect;
   /** Stable id of the entity this change belongs to, when there is one. */
   entityId?: string;
@@ -178,7 +213,7 @@ function diffField(entity: Entity, before: Field, after: Field, path: string): S
       kind: 'FIELD_RENAMED',
       // A response key changes and a request key stops being recognised. Callers
       // reading `firstName` get undefined; callers sending it are ignored.
-      severity: 'breaking',
+      risk: 'BREAKING',
       aspect: 'both',
       before: before.name,
       after: after.name,
@@ -192,7 +227,7 @@ function diffField(entity: Entity, before: Field, after: Field, path: string): S
       kind: 'FIELD_TYPE_CHANGED',
       // The spec calls this out as high-impact: the response value changes shape
       // and previously-valid request bodies stop validating.
-      severity: 'breaking',
+      risk: 'BREAKING',
       aspect: 'both',
       before: before.type,
       after: after.type,
@@ -205,7 +240,7 @@ function diffField(entity: Entity, before: Field, after: Field, path: string): S
       ...at,
       kind: 'FIELD_REQUIRED_CHANGED',
       // Widening breaks writers that omitted it; relaxing cannot break anyone.
-      severity: after.required ? 'breaking' : 'compatible',
+      risk: after.required ? 'WARNING' : 'SAFE',
       // Requiredness is a request rule. A GET response is unaffected by whether
       // the field was mandatory on the way in.
       aspect: 'write',
@@ -221,7 +256,7 @@ function diffField(entity: Entity, before: Field, after: Field, path: string): S
     changes.push({
       ...at,
       kind: 'FIELD_DEFAULT_CHANGED',
-      severity: 'compatible',
+      risk: 'SAFE',
       // The spec's own example of read-vs-write precision: a default affects what
       // a POST fills in, and nothing about reading stored data back.
       aspect: 'write',
@@ -242,7 +277,7 @@ function diffField(entity: Entity, before: Field, after: Field, path: string): S
       ...at,
       kind: 'ENUM_VALUES_ADDED',
       // Widening an accepted set cannot reject anything that used to pass.
-      severity: 'compatible',
+      risk: 'SAFE',
       aspect: 'write',
       before: beforeEnum,
       after: afterEnum,
@@ -255,7 +290,7 @@ function diffField(entity: Entity, before: Field, after: Field, path: string): S
       kind: 'ENUM_VALUES_REMOVED',
       // Requests carrying a removed value now 422 — and stored records may
       // already hold it, so reads can surface a value the schema disallows.
-      severity: 'breaking',
+      risk: 'BREAKING',
       aspect: 'both',
       before: beforeEnum,
       after: afterEnum,
@@ -286,7 +321,7 @@ function diffField(entity: Entity, before: Field, after: Field, path: string): S
       // one only widens what is accepted. Tightening-vs-loosening within a
       // numeric bound is not inferred — reporting a possible break is the safe
       // direction, and the user can see the before/after.
-      severity: kind === 'VALIDATION_REMOVED' ? 'compatible' : 'breaking',
+      risk: kind === 'VALIDATION_REMOVED' ? 'SAFE' : 'WARNING',
       aspect: 'write',
       before: from ?? null,
       after: to ?? null,
@@ -305,7 +340,7 @@ function diffField(entity: Entity, before: Field, after: Field, path: string): S
       kind: 'FIELD_META_CHANGED',
       // `unique` and `searchable` change what the hosted query layer accepts and
       // what a write may collide on, but no response shape moves.
-      severity: 'compatible',
+      risk: 'SAFE',
       aspect: 'write',
       before: before.meta,
       after: after.meta,
@@ -340,7 +375,7 @@ function diffEntityFields(before: Entity, after: Entity): SchemaChange[] {
         kind: 'FIELD_ADDED',
         // A new optional field is additive; a new required one rejects every
         // existing request body that does not carry it.
-        severity: field.required ? 'breaking' : 'compatible',
+        risk: field.required ? 'WARNING' : 'SAFE',
         aspect: 'both',
         after: { name: field.name, type: field.type, required: field.required },
         summary: field.required
@@ -366,7 +401,7 @@ function diffEntityFields(before: Entity, after: Entity): SchemaChange[] {
       fieldName: field.name,
       ...(path === field.name ? {} : { path }),
       kind: 'FIELD_REMOVED',
-      severity: 'breaking',
+      risk: 'BREAKING',
       aspect: 'both',
       before: { name: field.name, type: field.type },
       summary: `Field ${after.name}.${field.name} removed`,
@@ -396,7 +431,7 @@ function diffRelations(before: Entity, after: Entity): SchemaChange[] {
         kind: 'RELATION_ADDED',
         // Adds an `?include=` key and, on owning sides, a derived foreign-key
         // field. Nothing existing stops working.
-        severity: 'compatible',
+        risk: 'SAFE',
         aspect: 'both',
         after: { name: relation.name, kind: relation.kind, target: relation.target },
         summary: `Relation ${after.name}.${relation.name} → ${relation.target} added`,
@@ -410,7 +445,7 @@ function diffRelations(before: Entity, after: Entity): SchemaChange[] {
         kind: 'RELATION_KIND_CHANGED',
         // Cardinality decides whether an expansion is an object or an array, and
         // which side carries the key.
-        severity: 'breaking',
+        risk: 'BREAKING',
         aspect: 'both',
         before: previous.kind,
         after: relation.kind,
@@ -421,7 +456,7 @@ function diffRelations(before: Entity, after: Entity): SchemaChange[] {
       changes.push({
         ...at(relation),
         kind: 'RELATION_TARGET_CHANGED',
-        severity: 'breaking',
+        risk: 'BREAKING',
         aspect: 'both',
         before: previous.target,
         after: relation.target,
@@ -435,7 +470,7 @@ function diffRelations(before: Entity, after: Entity): SchemaChange[] {
       changes.push({
         ...at(relation),
         kind: 'RELATION_FIELDS_CHANGED',
-        severity: 'breaking',
+        risk: 'BREAKING',
         aspect: 'both',
         before: { localField: previous.localField, foreignField: previous.foreignField },
         after: { localField: relation.localField, foreignField: relation.foreignField },
@@ -448,7 +483,7 @@ function diffRelations(before: Entity, after: Entity): SchemaChange[] {
         kind: 'RELATION_ON_DELETE_CHANGED',
         // Only observable through DELETE, and only in what happens to the other
         // side. No shape moves.
-        severity: 'compatible',
+        risk: 'SAFE',
         aspect: 'write',
         before: previous.onDelete,
         after: relation.onDelete,
@@ -459,7 +494,7 @@ function diffRelations(before: Entity, after: Entity): SchemaChange[] {
       changes.push({
         ...at(relation),
         kind: 'RELATION_REQUIRED_CHANGED',
-        severity: relation.required ? 'breaking' : 'compatible',
+        risk: relation.required ? 'WARNING' : 'SAFE',
         aspect: 'write',
         before: previous.required,
         after: relation.required,
@@ -478,7 +513,7 @@ function diffRelations(before: Entity, after: Entity): SchemaChange[] {
       ...at(relation),
       kind: 'RELATION_REMOVED',
       // `?include=<name>` stops resolving for every existing caller.
-      severity: 'breaking',
+      risk: 'BREAKING',
       aspect: 'both',
       before: { name: relation.name, kind: relation.kind, target: relation.target },
       summary: `Relation ${after.name}.${relation.name} → ${relation.target} removed`,
@@ -500,7 +535,7 @@ function diffConfig(before: GenerationConfig, after: GenerationConfig): SchemaCh
     changes.push({
       kind: 'METHODS_CHANGED',
       // Removing a method deletes endpoints outright; adding creates new ones.
-      severity: removed.length > 0 ? 'breaking' : 'compatible',
+      risk: removed.length > 0 ? 'BREAKING' : 'SAFE',
       // Not `read`/`write`: this changes which endpoints EXIST, so the whole
       // surface is in scope.
       aspect: 'routing',
@@ -518,7 +553,7 @@ function diffConfig(before: GenerationConfig, after: GenerationConfig): SchemaCh
       kind: 'QUERY_FEATURES_CHANGED',
       // Turning a feature on only widens what the runtime accepts; turning one
       // off rejects query strings that used to work.
-      severity: 'compatible',
+      risk: 'SAFE',
       aspect: 'read',
       before: before.features ?? null,
       after: after.features ?? null,
@@ -529,7 +564,7 @@ function diffConfig(before: GenerationConfig, after: GenerationConfig): SchemaCh
   if (before.mockRecords !== after.mockRecords) {
     changes.push({
       kind: 'MOCK_RECORDS_CHANGED',
-      severity: 'compatible',
+      risk: 'INFO',
       // Reseeding replaces the records a GET returns, but no endpoint or shape
       // changes.
       aspect: 'read',
@@ -547,7 +582,7 @@ function diffConfig(before: GenerationConfig, after: GenerationConfig): SchemaCh
       kind: 'GENERATORS_CHANGED',
       // Which downloads get produced. The hosted API is untouched, so no caller
       // of the API can notice.
-      severity: 'cosmetic',
+      risk: 'INFO',
       aspect: 'none',
       before: { validators: before.validators, types: before.types },
       after: { validators: after.validators, types: after.types },
@@ -587,7 +622,7 @@ export function diffSchemas(
         entityId: id,
         entityName: entity.name,
         kind: 'ENTITY_ADDED',
-        severity: 'compatible',
+        risk: 'SAFE',
         aspect: 'routing',
         after: { name: entity.name },
         summary: `Entity ${entity.name} added`,
@@ -604,7 +639,7 @@ export function diffSchemas(
         // (`ENTITY_PATH = name.toLowerCase()`), so a rename MOVES every endpoint
         // for this entity. Callers holding the old URL get a 404. Stable ids keep
         // the dependency graph intact; they do not keep the URL intact.
-        severity: 'breaking',
+        risk: 'ROUTING',
         aspect: 'routing',
         before: previous.name,
         after: entity.name,
@@ -617,7 +652,7 @@ export function diffSchemas(
         entityId: id,
         entityName: entity.name,
         kind: 'ENTITY_DESCRIPTION_CHANGED',
-        severity: 'cosmetic',
+        risk: 'INFO',
         // Documentation text only. No request, response or route changes.
         aspect: 'none',
         before: previous.description ?? null,
@@ -633,7 +668,7 @@ export function diffSchemas(
         kind: 'ENTITY_IDENTITY_CHANGED',
         // The identity field is what item URLs address and what relations point
         // at, so this reshapes routes and joins together.
-        severity: 'breaking',
+        risk: 'ROUTING',
         aspect: 'routing',
         before: previous.identity ?? null,
         after: entity.identity ?? null,
@@ -653,7 +688,7 @@ export function diffSchemas(
       entityId: id,
       entityName: entity.name,
       kind: 'ENTITY_REMOVED',
-      severity: 'breaking',
+      risk: 'BREAKING',
       aspect: 'routing',
       before: { name: entity.name },
       summary: `Entity ${entity.name} removed — all of its endpoints go`,
@@ -663,16 +698,39 @@ export function diffSchemas(
   return changes;
 }
 
-/** True when any change would break an existing caller. */
-export function hasBreakingChanges(changes: readonly SchemaChange[]): boolean {
-  return changes.some((change) => change.severity === 'breaking');
+/** The worst risk present, or null for an empty set. */
+export function highestRisk(changes: readonly SchemaChange[]): ChangeRisk | null {
+  let worst: ChangeRisk | null = null;
+  for (const change of changes) {
+    if (worst === null || RISK_RANK[change.risk] > RISK_RANK[worst]) {
+      worst = change.risk;
+    }
+  }
+  return worst;
 }
 
-/** Counts by severity, for a summary line. */
-export function summariseChanges(changes: readonly SchemaChange[]): Record<ChangeSeverity, number> {
-  const counts: Record<ChangeSeverity, number> = { breaking: 0, compatible: 0, cosmetic: 0 };
+/**
+ * True when any change demands action from existing callers.
+ *
+ * `WARNING` counts. It means "some of your callers break", and a confirmation
+ * dialog that only warns on `BREAKING` would wave through making a field
+ * required — which rejects every request body that omitted it.
+ */
+export function needsAttention(changes: readonly SchemaChange[]): boolean {
+  return changes.some((change) => RISK_RANK[change.risk] >= RISK_RANK['WARNING']);
+}
+
+/** Counts by risk, for a summary line. */
+export function summariseChanges(changes: readonly SchemaChange[]): Record<ChangeRisk, number> {
+  const counts: Record<ChangeRisk, number> = {
+    SAFE: 0,
+    INFO: 0,
+    WARNING: 0,
+    ROUTING: 0,
+    BREAKING: 0,
+  };
   for (const change of changes) {
-    counts[change.severity] += 1;
+    counts[change.risk] += 1;
   }
   return counts;
 }

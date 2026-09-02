@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { diffSchemas, hasBreakingChanges, summariseChanges, type SchemaChange } from './changes.js';
+import {
+  diffSchemas,
+  highestRisk,
+  needsAttention,
+  summariseChanges,
+  type SchemaChange,
+} from './changes.js';
 import { ensureSchemaIds } from './ids.js';
 import type { Entity, Field, InternalProjectSchema } from './types.js';
 
@@ -83,7 +89,7 @@ describe('field type changes', () => {
 
     const change = one(diffSchemas(active, draft), 'FIELD_TYPE_CHANGED');
     expect(change).toMatchObject({
-      severity: 'breaking',
+      risk: 'BREAKING',
       // The stored value's shape changes AND previously-valid bodies stop
       // validating, so neither side is safe.
       aspect: 'both',
@@ -111,7 +117,7 @@ describe('field renames', () => {
     expect(one(changes, 'FIELD_RENAMED')).toMatchObject({
       before: 'firstName',
       after: 'givenName',
-      severity: 'breaking',
+      risk: 'BREAKING',
     });
   });
 });
@@ -122,7 +128,8 @@ describe('requiredness', () => {
     draft.entities[0]!.fields[0]!.required = true;
 
     expect(one(diffSchemas(active, draft), 'FIELD_REQUIRED_CHANGED')).toMatchObject({
-      severity: 'breaking',
+      // WARNING, not BREAKING: only callers that omitted the field break.
+      risk: 'WARNING',
       // A GET response does not care whether the field was mandatory inbound.
       aspect: 'write',
       after: true,
@@ -133,7 +140,7 @@ describe('requiredness', () => {
     const { active, draft } = fork(ips([entity('User', [field('email', { required: true })])]));
     draft.entities[0]!.fields[0]!.required = false;
 
-    expect(one(diffSchemas(active, draft), 'FIELD_REQUIRED_CHANGED').severity).toBe('compatible');
+    expect(one(diffSchemas(active, draft), 'FIELD_REQUIRED_CHANGED').risk).toBe('SAFE');
   });
 });
 
@@ -144,7 +151,7 @@ describe('defaults', () => {
     draft.entities[0]!.fields[0]!.default = 'pending';
 
     expect(one(diffSchemas(active, draft), 'FIELD_DEFAULT_CHANGED')).toMatchObject({
-      severity: 'compatible',
+      risk: 'SAFE',
       aspect: 'write',
       before: 'active',
       after: 'pending',
@@ -161,7 +168,7 @@ describe('enum values', () => {
     draft.entities[0]!.fields[0]!.validation.enum = ['a', 'b', 'c'];
 
     const change = one(diffSchemas(active, draft), 'ENUM_VALUES_ADDED');
-    expect(change.severity).toBe('compatible');
+    expect(change.risk).toBe('SAFE');
     expect(change.summary).toContain('c');
   });
 
@@ -174,7 +181,7 @@ describe('enum values', () => {
     draft.entities[0]!.fields[0]!.validation.enum = ['a', 'b'];
 
     expect(one(diffSchemas(active, draft), 'ENUM_VALUES_REMOVED')).toMatchObject({
-      severity: 'breaking',
+      risk: 'BREAKING',
       // Reads too: stored records may already hold the removed value, so a GET
       // can surface something the schema now disallows.
       aspect: 'both',
@@ -215,7 +222,8 @@ describe('validation rules', () => {
     draft.entities[0]!.fields[0]!.validation.min = 5;
 
     const change = one(diffSchemas(active, draft), 'VALIDATION_CHANGED');
-    expect(change).toMatchObject({ severity: 'breaking', aspect: 'write', before: 3, after: 5 });
+    // WARNING: breaks only requests whose value falls outside the new bound.
+    expect(change).toMatchObject({ risk: 'WARNING', aspect: 'write', before: 3, after: 5 });
     // Rule-level path, so the UI can point at the control that changed.
     expect(change.path).toBe('name.validation.min');
   });
@@ -226,7 +234,7 @@ describe('validation rules', () => {
     );
     delete draft.entities[0]!.fields[0]!.validation.regex;
 
-    expect(one(diffSchemas(active, draft), 'VALIDATION_REMOVED').severity).toBe('compatible');
+    expect(one(diffSchemas(active, draft), 'VALIDATION_REMOVED').risk).toBe('SAFE');
   });
 
   /** Spec §19's example: adding email validation to `User.email`. */
@@ -235,7 +243,7 @@ describe('validation rules', () => {
     draft.entities[0]!.fields[0]!.validation.email = true;
 
     expect(one(diffSchemas(active, draft), 'VALIDATION_ADDED')).toMatchObject({
-      severity: 'breaking',
+      risk: 'WARNING',
       aspect: 'write',
     });
   });
@@ -289,7 +297,7 @@ describe('adding and removing fields', () => {
     const { active, draft } = fork(ips([entity('User', [field('email')])]));
     draft.entities[0]!.fields.push(field('nickname'));
 
-    expect(one(diffSchemas(active, draft), 'FIELD_ADDED').severity).toBe('compatible');
+    expect(one(diffSchemas(active, draft), 'FIELD_ADDED').risk).toBe('SAFE');
   });
 
   it('treats a new required field as breaking', () => {
@@ -297,7 +305,7 @@ describe('adding and removing fields', () => {
     const { active, draft } = fork(ips([entity('User', [field('email')])]));
     draft.entities[0]!.fields.push(field('phone', { required: true }));
 
-    expect(one(diffSchemas(active, draft), 'FIELD_ADDED').severity).toBe('breaking');
+    expect(one(diffSchemas(active, draft), 'FIELD_ADDED').risk).toBe('WARNING');
   });
 
   it('treats a removed field as breaking', () => {
@@ -305,7 +313,7 @@ describe('adding and removing fields', () => {
     draft.entities[0]!.fields.splice(1, 1);
 
     expect(one(diffSchemas(active, draft), 'FIELD_REMOVED')).toMatchObject({
-      severity: 'breaking',
+      risk: 'BREAKING',
       fieldName: 'age',
     });
   });
@@ -331,7 +339,8 @@ describe('entities', () => {
     draft.entities[0]!.name = 'Customer';
 
     const change = one(diffSchemas(active, draft), 'ENTITY_RENAMED');
-    expect(change).toMatchObject({ severity: 'breaking', aspect: 'routing' });
+    // ROUTING, not BREAKING: the endpoints still work, at a different URL.
+    expect(change).toMatchObject({ risk: 'ROUTING', aspect: 'routing' });
     expect(change.summary).toMatch(/endpoint paths move/);
     // Not a remove-plus-add.
     expect(find(diffSchemas(active, draft), 'ENTITY_REMOVED')).toEqual([]);
@@ -344,7 +353,7 @@ describe('entities', () => {
     ensureSchemaIds(draft);
 
     expect(one(diffSchemas(active, draft), 'ENTITY_ADDED')).toMatchObject({
-      severity: 'compatible',
+      risk: 'SAFE',
       entityName: 'Order',
     });
   });
@@ -356,7 +365,7 @@ describe('entities', () => {
     draft.entities.splice(1, 1);
 
     expect(one(diffSchemas(active, draft), 'ENTITY_REMOVED')).toMatchObject({
-      severity: 'breaking',
+      risk: 'BREAKING',
       aspect: 'routing',
       entityName: 'Order',
     });
@@ -367,7 +376,7 @@ describe('entities', () => {
     draft.entities[0]!.description = 'Application user';
 
     expect(one(diffSchemas(active, draft), 'ENTITY_DESCRIPTION_CHANGED')).toMatchObject({
-      severity: 'cosmetic',
+      risk: 'INFO',
       aspect: 'none',
     });
   });
@@ -380,7 +389,7 @@ describe('entities', () => {
     draft.entities[0]!.identity = { field: 'id', style: 'uuid' };
 
     expect(one(diffSchemas(active, draft), 'ENTITY_IDENTITY_CHANGED')).toMatchObject({
-      severity: 'breaking',
+      risk: 'ROUTING',
       aspect: 'routing',
     });
   });
@@ -413,7 +422,7 @@ describe('relations', () => {
     draft.entities[0]!.relations = [];
 
     expect(one(diffSchemas(active, draft), 'RELATION_REMOVED')).toMatchObject({
-      severity: 'breaking',
+      risk: 'BREAKING',
       relationName: 'classroom',
     });
   });
@@ -427,7 +436,7 @@ describe('relations', () => {
     expect(one(changes, 'RELATION_TARGET_CHANGED')).toMatchObject({
       before: 'Classroom',
       after: 'Teacher',
-      severity: 'breaking',
+      risk: 'BREAKING',
     });
   });
 
@@ -435,7 +444,7 @@ describe('relations', () => {
     // Decides whether an expansion is an object or an array.
     const { active, draft } = withRelation();
     draft.entities[0]!.relations![0]!.kind = 'hasMany';
-    expect(one(diffSchemas(active, draft), 'RELATION_KIND_CHANGED').severity).toBe('breaking');
+    expect(one(diffSchemas(active, draft), 'RELATION_KIND_CHANGED').risk).toBe('BREAKING');
   });
 
   it('treats an onDelete change as compatible and write-only', () => {
@@ -444,7 +453,7 @@ describe('relations', () => {
     draft.entities[0]!.relations![0]!.onDelete = 'cascade';
 
     expect(one(diffSchemas(active, draft), 'RELATION_ON_DELETE_CHANGED')).toMatchObject({
-      severity: 'compatible',
+      risk: 'SAFE',
       aspect: 'write',
     });
   });
@@ -464,7 +473,7 @@ describe('relations', () => {
     ];
     ensureSchemaIds(draft);
 
-    expect(one(diffSchemas(active, draft), 'RELATION_ADDED').severity).toBe('compatible');
+    expect(one(diffSchemas(active, draft), 'RELATION_ADDED').risk).toBe('SAFE');
   });
 });
 
@@ -476,7 +485,7 @@ describe('generation config', () => {
     draft.generationConfig.methods = ['GET', 'POST'];
 
     const change = one(diffSchemas(active, draft), 'METHODS_CHANGED');
-    expect(change).toMatchObject({ severity: 'breaking', aspect: 'routing' });
+    expect(change).toMatchObject({ risk: 'BREAKING', aspect: 'routing' });
     expect(change.summary).toMatch(/PATCH|PUT|DELETE/);
   });
 
@@ -484,7 +493,7 @@ describe('generation config', () => {
     const { active, draft } = fork(ips([entity('User', [field('email')])], { methods: ['GET'] }));
     draft.generationConfig.methods = ['GET', 'POST'];
 
-    expect(one(diffSchemas(active, draft), 'METHODS_CHANGED').severity).toBe('compatible');
+    expect(one(diffSchemas(active, draft), 'METHODS_CHANGED').risk).toBe('SAFE');
   });
 
   it('ignores a pure reordering of methods', () => {
@@ -502,7 +511,7 @@ describe('generation config', () => {
     draft.generationConfig.validators = ['zod', 'yup'];
 
     expect(one(diffSchemas(active, draft), 'GENERATORS_CHANGED')).toMatchObject({
-      severity: 'cosmetic',
+      risk: 'INFO',
       aspect: 'none',
     });
   });
@@ -546,33 +555,68 @@ describe('several edits at once', () => {
   });
 });
 
-describe('hasBreakingChanges and summariseChanges', () => {
-  it('detects the presence of a breaking change', () => {
+describe('highestRisk, needsAttention and summariseChanges', () => {
+  it('finds the worst risk in a set', () => {
     const { active, draft } = fork(ips([entity('User', [field('age')])]));
     draft.entities[0]!.fields[0]!.type = 'integer';
-    expect(hasBreakingChanges(diffSchemas(active, draft))).toBe(true);
+    draft.entities[0]!.description = 'notes';
+    expect(highestRisk(diffSchemas(active, draft))).toBe('BREAKING');
   });
 
-  it('is false when every change is safe', () => {
+  it('ranks ROUTING above WARNING and below BREAKING', () => {
+    // Both demand action; the ordering is presentational, not a claim that a
+    // moved URL hurts less than a changed payload.
+    expect(highestRisk([{ risk: 'WARNING' }, { risk: 'ROUTING' }] as never)).toBe('ROUTING');
+    expect(highestRisk([{ risk: 'ROUTING' }, { risk: 'BREAKING' }] as never)).toBe('BREAKING');
+  });
+
+  it('returns null for no changes', () => {
+    expect(highestRisk([])).toBeNull();
+  });
+
+  /**
+   * WARNING counts as needing attention. A dialog that only warns on BREAKING
+   * would wave through making a field required — which rejects every request
+   * body that omitted it.
+   */
+  it('treats WARNING as needing attention', () => {
+    const { active, draft } = fork(ips([entity('User', [field('email')])]));
+    draft.entities[0]!.fields[0]!.required = true;
+
+    const changes = diffSchemas(active, draft);
+    expect(changes[0]?.risk).toBe('WARNING');
+    expect(needsAttention(changes)).toBe(true);
+  });
+
+  it('is quiet when every change is SAFE or INFO', () => {
     const { active, draft } = fork(ips([entity('User', [field('email')])]));
     draft.entities[0]!.description = 'notes';
     draft.entities[0]!.fields.push(field('nickname'));
-    expect(hasBreakingChanges(diffSchemas(active, draft))).toBe(false);
+
+    expect(needsAttention(diffSchemas(active, draft))).toBe(false);
   });
 
-  it('counts by severity', () => {
+  it('counts by risk', () => {
     const { active, draft } = fork(ips([entity('User', [field('age')])]));
     draft.entities[0]!.fields[0]!.type = 'integer';
     draft.entities[0]!.description = 'notes';
 
     expect(summariseChanges(diffSchemas(active, draft))).toEqual({
-      breaking: 1,
-      compatible: 0,
-      cosmetic: 1,
+      SAFE: 0,
+      INFO: 1,
+      WARNING: 0,
+      ROUTING: 0,
+      BREAKING: 1,
     });
   });
 
   it('reports all zeroes for no changes', () => {
-    expect(summariseChanges([])).toEqual({ breaking: 0, compatible: 0, cosmetic: 0 });
+    expect(summariseChanges([])).toEqual({
+      SAFE: 0,
+      INFO: 0,
+      WARNING: 0,
+      ROUTING: 0,
+      BREAKING: 0,
+    });
   });
 });
