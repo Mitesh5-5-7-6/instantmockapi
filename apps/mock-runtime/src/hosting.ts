@@ -10,7 +10,7 @@
 import { AppError, type ProjectKind } from '@instantmockapi/shared';
 import { resolveQueryFeatures, type QueryFeatures } from '@instantmockapi/ips';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
-import { Project } from '@instantmockapi/db';
+import { Project, publishedVersionOf } from '@instantmockapi/db';
 import { getArtifactRecord } from '@instantmockapi/registry';
 import type { StorageClient } from '@instantmockapi/storage';
 import type { HostedEntityConfig, HostingConfig } from '@instantmockapi/generator-hosting';
@@ -48,7 +48,11 @@ export function notFound(message = 'Not found'): AppError {
   return new AppError({ code: 'NOT_FOUND', message });
 }
 
-const PROJECT_FIELDS = 'status hosted currentVersion kind publicId slug';
+// `publishedVersion` is in the projection because the runtime resolves on it;
+// `currentVersion` stays only as its pre-split fallback. Dropping either from
+// the projection makes `publishedVersionOf` resolve undefined and 404 the
+// project — a lean projection is exactly how that mistake gets made.
+const PROJECT_FIELDS = 'status hosted currentVersion publishedVersion kind publicId slug';
 
 export async function resolveHostedProject(
   ref: HostedRefInput,
@@ -73,7 +77,13 @@ export async function resolveHostedProject(
     throw notFound();
   }
 
-  const record = await getArtifactRecord(projectId, 'hosted_api', project.currentVersion);
+  // THE deployment boundary. Resolving on `currentVersion` is what coupled
+  // editing to deployment: a schema PATCH or a restore advances that field
+  // without writing any artifacts, so the live URL pointed at a version that
+  // did not exist. `publishedVersion` only ever advances when a generation
+  // actually wrote a hosted_api artifact.
+  const version = publishedVersionOf(project);
+  const record = await getArtifactRecord(projectId, 'hosted_api', version);
   if (
     !record.ok ||
     !record.value ||
@@ -88,7 +98,7 @@ export async function resolveHostedProject(
   // Because the key is content-addressed this way, a stale hit is structurally
   // impossible — which is what lets the TTL be an hour rather than a minute.
   const stamp = String(record.value.generatedAt ? record.value.generatedAt.getTime() : 0);
-  const cacheKey = `mockcfg:${projectId}:v${project.currentVersion}:${stamp}`;
+  const cacheKey = `mockcfg:${projectId}:v${version}:${stamp}`;
   const storageRef = record.value.storageRef;
 
   // One read-through call: L1 hit costs zero Redis commands, L1 miss costs a

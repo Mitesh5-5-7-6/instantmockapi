@@ -97,6 +97,17 @@ export interface FieldMeta {
  * Supports nesting via recursive `children` (doc 04 §F3).
  */
 export interface Field {
+  /**
+   * Stable internal id (`fld_…`), minted by `ensureSchemaIds`.
+   *
+   * **Optional forever.** Every field written before Phase 1 has none, and
+   * `Project.ips` is `Schema.Types.Mixed`, so an old document can be any shape.
+   * Read it through the backfill; never require it.
+   *
+   * Survives a rename — which is the whole point: `firstName` becoming `givenName` is one field changing,
+   * not a field disappearing and an unrelated one appearing.
+   */
+  id?: string;
   /** Name of the field (camelCase recommended) */
   name: string;
   /** DataType of the field */
@@ -131,6 +142,17 @@ export type RelationKind = 'belongsTo' | 'hasOne' | 'hasMany' | 'manyToMany';
  * (for `manyToMany`, when the `localField` array contains it).
  */
 export interface Relation {
+  /**
+   * Stable internal id (`rel_…`), minted by `ensureSchemaIds`.
+   *
+   * **Optional forever.** Every relation written before Phase 1 has none, and
+   * `Project.ips` is `Schema.Types.Mixed`, so an old document can be any shape.
+   * Read it through the backfill; never require it.
+   *
+   * Survives a rename — which is the whole point: a relation keeps its identity when its `name` or
+   * `target` changes, so impact analysis can report a retarget as a retarget.
+   */
+  id?: string;
   /** Include key and JSON property on expanded records, e.g. `classroom` */
   name: string;
   kind: RelationKind;
@@ -163,6 +185,17 @@ export interface EntityIdentity {
  * An entity (corresponds to a database collection or API resource).
  */
 export interface Entity {
+  /**
+   * Stable internal id (`ent_…`), minted by `ensureSchemaIds`.
+   *
+   * **Optional forever.** Every entity written before Phase 1 has none, and
+   * `Project.ips` is `Schema.Types.Mixed`, so an old document can be any shape.
+   * Read it through the backfill; never require it.
+   *
+   * Survives a rename — which is the whole point: renaming `User` to `Customer` must not look like
+   * deleting one entity and creating another.
+   */
+  id?: string;
   /** Name of the entity (PascalCase recommended, e.g. Customer) */
   name: string;
   /** Field list for the entity */

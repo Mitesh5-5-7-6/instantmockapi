@@ -5,6 +5,7 @@ import { MockStore } from './models/mockStore.js';
 import { ApiLog } from './models/apiLog.js';
 import { Artifact } from './models/artifact.js';
 import { Version } from './models/version.js';
+import { ProjectDraft } from './models/projectDraft.js';
 import { Job } from './models/job.js';
 import { AppError, PUBLIC_ID_PREFIX, logger, slugify } from '@instantmockapi/shared';
 
@@ -137,6 +138,10 @@ export async function hardDeleteProject(projectId: string): Promise<void> {
 
   await Promise.all([
     Project.deleteOne({ _id: pId }),
+    // Every collection keyed on projectId has to be listed here. A draft left
+    // behind would also hold the unique index on projectId, so a later project
+    // reusing that id could not create one.
+    ProjectDraft.deleteMany({ projectId: pId }),
     Version.deleteMany({ projectId: pId }),
     Artifact.deleteMany({ projectId: pId }),
     Job.deleteMany({ projectId: pId }),

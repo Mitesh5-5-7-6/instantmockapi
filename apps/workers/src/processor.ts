@@ -11,7 +11,13 @@
  * `failed_partial`, never a global failure; completed siblings survive.
  */
 
-import { getErrorMessage, hostedUrl, logger, type ArtifactType } from '@instantmockapi/shared';
+import {
+  evaluatePromotion,
+  getErrorMessage,
+  hostedUrl,
+  logger,
+  type ArtifactType,
+} from '@instantmockapi/shared';
 import { calculateExpiresAt } from '@instantmockapi/config';
 import {
   Job,
@@ -20,6 +26,7 @@ import {
   User,
   Version,
   ensurePublicIdentity,
+  versionArtifactOutcomes,
   type IProject,
 } from '@instantmockapi/db';
 import {
@@ -386,7 +393,43 @@ async function settle(
     project.status = 'draft';
   }
 
-  if (outcomes.get('hosted_api') === 'completed') {
+  // ── Promotion ──
+  //
+  // Deliberately NOT `outcomes.get(...)`. A job settles with whatever IT
+  // touched, and a partial regenerate touches a subset — so "what this job
+  // produced" cannot answer "can this version serve traffic". The registry is
+  // read for the whole version instead, which is what makes affected-artifacts-
+  // only regeneration safe: regenerate three of nine artifacts and readiness is
+  // still judged on all nine.
+  //
+  //   job settles → artifact statuses → version readiness → policy → pointer
+  //
+  // The policy lives in packages/shared/src/promotion.ts, so the rule
+  // "hosted_api is the only artifact the runtime reads, therefore a failed
+  // OpenAPI degrades a version rather than blocking it" is stated once and is
+  // testable without spinning up a worker.
+  const versionOutcomes = await versionArtifactOutcomes(project._id, payload.version);
+  const decision = evaluatePromotion({
+    candidate: payload.version,
+    published: project.publishedVersion,
+    outcomes: versionOutcomes,
+  });
+
+  log.info(decision.promote ? 'Promoting version' : 'Not promoting version', {
+    version: payload.version,
+    livePublished: project.publishedVersion ?? null,
+    reason: decision.reason,
+    blocking: decision.readiness.blocking,
+    degraded: decision.readiness.degraded,
+    staleDataRisk: decision.readiness.staleDataRisk,
+  });
+
+  if (decision.promote) {
+    // The ONLY place `publishedVersion` advances. Everything upstream of here —
+    // every edit, every restore, every enqueue — leaves it alone, which is the
+    // invariant: a failed generation can never destroy or temporarily disable
+    // the currently live version.
+    project.publishedVersion = payload.version;
     // Mint addressing first so the URL is the pretty form; a project that somehow
     // has none falls back to the legacy id form, which still resolves.
     await ensurePublicIdentity(project);

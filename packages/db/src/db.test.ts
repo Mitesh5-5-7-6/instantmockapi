@@ -4,7 +4,13 @@ import mongoose, { Types } from 'mongoose';
 import { connectDB, disconnectDB } from './connection.js';
 import { User } from './models/user.js';
 import { AuthToken, AUTH_TOKEN_TTL_SECONDS } from './models/authToken.js';
+import {
+  hasPendingRegeneration,
+  pinPublishedVersion,
+  publishedVersionOf,
+} from './published-version.js';
 import { Project, type IProject } from './models/project.js';
+import { ProjectDraft } from './models/projectDraft.js';
 import { Version } from './models/version.js';
 import { Artifact } from './models/artifact.js';
 import { Job } from './models/job.js';
@@ -464,5 +470,249 @@ describe('ensurePublicIdentity (doc 19 §Phase 3)', () => {
     await Project.syncIndexes();
     await makeProject({ name: 'A', publicId: 'prj_1111111111' });
     await expect(makeProject({ name: 'B', publicId: 'prj_1111111111' })).rejects.toThrow();
+  });
+});
+
+/**
+ * The editing/deployment boundary (Phase 1).
+ *
+ * `currentVersion` used to mean the definition version AND the version the mock
+ * runtime resolved artifacts for. Five paths advance it; only a completed
+ * generation writes artifacts — so a schema PATCH, a partial regenerate, and
+ * `restore` (which writes none at all) each pointed the live URL at a version
+ * that did not exist.
+ */
+describe('publishedVersionOf', () => {
+  it('falls back to currentVersion for a project written before the split', () => {
+    // Every project that exists. The fallback is what makes deploying this change
+    // a no-op for anything currently healthy.
+    expect(publishedVersionOf({ currentVersion: 3 })).toBe(3);
+    expect(publishedVersionOf({ currentVersion: 3, publishedVersion: null })).toBe(3);
+  });
+
+  it('prefers publishedVersion once it is set', () => {
+    expect(publishedVersionOf({ currentVersion: 7, publishedVersion: 2 })).toBe(2);
+  });
+
+  it('serves version 0 rather than falling through it', () => {
+    // `??` and not `||`: zero is a real version number to this function, and `||`
+    // would silently skip it. Not reachable today (versions start at 1) but the
+    // operator choice is the kind of thing that gets "tidied" later.
+    expect(publishedVersionOf({ currentVersion: 5, publishedVersion: 0 })).toBe(0);
+  });
+});
+
+describe('hasPendingRegeneration', () => {
+  it('is false when the definition matches what is served', () => {
+    expect(hasPendingRegeneration({ currentVersion: 2, publishedVersion: 2 })).toBe(false);
+  });
+
+  it('is true when the definition has moved ahead', () => {
+    // The "needs regeneration" signal the platform had no way to express.
+    expect(hasPendingRegeneration({ currentVersion: 3, publishedVersion: 1 })).toBe(true);
+  });
+
+  it('is false for a pre-split project', () => {
+    // The fallback makes them equal, and claiming a pending regeneration for
+    // every legacy project would put a stale badge on the whole estate.
+    expect(hasPendingRegeneration({ currentVersion: 4 })).toBe(false);
+  });
+});
+
+describe('pinPublishedVersion', () => {
+  it('captures the version currently being served', () => {
+    const project = { currentVersion: 4 };
+    pinPublishedVersion(project);
+    expect(project).toEqual({ currentVersion: 4, publishedVersion: 4 });
+  });
+
+  /**
+   * The property that protects legacy projects. Called before the bump, the pin
+   * freezes the served version so the fallback cannot follow `currentVersion`
+   * upward — which is precisely how a schema edit used to 404 the live API.
+   */
+  it('keeps the runtime on the old version across a bump', () => {
+    const project = { currentVersion: 4 };
+    pinPublishedVersion(project);
+    project.currentVersion += 1;
+
+    expect(publishedVersionOf(project)).toBe(4);
+    expect(hasPendingRegeneration(project)).toBe(true);
+  });
+
+  it('never overwrites an existing pin', () => {
+    // It runs on every bump path, so a second call must not drag the served
+    // version forward to a version that was never generated.
+    const project = { currentVersion: 9, publishedVersion: 2 };
+    pinPublishedVersion(project);
+    pinPublishedVersion(project);
+    expect(project.publishedVersion).toBe(2);
+  });
+
+  it('treats null as unpinned', () => {
+    // The schema default is null, not undefined, so `??` has to cover both.
+    const project: { currentVersion: number; publishedVersion?: number | null } = {
+      currentVersion: 6,
+      publishedVersion: null,
+    };
+    pinPublishedVersion(project);
+    expect(project.publishedVersion).toBe(6);
+  });
+});
+
+describe('the publishedVersion schema path', () => {
+  it('defaults to null, not 1', async () => {
+    // A brand-new project has generated nothing. Defaulting to 1 would claim the
+    // runtime is serving a version whose artifacts do not exist — the exact
+    // confusion the field removes.
+    const project = await makeProject();
+    expect(project.publishedVersion ?? null).toBeNull();
+    expect(publishedVersionOf(project)).toBe(project.currentVersion);
+  });
+
+  it('round-trips through mongo', async () => {
+    const project = await makeProject();
+    project.publishedVersion = 3;
+    await project.save();
+
+    const reloaded = await Project.findById(project._id);
+    expect(reloaded?.publishedVersion).toBe(3);
+  });
+});
+
+/**
+ * The draft store (Phase 1).
+ *
+ * One draft per project, enforced by the database rather than by convention —
+ * "a user discovers a mistake and fixes it" is one edit session, not a branching
+ * model, and multiple drafts would make "is this project pending regeneration"
+ * ambiguous.
+ */
+describe('ProjectDraft', () => {
+  it('stores an edited copy alongside the untouched project', async () => {
+    const project = await makeProject();
+    const draft = await ProjectDraft.create({
+      projectId: project._id,
+      ips: project.ips,
+      generationConfig: project.generationConfig,
+      baseVersion: project.currentVersion,
+    });
+
+    expect(draft.baseVersion).toBe(1);
+    // The point of the whole model: the active definition is not touched.
+    const reloaded = await Project.findById(project._id);
+    expect(reloaded?.currentVersion).toBe(1);
+  });
+
+  it('allows only one draft per project', async () => {
+    await ProjectDraft.syncIndexes();
+    const project = await makeProject();
+    const payload = {
+      projectId: project._id,
+      ips: project.ips,
+      generationConfig: project.generationConfig,
+      baseVersion: 1,
+    };
+    await ProjectDraft.create(payload);
+
+    // Fails loudly rather than quietly creating a rival definition.
+    await expect(ProjectDraft.create(payload)).rejects.toThrow(/duplicate key/i);
+  });
+
+  it('allows a draft on each of two different projects', async () => {
+    await ProjectDraft.syncIndexes();
+    const [a, b] = await Promise.all([makeProject(), makeProject()]);
+    for (const project of [a, b]) {
+      await ProjectDraft.create({
+        projectId: project._id,
+        ips: project.ips,
+        generationConfig: project.generationConfig,
+        baseVersion: 1,
+      });
+    }
+    expect(await ProjectDraft.countDocuments({})).toBe(2);
+  });
+
+  /**
+   * `minimize: false` is load-bearing here, exactly as it is on the Version
+   * snapshot. An IPS is full of deliberately empty objects (`validation: {}`,
+   * `meta: {}`); mongoose strips them by default, so a round-tripped draft would
+   * differ from its source and `diffSchemas` would report changes the user never
+   * made.
+   */
+  it('preserves empty validation and meta objects through a round trip', async () => {
+    const project = await makeProject();
+    const ips = {
+      projectId: 'p1',
+      version: 1,
+      entities: [
+        {
+          name: 'User',
+          fields: [
+            {
+              name: 'email',
+              type: 'string',
+              required: true,
+              default: null,
+              children: [],
+              validation: {},
+              meta: {},
+            },
+          ],
+        },
+      ],
+      generationConfig,
+    };
+
+    await ProjectDraft.create({
+      projectId: project._id,
+      ips,
+      generationConfig,
+      baseVersion: 1,
+    });
+
+    const reloaded = await ProjectDraft.findOne({ projectId: project._id }).lean();
+    const field = (reloaded?.ips as typeof ips).entities[0]?.fields[0];
+    expect(field?.validation).toEqual({});
+    expect(field?.meta).toEqual({});
+    expect(field?.children).toEqual([]);
+  });
+
+  it('tracks the version it was forked from', async () => {
+    // The diff is only meaningful against the baseline the user started from,
+    // and the active definition can move underneath an open draft.
+    const project = await makeProject({ currentVersion: 4 });
+    const draft = await ProjectDraft.create({
+      projectId: project._id,
+      ips: project.ips,
+      generationConfig: project.generationConfig,
+      baseVersion: project.currentVersion,
+    });
+
+    await Project.updateOne({ _id: project._id }, { $set: { currentVersion: 5 } });
+
+    const current = await Project.findById(project._id);
+    // Detectably stale: showing this draft's diff would describe changes against
+    // a definition that no longer exists.
+    expect(draft.baseVersion).not.toBe(current?.currentVersion);
+  });
+
+  /**
+   * The hazard the inspection flagged for any new collection: a draft left
+   * behind still holds the unique index on projectId, so a later project reusing
+   * that id could not create one.
+   */
+  it('is removed by hardDeleteProject', async () => {
+    const project = await makeProject();
+    await ProjectDraft.create({
+      projectId: project._id,
+      ips: project.ips,
+      generationConfig: project.generationConfig,
+      baseVersion: 1,
+    });
+
+    await hardDeleteProject(String(project._id));
+
+    expect(await ProjectDraft.countDocuments({ projectId: project._id })).toBe(0);
   });
 });

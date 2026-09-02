@@ -1209,3 +1209,133 @@ describe('query layer — disabled features and legacy configs', () => {
     expect(onBody).toEqual(offBody);
   });
 });
+
+/**
+ * The editing/deployment boundary (Phase 1).
+ *
+ * `currentVersion` used to mean the definition version AND the version the
+ * runtime resolved. Five code paths advance it; only a completed generation
+ * writes artifacts. So three of them pointed the live URL at a version that had
+ * none — a schema PATCH, a partial regenerate omitting `hosted_api`, and worst,
+ * `POST /versions/:v/restore`, whose own comment says it writes no artifacts at
+ * all. Restoring a snapshot took the user's own API down.
+ *
+ * The invariant these pin down is not about editing:
+ *
+ * > The runtime must only ever resolve a version whose artifact set is complete.
+ */
+describe('the runtime resolves the PUBLISHED version, not the definition version', () => {
+  it('falls back to currentVersion when publishedVersion is absent', async () => {
+    // Every project written before the split has no publishedVersion. The
+    // fallback reproduces the old behaviour exactly, so nothing that was serving
+    // stops serving on deploy. (The whole suite above also relies on this — the
+    // fixture never sets publishedVersion.)
+    const projectId = await stageHostedProject({});
+    const project = await Project.findById(projectId);
+    expect(project?.publishedVersion ?? null).toBeNull();
+
+    expect((await app.inject({ method: 'GET', url: `/p/${projectId}/customer` })).statusCode).toBe(
+      200,
+    );
+  });
+
+  /**
+   * THE regression test. This exact sequence is what a schema PATCH and a
+   * restore both do: advance `currentVersion`, write no artifacts.
+   *
+   * Before the split this returned 404 — with no job queued and no path back.
+   */
+  it('keeps serving when the definition version advances with no new artifacts', async () => {
+    const projectId = await stageHostedProject({});
+
+    // Simulate the edit: definition moves to v2, artifacts still only exist at
+    // v1, publishedVersion is deliberately untouched.
+    await Project.updateOne(
+      { _id: projectId },
+      { $set: { currentVersion: 2, publishedVersion: 1 } },
+    );
+
+    const res = await app.inject({ method: 'GET', url: `/p/${projectId}/customer` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toHaveLength(3);
+  });
+
+  it('keeps serving across several unpublished edits', async () => {
+    // A user correcting a few mistakes in a row must not degrade the live API
+    // once per correction.
+    //
+    // publishedVersion is set once up front because that is what
+    // `pinPublishedVersion` does on the FIRST edit: the fallback in
+    // `publishedVersionOf` would otherwise follow the bump, so pinning is what
+    // protects a project that predates the split. Without that pin this loop
+    // 404s from the very first iteration.
+    const projectId = await stageHostedProject({});
+    await Project.updateOne({ _id: projectId }, { $set: { publishedVersion: 1 } });
+
+    for (const version of [2, 3, 4, 5]) {
+      await Project.updateOne({ _id: projectId }, { $set: { currentVersion: version } });
+      expect(
+        (await app.inject({ method: 'GET', url: `/p/${projectId}/customer` })).statusCode,
+      ).toBe(200);
+    }
+  });
+
+  it('serves publishedVersion even when it lags far behind', async () => {
+    const projectId = await stageHostedProject({});
+    await Project.updateOne(
+      { _id: projectId },
+      { $set: { currentVersion: 12, publishedVersion: 1 } },
+    );
+    expect((await app.inject({ method: 'GET', url: `/p/${projectId}/customer` })).statusCode).toBe(
+      200,
+    );
+  });
+
+  /**
+   * The honest limit. A project already skewed by the old bug — currentVersion
+   * advanced, artifacts never written — stays broken until it is regenerated.
+   * No backfill can invent artifacts that were never generated, and pretending
+   * otherwise would only move the 404 somewhere less obvious.
+   */
+  it('404s when the published version genuinely has no artifact', async () => {
+    const projectId = await stageHostedProject({});
+    await Project.updateOne({ _id: projectId }, { $set: { publishedVersion: 99 } });
+
+    expect((await app.inject({ method: 'GET', url: `/p/${projectId}/customer` })).statusCode).toBe(
+      404,
+    );
+  });
+
+  it('publishedVersion wins over currentVersion when they disagree', async () => {
+    // Both point at real artifacts here, so only precedence is under test:
+    // resolving on currentVersion would 404 because v2 has none.
+    const projectId = await stageHostedProject({});
+    await Project.updateOne(
+      { _id: projectId },
+      { $set: { currentVersion: 2, publishedVersion: 1 } },
+    );
+    expect((await app.inject({ method: 'GET', url: `/p/${projectId}/customer` })).statusCode).toBe(
+      200,
+    );
+
+    // And the reverse: publishing a version with no artifacts is what 404s, so
+    // the field really is the one being read.
+    await Project.updateOne({ _id: projectId }, { $set: { publishedVersion: 2 } });
+    expect((await app.inject({ method: 'GET', url: `/p/${projectId}/customer` })).statusCode).toBe(
+      404,
+    );
+  });
+
+  it('still enforces expiry and status independently of the version', async () => {
+    // The version split must not have widened what resolves.
+    const expired = await stageHostedProject({ expiresAt: new Date(Date.now() - 1000) });
+    await Project.updateOne({ _id: expired }, { $set: { publishedVersion: 1 } });
+    expect((await app.inject({ method: 'GET', url: `/p/${expired}/customer` })).statusCode).toBe(
+      404,
+    );
+
+    const draft = await stageHostedProject({ status: 'draft' });
+    await Project.updateOne({ _id: draft }, { $set: { publishedVersion: 1 } });
+    expect((await app.inject({ method: 'GET', url: `/p/${draft}/customer` })).statusCode).toBe(404);
+  });
+});
