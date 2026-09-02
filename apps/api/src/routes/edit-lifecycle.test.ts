@@ -199,6 +199,16 @@ function retypeField(
   return clone as unknown as Record<string, unknown>;
 }
 
+/** The digest a risky commit must echo back. */
+async function currentDigest(): Promise<string> {
+  const res = await app.inject({
+    method: 'GET',
+    url: `${draftUrl()}/impact`,
+    headers: authHeader(token),
+  });
+  return (res.json() as { digest: string }).digest;
+}
+
 const draftUrl = () => `/v1/projects/${projectId}/draft`;
 
 // ---------------------------------------------------------------------------
@@ -271,7 +281,7 @@ describe('the full edit lifecycle', () => {
       method: 'POST',
       url: `${draftUrl()}/commit`,
       headers: authHeader(token),
-      payload: { acknowledgeRisk: true },
+      payload: { acknowledgeImpact: await currentDigest() },
     });
     expect(committed.statusCode).toBe(202);
     expect(committed.json()).toMatchObject({
@@ -350,7 +360,7 @@ describe('the full edit lifecycle', () => {
       method: 'POST',
       url: `${draftUrl()}/commit`,
       headers: authHeader(token),
-      payload: { acknowledgeRisk: true },
+      payload: { acknowledgeImpact: await currentDigest() },
     });
 
     await completeAllArtifacts(2);
@@ -383,7 +393,7 @@ describe('the full edit lifecycle', () => {
       method: 'POST',
       url: `${draftUrl()}/commit`,
       headers: authHeader(token),
-      payload: { acknowledgeRisk: true },
+      payload: { acknowledgeImpact: await currentDigest() },
     });
 
     await completeAllArtifacts(2);
@@ -413,7 +423,7 @@ describe('a project from before the published/current split', () => {
    * explicitly and makes `pinPublishedVersion` a no-op whatever the order. This
    * one deliberately does not, so the ordering is actually under test.
    */
-  it('pins the served version before the commit advances the definition', async () => {
+  it('legacy project pins published runtime before currentVersion advances', async () => {
     // Generated and complete, but never promoted — exactly a pre-split document.
     await app.inject({
       method: 'POST',
@@ -438,15 +448,19 @@ describe('a project from before the published/current split', () => {
       method: 'POST',
       url: `${draftUrl()}/commit`,
       headers: authHeader(token),
-      payload: { acknowledgeRisk: true },
+      payload: { acknowledgeImpact: await currentDigest() },
     });
     expect(committed.statusCode).toBe(202);
 
     project = await reload();
     expect(project.currentVersion).toBe(2);
-    // Pinned to what was ACTUALLY being served, not dragged along by the bump.
-    // If this reads 2, the hosted URL is resolving artifacts that do not exist.
-    expect(project.publishedVersion).toBe(1);
+    // THE ORDERING IS SACRED. Pinned to what was ACTUALLY being served, not
+    // dragged along by the bump. If this reads 2, the hosted URL is resolving
+    // artifacts that do not exist and every caller gets a 404.
+    expect(
+      project.publishedVersion,
+      'pinPublishedVersion must run BEFORE currentVersion += 1',
+    ).toBe(1);
     expect(publishedVersionOf(project)).toBe(1);
     expect(hasPendingRegeneration(project)).toBe(true);
   });
@@ -482,7 +496,7 @@ describe('a stale draft', () => {
       method: 'POST',
       url: `${draftUrl()}/commit`,
       headers: authHeader(token),
-      payload: { acknowledgeRisk: true },
+      payload: { acknowledgeImpact: await currentDigest() },
     });
     expect(rejected.statusCode).toBe(409);
     const error = rejected.json().error as {

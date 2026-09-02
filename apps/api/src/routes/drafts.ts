@@ -134,7 +134,7 @@ export const draftRoutes: FastifyPluginAsync<DraftRouteOptions> = async (app, { 
           type: 'object',
           additionalProperties: false,
           properties: {
-            acknowledgeRisk: { type: 'boolean' },
+            acknowledgeImpact: { type: 'string', minLength: 8, maxLength: 64 },
             note: { type: 'string', maxLength: 500 },
             artifacts: {
               type: 'array',
@@ -153,7 +153,7 @@ export const draftRoutes: FastifyPluginAsync<DraftRouteOptions> = async (app, { 
       );
       const ctx = await loadDraft(project);
       const body = (request.body ?? {}) as {
-        acknowledgeRisk?: boolean;
+        acknowledgeImpact?: string;
         note?: string;
         artifacts?: ArtifactType[];
       };
@@ -162,7 +162,9 @@ export const draftRoutes: FastifyPluginAsync<DraftRouteOptions> = async (app, { 
         ctx,
         plan: request.authUser?.plan ?? 'free',
         ...(body.artifacts ? { artifacts: body.artifacts } : {}),
-        ...(body.acknowledgeRisk !== undefined ? { acknowledgeRisk: body.acknowledgeRisk } : {}),
+        ...(body.acknowledgeImpact !== undefined
+          ? { acknowledgeImpact: body.acknowledgeImpact }
+          : {}),
         ...(body.note !== undefined ? { note: body.note } : {}),
       });
 

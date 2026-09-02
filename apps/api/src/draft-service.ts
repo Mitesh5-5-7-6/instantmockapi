@@ -22,6 +22,8 @@
  * split closed.
  */
 
+import { createHash } from 'node:crypto';
+
 import { AppError, unwrap, type ArtifactType, type PlanTier } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
 import {
@@ -89,6 +91,27 @@ export async function backfillProjectIds(project: IProject): Promise<boolean> {
   return true;
 }
 
+/**
+ * A short, stable fingerprint of what the user was shown.
+ *
+ * `acknowledgeImpact` carries this back on commit, so an acknowledgement binds to
+ * one specific draft state rather than becoming a standing permission. Without
+ * it, this sequence quietly commits an unreviewed breaking change:
+ *
+ *     GET  /draft/impact        user reads it, approves
+ *     PATCH /draft              user (or the client) changes something else
+ *     POST /draft/commit        client replays acknowledgeRisk: true
+ *
+ * Hashing the draft's `ips` rather than the rendered impact is deliberate: the
+ * schema plus its embedded `generationConfig` is what *determines* the impact, and
+ * the active side is already covered by the staleness check. Field order is
+ * included on purpose — reordering changes the generated types, so it is a real
+ * change and deserves a fresh look.
+ */
+export function impactDigest(draft: IProjectDraft): string {
+  return createHash('sha256').update(JSON.stringify(draft.ips)).digest('hex').slice(0, 16);
+}
+
 /** A draft and the project it belongs to, with staleness already decided. */
 export interface DraftContext {
   project: IProject;
@@ -106,6 +129,8 @@ export interface DraftAnalysis {
   summary: Record<string, number>;
   /** True when a caller must acknowledge risk before committing. */
   requiresAcknowledgement: boolean;
+  /** The value a risky commit must echo back as `acknowledgeImpact`. */
+  digest: string;
 }
 
 /**
@@ -220,6 +245,7 @@ export function analyseDraft(ctx: DraftContext): DraftAnalysis {
     impact,
     summary: summariseChanges(impact.changes),
     requiresAcknowledgement: needsAttention(impact.changes),
+    digest: impactDigest(draft),
   };
 }
 
@@ -256,11 +282,18 @@ export async function commitDraft(params: {
   plan: PlanTier;
   /** Which artifacts to regenerate. Defaults to the impact report's list. */
   artifacts?: ArtifactType[];
-  /** The caller has shown the user the impact of a WARNING-or-worse change. */
-  acknowledgeRisk?: boolean;
+  /**
+   * The `digest` from the impact the user actually reviewed.
+   *
+   * A string rather than a boolean so it cannot be hardcoded once and replayed
+   * forever. A client that has not read `GET /draft/impact` cannot produce one,
+   * which is the point — you should not be able to acknowledge risk you have not
+   * been shown.
+   */
+  acknowledgeImpact?: string;
   note?: string;
 }): Promise<CommitResult> {
-  const { ctx, plan, acknowledgeRisk, note } = params;
+  const { ctx, plan, acknowledgeImpact, note } = params;
   const { project, draft } = ctx;
 
   // 1. Staleness. Never merge — the user reasoned about a definition that has
@@ -284,14 +317,24 @@ export async function commitDraft(params: {
 
   // 3. Risk gate. A commit that quietly ships a BREAKING or WARNING change
   //    defeats the point of computing the impact at all.
-  if (analysis.requiresAcknowledgement && acknowledgeRisk !== true) {
+  if (analysis.requiresAcknowledgement && acknowledgeImpact !== analysis.digest) {
+    const stated =
+      acknowledgeImpact === undefined
+        ? 'Re-send with acknowledgeImpact set to the digest from GET /draft/impact.'
+        : 'The draft has changed since that impact was reviewed. Fetch GET /draft/impact again.';
     throw new AppError({
       code: 'VALIDATION_ERROR',
-      message: `This change is ${highestRisk(analysis.impact.changes) ?? 'risky'} and affects ${analysis.impact.affected.length} endpoint(s). Re-send with acknowledgeRisk: true to confirm.`,
-      details: analysis.impact.affected.map((endpoint) => ({
-        path: `${endpoint.method} ${endpoint.path}`,
-        issue: endpoint.reasons.map((reason) => reason.reason).join(', '),
-      })),
+      message: `This change is ${highestRisk(analysis.impact.changes) ?? 'risky'} and affects ${analysis.impact.affected.length} endpoint(s). ${stated}`,
+      details: [
+        { path: 'acknowledgeImpact', issue: analysis.digest },
+        // The affected endpoints ride along so a client that skipped the impact
+        // call can still render the dialog from the rejection alone. The API
+        // stays self-describing even when the frontend gets the order wrong.
+        ...analysis.impact.affected.map((endpoint) => ({
+          path: `${endpoint.method} ${endpoint.path}`,
+          issue: endpoint.reasons.map((reason) => reason.reason).join(', '),
+        })),
+      ],
     });
   }
 
@@ -384,6 +427,8 @@ export function toDraftAnalysisResponse(analysis: DraftAnalysis): Record<string,
     risk: impact.risk,
     summary: analysis.summary,
     requiresAcknowledgement: analysis.requiresAcknowledgement,
+    // Echo this back as `acknowledgeImpact` on a risky commit.
+    digest: analysis.digest,
     // Flagged when a change could not be matched to a graph node, so a UI can
     // avoid presenting the not-affected list as a guarantee it cannot make.
     incomplete: impact.incomplete,

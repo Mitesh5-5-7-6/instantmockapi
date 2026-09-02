@@ -96,17 +96,24 @@ async function editedIps(): Promise<Record<string, unknown>> {
  * exercise the risk gate. Keeping the two separate means each test says which
  * kind of change it is about.
  */
-async function riskyIps(): Promise<Record<string, unknown>> {
+async function riskyIps(leafIndex = 0): Promise<Record<string, unknown>> {
   const project = await reload();
   const clone = JSON.parse(JSON.stringify(project.ips)) as {
     entities: { fields: { children?: { name: string; type: string }[] }[] }[];
   };
-  const leaf = clone.entities[0]?.fields.find((f) => (f.children?.length ?? 0) > 0)?.children?.[0];
+  const leaves = clone.entities[0]?.fields.find((f) => (f.children?.length ?? 0) > 0)?.children;
+  const leaf = leaves?.[leafIndex];
   if (!leaf) {
-    throw new Error('fixture has no nested leaf to retype');
+    throw new Error(`fixture has no nested leaf at ${leafIndex} to retype`);
   }
   leaf.type = leaf.type === 'integer' ? 'string' : 'integer';
   return clone as unknown as Record<string, unknown>;
+}
+
+/** The digest the API demands back on a risky commit. */
+async function currentDigest(): Promise<string> {
+  const analysis = (await get(`${draftUrl()}/impact`)).json() as { digest: string };
+  return analysis.digest;
 }
 
 // ---------------------------------------------------------------------------
@@ -330,7 +337,7 @@ describe('POST /draft/commit', () => {
 
     const res = await post(`${draftUrl()}/commit`);
     expect(res.statusCode).toBe(422);
-    expect(res.json().error.message).toContain('acknowledgeRisk');
+    expect(res.json().error.message).toContain('acknowledgeImpact');
     expect(res.json().error.message).toContain('BREAKING');
     // The affected endpoints ride along, so a client that skipped the impact
     // call can still render the dialog from the rejection alone.
@@ -345,10 +352,55 @@ describe('POST /draft/commit', () => {
     await post(draftUrl());
     await patch(draftUrl(), { ips: await riskyIps() });
 
-    const res = await post(`${draftUrl()}/commit`, { acknowledgeRisk: true });
+    const res = await post(`${draftUrl()}/commit`, { acknowledgeImpact: await currentDigest() });
     expect(res.statusCode).toBe(202);
     expect(res.json()).toMatchObject({ committed: true, version: 2 });
     expect(await ProjectDraft.countDocuments({ projectId })).toBe(0);
+  });
+
+  /**
+   * The hole a boolean `acknowledgeRisk` would leave open.
+   *
+   * A client that reviewed one impact and then edited the draft again must not be
+   * able to replay its old approval — the server would accept a change nobody
+   * looked at. Binding the acknowledgement to a digest of the draft makes the
+   * stale approval fail loudly.
+   */
+  it('refuses an acknowledgement that was issued for a different draft state', async () => {
+    await post(draftUrl());
+    await patch(draftUrl(), { ips: await riskyIps() });
+    const reviewed = await currentDigest();
+
+    // The user (or the client) changes something else before committing. A
+    // different leaf, and still BREAKING — so the commit is not merely allowed
+    // for having become safe.
+    await patch(draftUrl(), { ips: await riskyIps(1) });
+    expect(await currentDigest()).not.toBe(reviewed);
+
+    const replayed = await post(`${draftUrl()}/commit`, { acknowledgeImpact: reviewed });
+    expect(replayed.statusCode).toBe(422);
+    expect(replayed.json().error.message).toContain('changed since');
+    expect((await reload()).currentVersion).toBe(1);
+
+    // Re-reviewing produces a digest that works.
+    const fresh = await post(`${draftUrl()}/commit`, { acknowledgeImpact: await currentDigest() });
+    expect(fresh.statusCode).toBe(202);
+  });
+
+  it('names the expected digest in the rejection so a client can recover', async () => {
+    await post(draftUrl());
+    await patch(draftUrl(), { ips: await riskyIps() });
+
+    const res = await post(`${draftUrl()}/commit`);
+    const details = res.json().error.details as { path: string; issue: string }[];
+    const offered = details.find((d) => d.path === 'acknowledgeImpact');
+    expect(offered?.issue).toBe(await currentDigest());
+  });
+
+  it('keeps the digest stable while the draft is untouched', async () => {
+    await post(draftUrl());
+    await patch(draftUrl(), { ips: await riskyIps() });
+    expect(await currentDigest()).toBe(await currentDigest());
   });
 
   /**
@@ -379,7 +431,7 @@ describe('POST /draft/commit', () => {
    */
   it('does nothing for an unchanged draft', async () => {
     await post(draftUrl());
-    const res = await post(`${draftUrl()}/commit`, { acknowledgeRisk: true });
+    const res = await post(`${draftUrl()}/commit`, { acknowledgeImpact: await currentDigest() });
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ committed: false, reason: 'no-changes', version: null });
@@ -394,7 +446,7 @@ describe('POST /draft/commit', () => {
     await patch(draftUrl(), { ips: await editedIps() });
     const expected = (await get(`${draftUrl()}/impact`)).json() as { artifacts: string[] };
 
-    await post(`${draftUrl()}/commit`, { acknowledgeRisk: true });
+    await post(`${draftUrl()}/commit`, { acknowledgeImpact: await currentDigest() });
 
     const job = await Job.findOne({ projectId, version: 2 });
     expect(job).not.toBeNull();
@@ -417,7 +469,10 @@ describe('POST /draft/commit', () => {
   it('stamps a readable note on the new version', async () => {
     await post(draftUrl());
     await patch(draftUrl(), { ips: await editedIps() });
-    await post(`${draftUrl()}/commit`, { acknowledgeRisk: true, note: 'Tighten the address' });
+    await post(`${draftUrl()}/commit`, {
+      acknowledgeImpact: await currentDigest(),
+      note: 'Tighten the address',
+    });
 
     const version = await Version.findOne({ projectId, version: 2 });
     expect(version!.note).toBe('Tighten the address');
@@ -426,14 +481,14 @@ describe('POST /draft/commit', () => {
   it('derives a note when none is given', async () => {
     await post(draftUrl());
     await patch(draftUrl(), { ips: await editedIps() });
-    await post(`${draftUrl()}/commit`, { acknowledgeRisk: true });
+    await post(`${draftUrl()}/commit`, { acknowledgeImpact: await currentDigest() });
 
     const version = await Version.findOne({ projectId, version: 2 });
     expect(version!.note).toMatch(/Draft commit: 1 change/);
   });
 
   it('404s when there is no draft to commit', async () => {
-    const res = await post(`${draftUrl()}/commit`, { acknowledgeRisk: true });
+    const res = await post(`${draftUrl()}/commit`, { acknowledgeImpact: await currentDigest() });
     expect(res.statusCode).toBe(404);
   });
 });
