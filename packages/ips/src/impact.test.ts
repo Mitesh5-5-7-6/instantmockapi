@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { diffSchemas, type SchemaChange } from './changes.js';
-import { buildDependencyGraph } from './graph.js';
+import { buildDependencyGraph, IMPACTED_ARTIFACTS } from './graph.js';
 import { ensureSchemaIds } from './ids.js';
 import { analyseDraftImpact, analyseImpact, type ImpactReport } from './impact.js';
 import { materializeRelations } from './relations.js';
@@ -408,6 +408,78 @@ describe('artifacts', () => {
 
     const artifacts = analyseDraftImpact(active, edited(draft)).artifacts;
     expect(artifacts).toEqual([...new Set(artifacts)].sort());
+  });
+});
+
+describe('the artifacts it names', () => {
+  /**
+   * The bug this exists to prevent, found by a user on the very first commit
+   * from the editor.
+   *
+   * `GENERATOR_INPUTS` used to list `ips`, so an entity-level change reported
+   * `ips` among the artifacts to regenerate. The web panel echoed that list back
+   * to `POST /draft/commit`, whose schema validates against
+   * `REGENERATABLE_ARTIFACTS` — which excludes `ips` because the API owns it and
+   * no worker produces it. Every commit from the UI answered
+   * 400 `body.artifacts.2 must be equal to one of the allowed values`.
+   *
+   * The unit tests passed because none of them sent the report's own list back
+   * through the route, and the route test only ever passed two hand-picked
+   * artifacts. `apps/api` now asserts the round trip; this asserts the source.
+   */
+  it('never names ips, which the API owns rather than generates', () => {
+    expect(IMPACTED_ARTIFACTS).not.toContain('ips');
+
+    const { active, draft } = fork(USER());
+    draft.entities[0]!.fields.find((f) => f.name === 'email')!.type = 'integer';
+    expect(analyseDraftImpact(active, edited(draft)).artifacts).not.toContain('ips');
+  });
+
+  it('names nothing outside the impactable set, for any change', () => {
+    const impactable = new Set<string>(IMPACTED_ARTIFACTS);
+
+    // One case per attribution path: field-level, entity-level fallback, entity
+    // removal (the hardcoded list), and project-level config.
+    const cases: ((draft: InternalProjectSchema) => void)[] = [
+      (d) => {
+        d.entities[0]!.fields.find((f) => f.name === 'email')!.type = 'integer';
+      },
+      (d) => {
+        d.entities[0]!.fields = d.entities[0]!.fields.filter((f) => f.name !== 'age');
+      },
+      (d) => {
+        d.entities.push(entity('Order', [field('total', { type: 'integer' })]));
+      },
+      (d) => {
+        d.generationConfig.methods = ['GET'];
+      },
+      (d) => {
+        d.generationConfig.mockRecords = 99;
+      },
+      (d) => {
+        d.entities[0]!.name = 'Customer';
+      },
+    ];
+
+    for (const mutate of cases) {
+      const { active, draft } = fork(USER());
+      mutate(draft);
+      for (const artifact of analyseDraftImpact(active, edited(draft)).artifacts) {
+        expect(impactable.has(artifact), `${artifact} is not an impactable artifact`).toBe(true);
+      }
+    }
+  });
+
+  it('names every artifact for a removed entity, ips excepted', () => {
+    const { active, draft } = fork(
+      ips([
+        entity('User', [field('email')]),
+        entity('Order', [field('total', { type: 'integer' })]),
+      ]),
+    );
+    draft.entities = draft.entities.filter((e) => e.name !== 'Order');
+
+    expect(analyseDraftImpact(active, edited(draft)).artifacts).toEqual([...IMPACTED_ARTIFACTS]);
   });
 });
 

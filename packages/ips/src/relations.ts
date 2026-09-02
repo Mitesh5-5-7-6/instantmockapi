@@ -197,8 +197,28 @@ export function materializeRelations(ips: InternalProjectSchema): InternalProjec
     const fields = [...(entity.fields ?? [])];
     const has = (name: string): boolean => fields.some((field) => field.name === name);
 
-    if (!has(entity.identity.field)) {
+    const identityAt = fields.findIndex((field) => field.name === entity.identity.field);
+    if (identityAt === -1) {
       fields.unshift(identityField(entity.identity));
+    } else {
+      // Reconcile, do not just tolerate.
+      //
+      // `identity.style` and the identity field's `type` are two statements about
+      // the same thing, and everything downstream assumes they agree: the mock
+      // data generator seeds from the style, while the hosted runtime validates
+      // against the field's type. Left to disagree, a project switched from UUIDs
+      // to counting numbers seeds `1, 2, 3` into a runtime that rejects anything
+      // that is not a UUID.
+      //
+      // Only reachable now that definitions are editable — before Phase 1 the
+      // style was fixed at creation. The correction shows up in the diff as an
+      // ordinary FIELD_TYPE_CHANGED on the identity field, so the user sees it and
+      // confirms it rather than discovering it in production.
+      const existing = fields[identityAt]!;
+      const expected = identityFieldType(entity.identity);
+      if (existing.type !== expected) {
+        fields[identityAt] = { ...existing, type: expected };
+      }
     }
 
     for (const relation of entity.relations) {

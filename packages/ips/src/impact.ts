@@ -162,12 +162,12 @@ const RISK_RANK: Record<ChangeRisk, number> = {
  *
  * All of them: every generator emits something per entity, so a removal changes
  * every output. Listed rather than inferred because the removed entity has no
- * graph node whose edges could be followed.
+ * graph node whose edges could be followed. `ips` is excluded for the same
+ * reason it is absent from `GENERATOR_INPUTS` — the API owns it.
  */
 const REMOVAL_ARTIFACTS: readonly ArtifactType[] = [
   'export_zip',
   'hosted_api',
-  'ips',
   'json_schema',
   'mock_data',
   'openapi',

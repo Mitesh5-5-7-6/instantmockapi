@@ -185,8 +185,11 @@ export function edgeFacet(edge: DependencyEdge): 'request' | 'response' | 'query
  * disagreeing with its own documentation. Phase 1's affected-API answer does not
  * consult this map at all.
  */
-const GENERATOR_INPUTS: Record<ArtifactType, 'schema' | 'surface'> = {
-  ips: 'schema',
+const GENERATOR_INPUTS: Partial<Record<ArtifactType, 'schema' | 'surface'>> = {
+  // `ips` is deliberately absent. It is a registry entry for the stored schema
+  // itself — the API writes it, no worker produces it, and `REGENERATABLE_ARTIFACTS`
+  // rejects it from any client request. Listing it as something a change causes to
+  // be *regenerated* is a category error: it is the input, not an output.
   json_schema: 'schema',
   zod: 'schema',
   yup: 'schema',
@@ -198,8 +201,7 @@ const GENERATOR_INPUTS: Record<ArtifactType, 'schema' | 'surface'> = {
   export_zip: 'surface',
 };
 
-const GENERATOR_LABELS: Record<ArtifactType, string> = {
-  ips: 'IPS',
+const GENERATOR_LABELS: Partial<Record<ArtifactType, string>> = {
   json_schema: 'JSON Schema',
   zod: 'Zod',
   yup: 'Yup',
@@ -215,6 +217,11 @@ const GENERATOR_ENTRIES = Object.entries(GENERATOR_INPUTS) as [
   ArtifactType,
   'schema' | 'surface',
 ][];
+
+/** Every artifact a change can cause to be regenerated. */
+export const IMPACTED_ARTIFACTS: readonly ArtifactType[] = GENERATOR_ENTRIES.map(
+  ([artifact]) => artifact,
+).sort();
 
 // ---------------------------------------------------------------------------
 // Field flattening
@@ -318,7 +325,7 @@ export function buildDependencyGraph(
     builder.node({
       id: generatorNode(artifact),
       kind: 'generator',
-      label: GENERATOR_LABELS[artifact],
+      label: GENERATOR_LABELS[artifact] ?? artifact,
       parent: PROJECT_NODE,
       artifact,
     });
