@@ -9,7 +9,8 @@
  */
 
 import { useParams } from 'next/navigation';
-import { Card, EmptyState, SchemaTree, type SchemaTreeEntity } from '@instantmockapi/ui';
+import Link from 'next/link';
+import { Card, EmptyState, Icon, SchemaTree, type SchemaTreeEntity } from '@instantmockapi/ui';
 import { useProject } from '../../../../lib/hooks';
 
 export default function SchemaPage() {
@@ -26,16 +27,26 @@ export default function SchemaPage() {
 
   return (
     <Card className="ui-stack">
-      <div>
-        <h2>Schema</h2>
-        <p className="ui-meta">
-          The internal project schema every generator reads. Entities become API resources; fields
-          define each record&rsquo;s shape.
-        </p>
+      <div className="ui-row ui-row--between">
+        <div>
+          <h2>Schema</h2>
+          <p className="ui-meta">
+            The internal project schema every generator reads. Entities become API resources; fields
+            define each record&rsquo;s shape.
+          </p>
+        </div>
+        {/*
+          The only way into the editor. Editing opens a draft; this view stays a
+          read-only picture of what is actually generated, so the two can be held
+          side by side while a change is being reasoned about.
+        */}
+        <Link className="ui-btn" href={`/projects/${id}/edit`}>
+          Edit data model <Icon name="chevron-right" size={16} />
+        </Link>
       </div>
       {entities.length === 0 ? (
         <EmptyState title="No entities yet">
-          Parse an input source or use the builder to define this project&rsquo;s data model.
+          Parse an input source or use the editor to define this project&rsquo;s data model.
         </EmptyState>
       ) : (
         <SchemaTree entities={entities} />

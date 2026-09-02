@@ -23,12 +23,15 @@ import type {
   ArtifactContent,
   DashboardView,
   ArtifactView,
+  DraftAnalysis,
+  DraftCommitResult,
   AuthAcknowledgement,
   AuthSession,
   GenerationConfig,
   JobView,
   ListEnvelope,
   ProjectDetail,
+  ProjectDraft,
   ProjectLogsEnvelope,
   ProjectLogsParams,
   ProjectMetricsView,
@@ -637,4 +640,110 @@ export function downloadTextFile(filename: string, content: string): void {
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+// ---------------------------------------------------------------------------
+// Drafts (Phase 1)
+// ---------------------------------------------------------------------------
+
+/**
+ * The editable copy of a project's definition.
+ *
+ * `retry: false` because a 404 here is the ordinary "no draft is open" answer,
+ * not a transient failure — retrying it three times just delays the empty state.
+ */
+export function useDraft(projectId: string | null) {
+  return useQuery({
+    queryKey: ['draft', projectId],
+    queryFn: () => apiFetch<ProjectDraft>(`/v1/projects/${projectId}/draft`),
+    enabled: projectId !== null,
+    retry: false,
+  });
+}
+
+/**
+ * The review-changes analysis: diff, affected APIs, and what to regenerate.
+ *
+ * Fetched from the server rather than computed here, deliberately. The
+ * dependency graph and impact rules live in `@instantmockapi/ips`; a second
+ * implementation in the browser would eventually disagree with the one the
+ * commit endpoint enforces, and the user would be shown two different answers to
+ * the same question.
+ */
+export function useDraftImpact(projectId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ['draft-impact', projectId],
+    queryFn: () => apiFetch<DraftAnalysis>(`/v1/projects/${projectId}/draft/impact`),
+    enabled: projectId !== null && enabled,
+    retry: false,
+  });
+}
+
+/** Everything a draft mutation has to refresh. */
+function useInvalidateDraft(projectId: string) {
+  const queryClient = useQueryClient();
+  return async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['draft', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['draft-impact', projectId] }),
+      // The project itself carries currentVersion and status, both of which a
+      // commit moves.
+      queryClient.invalidateQueries({ queryKey: ['project', projectId] }),
+    ]);
+  };
+}
+
+/** Fork a draft, or resume the one already open. */
+export function useOpenDraft(projectId: string) {
+  const invalidate = useInvalidateDraft(projectId);
+  return useMutation({
+    mutationFn: () => apiFetch<ProjectDraft>(`/v1/projects/${projectId}/draft`, { method: 'POST' }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useSaveDraft(projectId: string) {
+  const invalidate = useInvalidateDraft(projectId);
+  return useMutation({
+    mutationFn: (input: { ips?: unknown; generationConfig?: unknown }) =>
+      apiFetch<ProjectDraft>(`/v1/projects/${projectId}/draft`, { method: 'PATCH', body: input }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useDiscardDraft(projectId: string) {
+  const invalidate = useInvalidateDraft(projectId);
+  return useMutation({
+    mutationFn: () => apiFetch<void>(`/v1/projects/${projectId}/draft`, { method: 'DELETE' }),
+    onSuccess: invalidate,
+  });
+}
+
+/** Discard a stale draft and fork a fresh one from the current definition. */
+export function useReforkDraft(projectId: string) {
+  const invalidate = useInvalidateDraft(projectId);
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<ProjectDraft>(`/v1/projects/${projectId}/draft/refork`, { method: 'POST' }),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * Commit the draft: it becomes the new definition, pending regeneration.
+ *
+ * `acknowledgeImpact` must be the `digest` from the analysis the user actually
+ * saw. Passing a stale one is refused — which is the point, since a boolean flag
+ * could be replayed across an edit the user never reviewed.
+ */
+export function useCommitDraft(projectId: string) {
+  const invalidate = useInvalidateDraft(projectId);
+  return useMutation({
+    mutationFn: (input: { acknowledgeImpact?: string; artifacts?: string[]; note?: string }) =>
+      apiFetch<DraftCommitResult>(`/v1/projects/${projectId}/draft/commit`, {
+        method: 'POST',
+        body: input,
+      }),
+    onSuccess: invalidate,
+  });
 }

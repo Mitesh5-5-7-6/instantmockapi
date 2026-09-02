@@ -294,3 +294,102 @@ export interface ProjectLogsEnvelope {
   data: ApiLogRow[];
   meta: { page: number; limit: number; total: number; retentionDays: number };
 }
+
+// ---------------------------------------------------------------------------
+// Drafts and impact analysis (Phase 1)
+// ---------------------------------------------------------------------------
+
+/**
+ * The five risk levels, worst last.
+ *
+ * Mirrors `ChangeRisk` in `@instantmockapi/ips`. Restated rather than imported
+ * because `apps/web` may not import server packages, and the union is small
+ * enough that a drift would fail the first render rather than lurk.
+ */
+export type ChangeRisk = 'SAFE' | 'INFO' | 'WARNING' | 'ROUTING' | 'BREAKING';
+
+/** Which part of an endpoint a dependency lands on. */
+export type ImpactFacet = 'request' | 'response' | 'query' | 'path';
+
+export interface DraftChange {
+  kind: string;
+  risk: ChangeRisk;
+  aspect: 'read' | 'write' | 'both' | 'routing' | 'none';
+  entity: string | null;
+  field: string | null;
+  path: string | null;
+  before: unknown;
+  after: unknown;
+  summary: string;
+}
+
+/** One answer to "why is this API affected?". */
+export interface ImpactReason {
+  /** Readable source, e.g. `User.email`. */
+  source: string;
+  /** Precise pointer, e.g. `request.body.email`. */
+  reason: string;
+  facet: ImpactFacet;
+  /** The change kind that caused it. */
+  change: string;
+  summary: string;
+}
+
+export interface AffectedEndpoint {
+  method: string;
+  path: string;
+  entity: string | null;
+  risk: ChangeRisk;
+  reasons: ImpactReason[];
+}
+
+export interface UnaffectedEndpoint {
+  method: string;
+  path: string;
+  entity: string | null;
+}
+
+export interface DraftAnalysis {
+  stale: boolean;
+  baseVersion: number;
+  currentVersion: number;
+  /** Worst risk across every change; null when nothing changed. */
+  risk: ChangeRisk | null;
+  summary: Record<ChangeRisk, number>;
+  /** A commit must echo `digest` back as `acknowledgeImpact` when this is true. */
+  requiresAcknowledgement: boolean;
+  /**
+   * True when a change could not be matched to a graph node.
+   *
+   * The not-affected list must not be presented as a guarantee when this is set.
+   */
+  incomplete: boolean;
+  /** Bind an acknowledgement to this exact draft state. */
+  digest: string;
+  changes: DraftChange[];
+  affected: AffectedEndpoint[];
+  unaffected: UnaffectedEndpoint[];
+  artifacts: string[];
+}
+
+export interface ProjectDraft {
+  projectId: string;
+  baseVersion: number;
+  currentVersion: number;
+  stale: boolean;
+  ips: unknown;
+  generationConfig: GenerationConfig;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DraftCommitResult {
+  committed: boolean;
+  /** The new definition version, or null when nothing changed. */
+  version: number | null;
+  /** What the runtime is still serving. A commit never moves this. */
+  publishedVersion: number;
+  job: { jobId: string; status: string } | null;
+  reason?: 'no-changes';
+  analysis: DraftAnalysis;
+}

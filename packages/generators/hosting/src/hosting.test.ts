@@ -5,6 +5,7 @@ import {
   materializeRelations,
   type QueryFeatures,
 } from '@instantmockapi/ips';
+import { entitySlug } from '@instantmockapi/shared';
 import { goldenFixtureIPS } from '../../__tests__/golden-fixture.js';
 import { goldenRelationsIPS } from '../../../ips/__tests__/golden-relations-fixture.js';
 import { generateHostingConfig, type HostedEntityConfig, type HostingConfig } from './hosting.js';
@@ -262,5 +263,28 @@ describe('generateHostingConfig — query layer (doc 19 §Phase 4)', () => {
       generationConfig: { ...goldenRelationsIPS.generationConfig, features: ALL_QUERY_FEATURES },
     };
     expect(generateHostingConfig(ips)).toEqual(generateHostingConfig(ips));
+  });
+});
+
+describe('routing identity comes from the shared slug', () => {
+  /**
+   * The runtime is the consumer whose disagreement hurts most: if it routes on a
+   * segment the OpenAPI document does not advertise, the docs point at a 404 and
+   * nothing in the stack reports a problem. Asserting against `entitySlug` rather
+   * than a literal means a change to the policy fails here instead of shipping.
+   */
+  it('routes every entity on entitySlug(entity)', () => {
+    const emitted = generateHostingConfig(goldenFixtureIPS);
+    const parsed = JSON.parse(emitted['hosting.config.json'] ?? '{}') as HostingConfig;
+    const entities = parsed.entities;
+    expect(entities.length).toBeGreaterThan(0);
+
+    for (const hosted of entities) {
+      const source = goldenFixtureIPS.entities.find(
+        (candidate) => candidate.name.toLowerCase() === hosted.path,
+      );
+      expect(source, `no source entity for hosted path ${hosted.path}`).toBeDefined();
+      expect(hosted.path).toBe(entitySlug(source!));
+    }
   });
 });

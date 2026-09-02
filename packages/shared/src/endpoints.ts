@@ -23,6 +23,7 @@
  */
 
 import type { HttpMethod } from './constants.js';
+import { entitySlug } from './routing.js';
 
 /**
  * Shape of the stored IPS these functions read.
@@ -63,7 +64,8 @@ export interface EndpointRow {
   entity?: string;
 }
 
-const ENTITY_PATH = (entity: IpsEntity): string => entity.name.toLowerCase();
+// Routing identity comes from one place; see `routing.ts` for why.
+const ENTITY_PATH = entitySlug;
 
 function identityField(entity: IpsEntity): string {
   return entity.identity?.field ?? 'id';

@@ -4,7 +4,7 @@
  * from Worker D's example records.
  */
 
-import { HTTP_METHODS, type HttpMethod } from '@instantmockapi/shared';
+import { entitySlug, HTTP_METHODS, type HttpMethod } from '@instantmockapi/shared';
 import {
   entityQueryFields,
   queryFeatures,
@@ -103,7 +103,7 @@ export function generatePostmanCollection(
 
   const folders: PostmanNode[] = [];
   for (const entity of ips.entities) {
-    const entityPath = entity.name.toLowerCase();
+    const entityPath = entitySlug(entity);
     const example = firstExample(examples, entity.name);
     const requests: PostmanNode[] = [];
 

@@ -26,7 +26,17 @@ export interface BuilderValidation {
 }
 
 export interface BuilderField {
+  /** UI-local key for React. Regenerated freely; never sent to the API. */
   id: string;
+  /**
+   * The stable `fld_` id, when this field came from an existing definition.
+   *
+   * Distinct from `id` on purpose. `id` identifies a row in this form; this
+   * identifies a field in the project's history. Losing it makes a rename look
+   * like a delete plus an unrelated create, which would tell the user their whole
+   * entity was rebuilt.
+   */
+  schemaId?: string;
   name: string;
   type: string;
   required: boolean;
@@ -39,6 +49,8 @@ export interface BuilderField {
 /** How two entities relate, as authored in the wizard. */
 export interface BuilderRelation {
   id: string;
+  /** The stable `rel_` id, when editing an existing definition. */
+  schemaId?: string;
   /** Property name on the expanded record, e.g. `classroom`. */
   name: string;
   kind: 'belongsTo' | 'hasOne' | 'hasMany' | 'manyToMany';
@@ -50,6 +62,8 @@ export interface BuilderRelation {
 
 export interface BuilderEntity {
   id: string;
+  /** The stable `ent_` id, when editing an existing definition. */
+  schemaId?: string;
   name: string;
   fields: BuilderField[];
   relations: BuilderRelation[];

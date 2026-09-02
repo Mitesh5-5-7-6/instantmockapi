@@ -11,7 +11,7 @@
  * runtime performs lookups rather than derivations (doc 19 §Phase A/B).
  */
 
-import { HTTP_METHODS, type HttpMethod } from '@instantmockapi/shared';
+import { entitySlug, HTTP_METHODS, type HttpMethod } from '@instantmockapi/shared';
 import {
   completeRelation,
   entityIdentity,
@@ -113,8 +113,10 @@ function fieldRule(field: Field): HostedFieldRule {
   };
 }
 
+// The route the runtime matches on. Shared with the docs generators so a
+// hosted URL and its documentation can never drift apart.
 function entityPath(name: string): string {
-  return name.toLowerCase();
+  return entitySlug({ name });
 }
 
 /**
