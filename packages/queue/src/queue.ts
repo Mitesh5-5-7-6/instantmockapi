@@ -94,6 +94,17 @@ export function generateIdempotencyKey(
   version: number,
   config: GenerationConfig,
   requestedArtifacts?: string[],
+  /**
+   * The schema being generated from.
+   *
+   * Optional for compatibility with existing callers, but supplying it is what
+   * makes the key describe the actual INPUTS rather than just their address. A
+   * restore rewrites `ips`, and a Phase 1 draft commit will too; without the
+   * schema in the hash, two generations of genuinely different definitions can
+   * collide and the second silently dedupes into the first — generating the
+   * wrong thing and reporting success.
+   */
+  schema?: unknown,
 ): string {
   const hash = crypto.createHash('sha256');
   hash.update(projectId);
@@ -101,6 +112,12 @@ export function generateIdempotencyKey(
   hash.update(JSON.stringify(config));
   if (requestedArtifacts && requestedArtifacts.length > 0) {
     hash.update(JSON.stringify([...requestedArtifacts].sort()));
+  }
+  if (schema !== undefined) {
+    // Not sorted or canonicalised: an IPS is authored in a meaningful order
+    // (field order shows up in generated types), so a reordering IS a different
+    // input and should produce a different key.
+    hash.update(JSON.stringify(schema));
   }
   return hash.digest('hex');
 }

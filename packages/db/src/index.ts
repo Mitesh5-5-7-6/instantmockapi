@@ -33,3 +33,19 @@ export {
   hardDeleteProject,
   ensurePublicIdentity,
 } from './queries.js';
+
+/**
+ * The editing/deployment boundary (Phase 1).
+ *
+ * `publishedVersionOf` is the ONLY correct way to ask which version the hosted
+ * runtime should serve — reading `project.publishedVersion` raw resolves
+ * `undefined` for every project written before the split.
+ */
+export {
+  publishedVersionOf,
+  pinPublishedVersion,
+  mustAdvanceBeforeGenerating,
+  wouldDisturbLiveRuntime,
+  hasPendingRegeneration,
+  type VersionedProject,
+} from './published-version.js';

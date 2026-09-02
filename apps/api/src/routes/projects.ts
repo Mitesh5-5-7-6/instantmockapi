@@ -26,6 +26,7 @@ import {
   Project,
   ensurePublicIdentity,
   hardDeleteProject,
+  pinPublishedVersion,
   type IProject,
 } from '@instantmockapi/db';
 import { materializeRelations, validateIPS } from '@instantmockapi/ips';
@@ -420,6 +421,11 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
       // Editing the schema or config stamps a new version (doc 08 §4: jobs
       // generated after an edit carry a fresh version + idempotency key)
       if (schemaChanged) {
+        // Freeze what the runtime is serving BEFORE the definition moves. At this
+        // instant `currentVersion` IS the served version, and `publishedVersionOf`
+        // falls back to it — so without this pin the fallback would follow the bump
+        // and 404 the live URL, which is the bug this whole split removes.
+        pinPublishedVersion(project);
         project.currentVersion += 1;
         project.ips = {
           ...project.ips,

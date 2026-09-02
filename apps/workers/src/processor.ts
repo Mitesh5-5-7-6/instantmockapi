@@ -387,6 +387,13 @@ async function settle(
   }
 
   if (outcomes.get('hosted_api') === 'completed') {
+    // THE publish. This is the only place `publishedVersion` ever advances, and
+    // it is deliberately inside the `hosted_api === completed` branch: the
+    // artifact the runtime resolves has just been written at this version, so
+    // pointing the runtime here cannot 404. A failed or partial job that did
+    // not produce a hosted_api leaves the previous published version serving,
+    // which is the invariant — the live API is never taken down by a failure.
+    project.publishedVersion = payload.version;
     // Mint addressing first so the URL is the pretty form; a project that somehow
     // has none falls back to the legacy id form, which still resolves.
     await ensurePublicIdentity(project);

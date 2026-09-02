@@ -7,6 +7,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { AppError, unwrap, type ArtifactType } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
+import { mustAdvanceBeforeGenerating, pinPublishedVersion } from '@instantmockapi/db';
 import { loadOwnedProject } from '../access.js';
 import {
   REGENERATABLE_ARTIFACTS,
@@ -33,6 +34,19 @@ export const generationRoutes: FastifyPluginAsync<GenerationRouteOptions> = asyn
     const cfg = unwrap(
       validateGenerationConfig(body.generationConfig ?? project.generationConfig, config),
     );
+
+    // OUTAGE FIX. This route used to generate into the version it was already
+    // serving, and `createOrResetArtifactRecord` resets those rows to `pending`
+    // with a null storageRef — so the hosted URL 404ed for the whole job, on
+    // every ordinary regenerate, with no edit involved. Advancing first leaves
+    // the live version serving until the new one is promoted on success.
+    //
+    // Conditional, not unconditional: a brand-new project has published nothing
+    // and must generate INTO v1, or v1 never gets artifacts at all.
+    if (mustAdvanceBeforeGenerating(project)) {
+      project.currentVersion += 1;
+      project.ips = { ...project.ips, version: project.currentVersion };
+    }
 
     const job = await createGenerationJob({
       project,
@@ -75,6 +89,10 @@ export const generationRoutes: FastifyPluginAsync<GenerationRouteOptions> = asyn
       // fresh snapshot (doc 07 §5). A partial regen resets ONLY the requested
       // artifacts at the new version; untouched artifacts keep their prior-
       // version rows, producing per-artifact version skew ("Zod v3, Mock Data v2").
+      // Always a fresh version. Beyond keeping the live artifacts intact, the
+      // bump is what makes the note snapshot land — the Version upsert is a
+      // `$setOnInsert` — and what stops two rapid identical calls deduping.
+      pinPublishedVersion(project);
       project.currentVersion += 1;
       project.ips = { ...project.ips, version: project.currentVersion };
 
@@ -105,6 +123,10 @@ export const generationRoutes: FastifyPluginAsync<GenerationRouteOptions> = asyn
 
     // Re-run from the kept shell: a fresh version so artifacts and the
     // idempotency key never collide with the expired generation (doc 07 §6)
+    // Always a fresh version. Beyond keeping the live artifacts intact, the
+    // bump is what makes the note snapshot land — the Version upsert is a
+    // `$setOnInsert` — and what stops two rapid identical calls deduping.
+    pinPublishedVersion(project);
     project.currentVersion += 1;
     project.ips = { ...project.ips, version: project.currentVersion };
 

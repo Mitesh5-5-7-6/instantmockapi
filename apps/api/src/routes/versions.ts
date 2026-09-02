@@ -4,7 +4,7 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import type { EnvConfig } from '@instantmockapi/config';
-import { Version } from '@instantmockapi/db';
+import { Version, pinPublishedVersion } from '@instantmockapi/db';
 import { materializeRelations } from '@instantmockapi/ips';
 import { loadOwnedProject, notFound } from '../access.js';
 import { listEnvelope, parsePagination } from '../pagination.js';
@@ -78,6 +78,11 @@ export const versionRoutes: FastifyPluginAsync<VersionRouteOptions> = async (app
       // append-only and never rewound. No snapshot/artifacts are written here;
       // they materialize when the user generates (the artifact grid still shows
       // the last-generated set until then, at their older versions).
+      // Freeze what the runtime is serving BEFORE the definition moves. At this
+      // instant `currentVersion` IS the served version, and `publishedVersionOf`
+      // falls back to it — so without this pin the fallback would follow the bump
+      // and 404 the live URL, which is the bug this whole split removes.
+      pinPublishedVersion(project);
       project.currentVersion += 1;
       project.generationConfig = snapshot.configSnapshot;
       // Materialize on the way out so a snapshot taken before relations existed

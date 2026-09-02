@@ -8,6 +8,7 @@
  */
 
 import {
+  AppError,
   logger,
   unwrap,
   type ArtifactType,
@@ -15,7 +16,7 @@ import {
   type PlanTier,
 } from '@instantmockapi/shared';
 import { canCreateJob } from '@instantmockapi/config';
-import { Job, Project, Version, type IProject } from '@instantmockapi/db';
+import { Job, Project, Version, wouldDisturbLiveRuntime, type IProject } from '@instantmockapi/db';
 import { createOrResetArtifactRecord } from '@instantmockapi/registry';
 import { enqueueGenerationJob, generateIdempotencyKey } from '@instantmockapi/queue';
 import type { GenerationConfig } from '@instantmockapi/ips';
@@ -38,13 +39,33 @@ export async function createGenerationJob(params: {
 }): Promise<CreatedJobRef> {
   const { project, type, requestedArtifacts, generationConfig, plan, note } = params;
   const projectId = String(project._id);
-  const version = project.currentVersion;
 
+  // The version is chosen by the caller. The routes that regenerate advance it
+  // unconditionally; the full-generate route advances it only when the current
+  // version is the live one (see `mustAdvanceBeforeGenerating`).
+  const version = project.currentVersion;
+  // Belt and braces. The routes make this unreachable; if it
+  // ever fires, a caller has bypassed it and we would rather fail loudly than
+  // reset a live artifact to pending and serve an unexplainable 404.
+  if (wouldDisturbLiveRuntime(project, version)) {
+    throw new AppError({
+      code: 'INTERNAL_ERROR',
+      message: `Refusing to generate into v${version}, which is currently serving traffic`,
+    });
+  }
+
+  // Keyed on projectId + version + config + artifacts + the SCHEMA. Without the
+  // schema, two generations of different definitions at the same version hash
+  // identically and the second dedupes into the first — generating the wrong
+  // thing. The version is now always fresh for a live project, so that can't
+  // arise from a plain regenerate, but a restore rewrites `ips` and a draft
+  // commit will too, and neither should be able to alias.
   const idempotencyKey = generateIdempotencyKey(
     projectId,
     version,
     generationConfig,
     requestedArtifacts,
+    project.ips,
   );
 
   // Idempotency dedupe: identical rapid calls return the existing job (doc 08 §4)

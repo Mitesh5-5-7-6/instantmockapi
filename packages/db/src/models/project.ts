@@ -25,7 +25,41 @@ export interface IProject extends Document {
     raw: string;
   };
   ips: InternalProjectSchema;
+  /**
+   * Version of the **definition** — the schema the user edits.
+   *
+   * Advances whenever the definition changes: a schema PATCH, a restore, a
+   * regenerate. It is mirrored into `ips.version` and flows into artifact
+   * *content* (the OpenAPI `info.version`, the Postman collection name, the
+   * export README), so it describes what was authored, not what is live.
+   *
+   * **The hosted runtime must never resolve on this field.** Doing so is what
+   * coupled editing to deployment: advancing it pointed the live URL at a
+   * version whose artifacts did not exist yet, so a schema edit — or a
+   * restore, which writes no artifacts at all — 404ed the API with no job
+   * queued and no way to recover. `publishedVersion` is what the runtime reads.
+   */
   currentVersion: number;
+  /**
+   * Version the hosted runtime **serves**.
+   *
+   * Advances only when a generation completes with a `hosted_api` artifact
+   * actually written (see `settleJob` in apps/workers/src/processor.ts). Nothing
+   * an editor does can move it, which is the whole invariant:
+   *
+   * > The runtime must only ever resolve a version whose artifact set is
+   * > complete. Until publishing succeeds, the existing runtime is untouched.
+   *
+   * Absent on every project written before the split. Read it as
+   * `publishedVersion ?? currentVersion`, which reproduces the old behaviour
+   * exactly — so healthy projects serve what they served before, and a project
+   * already skewed by the old bug stays skewed until its next generation heals
+   * it. No backfill can invent artifacts that were never generated.
+   *
+   * `definitionVersion > publishedVersion` is the "pending regeneration"
+   * signal the platform never had a way to express.
+   */
+  publishedVersion?: number | null;
   generationConfig: GenerationConfig;
   hosted: {
     url: string | null;
@@ -93,6 +127,14 @@ const projectSchema = new Schema<IProject>(
       type: Number,
       required: true,
       default: 1,
+    },
+    publishedVersion: {
+      type: Number,
+      // Null, not 1: a brand-new project has generated nothing, so there is no
+      // published version yet. Defaulting to 1 would claim the runtime is
+      // serving a version whose artifacts do not exist — the exact confusion
+      // this field exists to remove.
+      default: null,
     },
     generationConfig: {
       type: Schema.Types.Mixed, // GenerationConfig structure
