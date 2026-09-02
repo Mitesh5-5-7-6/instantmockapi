@@ -259,47 +259,53 @@ export function applyBuilderToIps(stored: IpsLike, entities: readonly BuilderEnt
   const storedEntities = Array.isArray(stored.entities) ? stored.entities : [];
   const entityIndex = indexById(storedEntities);
 
-  const merged = entities.map((entity) => {
-    const previous = entity.schemaId ? entityIndex.get(entity.schemaId) : undefined;
-    const storedFields = Array.isArray(previous?.fields) ? previous.fields : [];
-    const fieldIndex = indexById(storedFields);
+  // Nameless entities are dropped, exactly as nameless fields are below. A
+  // freshly added card is a half-typed thought, and `validateIPS` answers
+  // "Entity name is required" — so without this, clicking "Add entity" and then
+  // Save is a 422 for having clicked a button.
+  const merged = entities
+    .filter((entity) => entity.name.trim() !== '')
+    .map((entity) => {
+      const previous = entity.schemaId ? entityIndex.get(entity.schemaId) : undefined;
+      const storedFields = Array.isArray(previous?.fields) ? previous.fields : [];
+      const fieldIndex = indexById(storedFields);
 
-    const authored = entity.fields
-      .filter((field) => field.name !== '')
-      .map((field) =>
-        mergeField(field, field.schemaId ? fieldIndex.get(field.schemaId) : undefined),
-      );
+      const authored = entity.fields
+        .filter((field) => field.name !== '')
+        .map((field) =>
+          mergeField(field, field.schemaId ? fieldIndex.get(field.schemaId) : undefined),
+        );
 
-    // Derived fields, in the order `materializeRelations` produces them: identity
-    // first, foreign keys last. Placed deterministically so repeated saves do not
-    // churn the generated type field order.
-    const derived = storedFields.filter(isDerivedField);
-    const identity = derived.filter((field) => field.meta?.['identity'] === true);
-    const references = derived.filter((field) => field.meta?.['identity'] !== true);
+      // Derived fields, in the order `materializeRelations` produces them: identity
+      // first, foreign keys last. Placed deterministically so repeated saves do not
+      // churn the generated type field order.
+      const derived = storedFields.filter(isDerivedField);
+      const identity = derived.filter((field) => field.meta?.['identity'] === true);
+      const references = derived.filter((field) => field.meta?.['identity'] !== true);
 
-    return {
-      ...(previous ?? {}),
-      ...(entity.schemaId !== undefined ? { id: entity.schemaId } : {}),
-      name: entity.name,
-      identity: {
-        field: previous?.identity?.field ?? 'id',
-        style: entity.identityStyle,
-      },
-      fields: [...identity, ...authored, ...references],
-      relations: entity.relations
-        .filter((relation) => relation.name !== '' && relation.target !== '')
-        .map((relation) =>
-          mergeRelation(
-            relation,
-            relation.schemaId
-              ? indexById(Array.isArray(previous?.relations) ? previous.relations : []).get(
-                  relation.schemaId,
-                )
-              : undefined,
+      return {
+        ...(previous ?? {}),
+        ...(entity.schemaId !== undefined ? { id: entity.schemaId } : {}),
+        name: entity.name,
+        identity: {
+          field: previous?.identity?.field ?? 'id',
+          style: entity.identityStyle,
+        },
+        fields: [...identity, ...authored, ...references],
+        relations: entity.relations
+          .filter((relation) => relation.name !== '' && relation.target !== '')
+          .map((relation) =>
+            mergeRelation(
+              relation,
+              relation.schemaId
+                ? indexById(Array.isArray(previous?.relations) ? previous.relations : []).get(
+                    relation.schemaId,
+                  )
+                : undefined,
+            ),
           ),
-        ),
-    };
-  });
+      };
+    });
 
   return { ...stored, entities: merged };
 }
@@ -328,4 +334,76 @@ function canonical(value: unknown): string {
 /** Does the form differ meaningfully from what it was loaded with? */
 export function isDirty(stored: IpsLike, entities: readonly BuilderEntity[]): boolean {
   return canonical(applyBuilderToIps(stored, entities)) !== canonical(stored);
+}
+
+/** What the editor lets an author do, per project kind. */
+export interface EditorCapabilities {
+  /** What one top-level item is called to the author. */
+  noun: 'entity' | 'endpoint';
+  /** Whether the relationship editor is offered at all. */
+  showRelations: boolean;
+}
+
+/**
+ * A **Single API** project is a set of independent endpoints, not a relational
+ * model.
+ *
+ * `endpointsToEntities` in `single-api.ts` hardcodes `relations: []`, and
+ * `SingleEndpoint` has no relations field — so the creation flow cannot produce a
+ * single project with relations. Nothing on the server enforces it: such a
+ * project would generate and host perfectly well. That is precisely why the
+ * editor must not offer relations. The only way to create one would be by
+ * editing, and the result would be a project whose shape contradicts its own
+ * kind, with no wizard able to reproduce it.
+ *
+ * Adding a top-level item is a different matter and stays available for both
+ * kinds. For a single project, adding an "entity" *is* adding an endpoint — the
+ * same thing its wizard does with a second endpoint row, and it hosts at
+ * `/p/{sng_…}/{slug}/{endpoint}` exactly as the first one does.
+ */
+export function editorCapabilities(kind: 'project' | 'single' | undefined): EditorCapabilities {
+  return kind === 'single'
+    ? { noun: 'endpoint', showRelations: false }
+    : // Anything unrecognised, including an absent kind on a document written
+      // before kinds existed, gets the relational editor. It is the superset, so
+      // the failure mode is an offered control rather than a hidden one.
+      { noun: 'entity', showRelations: true };
+}
+
+/**
+ * Problems the form can name before the server does.
+ *
+ * These are the two `validateIPS` rules an author trips by ordinary editing, and
+ * a readable line beside the Save button beats a 422 with a JSON path. Nameless
+ * entities and fields are absent on purpose — those are dropped rather than
+ * reported, because a half-typed row is not a mistake.
+ *
+ * Relation problems are NOT here: `validateRelations` already owns those and the
+ * editor renders them per card.
+ */
+export function draftProblems(entities: readonly BuilderEntity[]): string[] {
+  const problems: string[] = [];
+  const named = entities.filter((entity) => entity.name.trim() !== '');
+
+  if (named.length === 0) {
+    problems.push('Add at least one named entity.');
+  }
+  for (const entity of named) {
+    if (entity.fields.every((field) => field.name.trim() === '')) {
+      problems.push(`${entity.name} needs at least one named field.`);
+    }
+  }
+
+  // Duplicate names would collide on the hosted route, since the path segment is
+  // the lowercased name. `validateIPS` rejects it; naming it here is friendlier.
+  const seen = new Set<string>();
+  for (const entity of named) {
+    const key = entity.name.trim().toLowerCase();
+    if (seen.has(key)) {
+      problems.push(`Two entities are both called ${entity.name}.`);
+    }
+    seen.add(key);
+  }
+
+  return problems;
 }

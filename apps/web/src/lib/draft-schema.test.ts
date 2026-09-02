@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 
 import {
   applyBuilderToIps,
+  draftProblems,
+  editorCapabilities,
   ipsToBuilder,
   isDerivedField,
   isDirty,
@@ -391,5 +393,133 @@ describe('isDirty', () => {
       children: [],
     });
     expect(isDirty(stored, entities)).toBe(false);
+  });
+});
+
+describe('editorCapabilities', () => {
+  it('treats a relational project as the default', () => {
+    expect(editorCapabilities('project')).toEqual({ noun: 'entity', showRelations: true });
+  });
+
+  /**
+   * The rule a user asked about: can you add an entity to a Single API project?
+   *
+   * Yes — for a single project that is adding an endpoint, which is what its own
+   * wizard does. What you cannot do is relate them: `endpointsToEntities`
+   * hardcodes `relations: []`, so a single project with relations is a shape no
+   * creation flow can produce.
+   */
+  it('calls them endpoints and hides relations for a Single API', () => {
+    expect(editorCapabilities('single')).toEqual({ noun: 'endpoint', showRelations: false });
+  });
+
+  /**
+   * `kind` is optional on documents written before kinds existed, and the API
+   * defaults it to 'project'. Falling back to the relational editor keeps the
+   * failure mode "a control is offered" rather than "a control is missing" —
+   * the second would make existing relations uneditable.
+   */
+  it('falls back to the relational editor for an unknown kind', () => {
+    expect(editorCapabilities(undefined).showRelations).toBe(true);
+    expect(editorCapabilities('nonsense' as 'project').showRelations).toBe(true);
+  });
+});
+
+describe('a half-typed entity', () => {
+  const blankEntity = () => ({
+    id: 'ui-new',
+    name: '',
+    fields: [
+      {
+        id: 'ui-f',
+        name: 'name',
+        type: 'string',
+        required: true,
+        default: '',
+        validation: {},
+        children: [],
+      },
+    ],
+    relations: [],
+    identityStyle: 'int' as const,
+    generate: true,
+  });
+
+  /**
+   * What a user actually does: click "Add entity", look at the blank card, then
+   * hit Save. `validateIPS` answers "Entity name is required", so sending the
+   * blank card turns a button press into a 422. Nameless fields were already
+   * dropped; entities were not, which was simply an inconsistency.
+   */
+  it('is dropped rather than sent', () => {
+    const stored = storedIps();
+    const entities = [...ipsToBuilder(stored), blankEntity()];
+
+    const result = applyBuilderToIps(stored, entities);
+    expect(result.entities).toHaveLength(1);
+    expect(result.entities![0]!.name).toBe('User');
+  });
+
+  it('does not count as an unsaved change', () => {
+    const stored = storedIps();
+    expect(isDirty(stored, [...ipsToBuilder(stored), blankEntity()])).toBe(false);
+  });
+
+  it('is not reported as a problem, because it is not a mistake', () => {
+    const stored = storedIps();
+    expect(draftProblems([...ipsToBuilder(stored), blankEntity()])).toEqual([]);
+  });
+
+  it('still merges the entities that do have names', () => {
+    const stored = storedIps();
+    const entities = [...ipsToBuilder(stored), blankEntity()];
+    entities[1]!.name = 'Order';
+
+    const result = applyBuilderToIps(stored, entities);
+    expect(result.entities!.map((e) => e.name)).toEqual(['User', 'Order']);
+  });
+});
+
+describe('draftProblems', () => {
+  it('is silent for a definition straight off the server', () => {
+    expect(draftProblems(ipsToBuilder(storedIps()))).toEqual([]);
+  });
+
+  /** `validateIPS`: "Entity 'X' must have at least one field". */
+  it('names an entity whose fields were all deleted', () => {
+    const entities = ipsToBuilder(storedIps());
+    entities[0]!.fields = [];
+    expect(draftProblems(entities)).toEqual(['User needs at least one named field.']);
+  });
+
+  it('treats an entity with only blank field rows as having none', () => {
+    const entities = ipsToBuilder(storedIps());
+    entities[0]!.fields = [
+      {
+        id: 'ui-x',
+        name: '  ',
+        type: 'string',
+        required: false,
+        default: '',
+        validation: {},
+        children: [],
+      },
+    ];
+    expect(draftProblems(entities)).toEqual(['User needs at least one named field.']);
+  });
+
+  /** `validateIPS`: projects must have at least one entity. */
+  it('names an empty definition', () => {
+    expect(draftProblems([])).toEqual(['Add at least one named entity.']);
+  });
+
+  /**
+   * Two entities with the same name collide on the hosted route — the path
+   * segment is the lowercased name, so `User` and `user` are one URL.
+   */
+  it('catches a duplicate name, including a case-only difference', () => {
+    const entities = ipsToBuilder(storedIps());
+    entities.push({ ...entities[0]!, id: 'ui-dupe', name: 'user' });
+    expect(draftProblems(entities)).toEqual(['Two entities are both called user.']);
   });
 });

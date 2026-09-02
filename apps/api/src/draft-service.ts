@@ -152,16 +152,33 @@ export async function openDraft(
     return { draft: existing, created: false };
   }
 
-  const draft = await ProjectDraft.create({
-    projectId: project._id,
-    // Deep-copied through JSON so the draft cannot share structure with the live
-    // document — a shared nested object would let an edit mutate the active
-    // definition in place, which is the one thing this whole model prevents.
-    ips: JSON.parse(JSON.stringify(project.ips)) as InternalProjectSchema,
-    generationConfig: JSON.parse(JSON.stringify(project.generationConfig)) as GenerationConfig,
-    baseVersion: project.currentVersion,
-  });
-  return { draft, created: true };
+  try {
+    const draft = await ProjectDraft.create({
+      projectId: project._id,
+      // Deep-copied through JSON so the draft cannot share structure with the live
+      // document — a shared nested object would let an edit mutate the active
+      // definition in place, which is the one thing this whole model prevents.
+      ips: JSON.parse(JSON.stringify(project.ips)) as InternalProjectSchema,
+      generationConfig: JSON.parse(JSON.stringify(project.generationConfig)) as GenerationConfig,
+      baseVersion: project.currentVersion,
+    });
+    return { draft, created: true };
+  } catch (error) {
+    // Race on the unique index: two POSTs arrived between the findOne above and
+    // this insert, and the other one won. Return its draft rather than a 500 —
+    // "fork or resume" is meant to be idempotent, and it has to stay so under
+    // concurrency, not merely when the calls are politely sequential. React's
+    // development double-invoke makes this a first-load certainty, not a corner
+    // case. Same shape as the idempotency-key race in `generation-service.ts`.
+    if ((error as { code?: number }).code !== 11000) {
+      throw error;
+    }
+    const winner = await ProjectDraft.findOne({ projectId: project._id });
+    if (winner === null) {
+      throw error;
+    }
+    return { draft: winner, created: false };
+  }
 }
 
 /** Load the open draft, or throw NOT_FOUND. */
