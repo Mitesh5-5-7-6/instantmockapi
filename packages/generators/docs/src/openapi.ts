@@ -6,7 +6,7 @@
  * the live API always agree.
  */
 
-import { HTTP_METHODS, hostedUrl, type HttpMethod } from '@instantmockapi/shared';
+import { entitySlug, HTTP_METHODS, hostedUrl, type HttpMethod } from '@instantmockapi/shared';
 import {
   FILTER_OPERATORS,
   entityQueryFields,
@@ -219,7 +219,7 @@ export function generateOpenAPI(
     }
     schemas[entity.name] = schema;
 
-    const path = `/${entity.name.toLowerCase()}`;
+    const path = `/${entitySlug(entity)}`;
     const itemPath = `${path}/{recordId}`;
     const example = firstExample(examples, entity.name);
     const listExample = exampleList(examples, entity.name);

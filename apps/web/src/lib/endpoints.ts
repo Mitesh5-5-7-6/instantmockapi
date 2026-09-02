@@ -23,6 +23,7 @@ export {
   entityEndpoints,
   projectEndpoints,
   countEndpoints,
+  entitySlug,
   exampleBody,
   exampleQuery,
   buildSnippet,

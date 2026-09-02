@@ -51,7 +51,12 @@
  */
 
 import type { ArtifactType, HttpMethod } from '@instantmockapi/shared';
-import { entityEndpoints, projectEndpoints, type EndpointRow } from '@instantmockapi/shared';
+import {
+  entityEndpoints,
+  entitySlug,
+  projectEndpoints,
+  type EndpointRow,
+} from '@instantmockapi/shared';
 
 import { entityQueryFields, resolveQueryFeatures } from './query.js';
 import type { Entity, Field, GenerationConfig, InternalProjectSchema, Relation } from './types.js';
@@ -383,11 +388,11 @@ function buildEntity(
     });
     endpointIds.set(row, id);
 
-    // The entity name IS the path segment (`ENTITY_PATH = name.toLowerCase()`),
+    // The entity name IS the path segment (`entitySlug` in `shared/routing.ts`),
     // so renaming the entity moves every one of its endpoints. That is this
     // edge, and it is why `ENTITY_RENAMED` is ROUTING rather than BREAKING: the
     // endpoint still works, at a different URL.
-    builder.edge(entityId, id, 'routing', `path./${entity.name.toLowerCase()}`);
+    builder.edge(entityId, id, 'routing', `path./${entitySlug(entity)}`);
 
     // Whole-shape edges, at entity granularity.
     //

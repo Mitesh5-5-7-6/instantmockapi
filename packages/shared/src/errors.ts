@@ -38,6 +38,16 @@ export type ErrorCode =
   | 'EMAIL_SEND_FAILED'
   | 'FORBIDDEN'
   | 'CONFLICT'
+  /**
+   * The draft was forked from a version the project has since moved past.
+   *
+   * Its own code rather than a bare CONFLICT because the client can do something
+   * specific with it: the response carries `baseVersion` and `currentVersion`,
+   * so a screen can say which version the edits were based on and offer to
+   * re-fork. Silently merging instead would apply an edit reasoned about against
+   * a definition that no longer exists.
+   */
+  | 'STALE_DRAFT'
   | 'RATE_LIMIT_EXCEEDED'
   | 'PLAN_LIMIT_EXCEEDED'
   | 'DEPTH_LIMIT_EXCEEDED'
@@ -101,6 +111,9 @@ function errorCodeToStatus(code: ErrorCode): number {
     EMAIL_SEND_FAILED: 502,
     FORBIDDEN: 403,
     CONFLICT: 409,
+    // 409, like CONFLICT: the request was well-formed and authorised, and the
+    // only problem is that the world moved underneath it.
+    STALE_DRAFT: 409,
     RATE_LIMIT_EXCEEDED: 429,
     PLAN_LIMIT_EXCEEDED: 403,
     DEPTH_LIMIT_EXCEEDED: 422,

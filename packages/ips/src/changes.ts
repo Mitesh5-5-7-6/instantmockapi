@@ -636,7 +636,7 @@ export function diffSchemas(
         entityName: entity.name,
         kind: 'ENTITY_RENAMED',
         // The hosted route is derived from the entity name
-        // (`ENTITY_PATH = name.toLowerCase()`), so a rename MOVES every endpoint
+        // (`entitySlug` in `shared/routing.ts`), so a rename MOVES every endpoint
         // for this entity. Callers holding the old URL get a 404. Stable ids keep
         // the dependency graph intact; they do not keep the URL intact.
         risk: 'ROUTING',

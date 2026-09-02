@@ -7,7 +7,7 @@
  * against an endpoint that no longer exists.
  */
 
-import { countEndpoints, entityEndpoints, type IpsEntity } from './endpoints';
+import { countEndpoints, entityEndpoints, entitySlug, type IpsEntity } from './endpoints';
 import { formatCompact, type ChartPoint } from './area-chart';
 import type { ApiLogShape, EndpointUsage, ProjectMetricsView } from './api-types';
 
@@ -187,7 +187,9 @@ export function toEndpointRows(
   for (const entity of entities) {
     for (const row of entityEndpoints(entity, methods)) {
       paths.set(
-        `${row.method}|${entity.name.toLowerCase()}|${shapeOfTarget(row.target)}`,
+        // `ApiLog.entity` stores the hosted route segment, so the join key must
+        // be the same function the runtime routed with — not a second lowercase.
+        `${row.method}|${entitySlug(entity)}|${shapeOfTarget(row.target)}`,
         row.path,
       );
     }

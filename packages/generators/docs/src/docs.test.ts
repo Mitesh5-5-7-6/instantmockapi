@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { entitySlug } from '@instantmockapi/shared';
 import { goldenFixtureIPS } from '../../__tests__/golden-fixture.js';
 import { goldenRelationsIPS } from '../../../ips/__tests__/golden-relations-fixture.js';
 import {
@@ -314,5 +315,28 @@ describe('entity descriptions (doc 19 §Phase 7)', () => {
       generatePostmanCollection(goldenFixtureIPS)['postman_collection.json'] ?? '{}',
     );
     expect(collection.item[0]).not.toHaveProperty('description');
+  });
+});
+
+describe('routing identity comes from the shared slug', () => {
+  /** Same contract as the runtime asserts — see `shared/routing.ts`. */
+  it('builds every OpenAPI path from entitySlug(entity)', () => {
+    const doc = JSON.parse(generateOpenAPI(goldenFixtureIPS, examples)['openapi.json'] ?? '{}');
+    const paths = Object.keys(doc.paths as Record<string, unknown>);
+
+    for (const entity of goldenFixtureIPS.entities) {
+      expect(paths).toContain(`/${entitySlug(entity)}`);
+    }
+  });
+
+  it('builds every Postman URL from entitySlug(entity)', () => {
+    const collection = JSON.parse(
+      generatePostmanCollection(goldenFixtureIPS, examples)['postman_collection.json'] ?? '{}',
+    );
+    const serialised = JSON.stringify(collection);
+
+    for (const entity of goldenFixtureIPS.entities) {
+      expect(serialised).toContain(`/${entitySlug(entity)}`);
+    }
   });
 });

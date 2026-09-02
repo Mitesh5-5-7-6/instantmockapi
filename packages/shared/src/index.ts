@@ -65,6 +65,8 @@ export {
   endpointUrl,
 } from './endpoints.js';
 
+export { entitySlug, type RoutableEntity } from './routing.js';
+
 /**
  * Runtime readiness and the promotion policy (Phase 1).
  *
