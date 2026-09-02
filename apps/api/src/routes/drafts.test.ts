@@ -621,3 +621,78 @@ describe('access control', () => {
     expect(await ProjectDraft.countDocuments({ projectId })).toBe(0);
   });
 });
+
+describe('concurrent forks', () => {
+  /**
+   * `openDraft` reads then inserts, and the unique index on `projectId` makes the
+   * loser of that race throw E11000. "Fork or resume" has to be idempotent under
+   * concurrency, not just when the calls are politely sequential — React's
+   * development double-invoke fires two POSTs on the editor's very first render,
+   * so this is a first-load certainty rather than a corner case.
+   */
+  it('return one draft, not a 500', async () => {
+    const results = await Promise.all([post(draftUrl()), post(draftUrl()), post(draftUrl())]);
+
+    for (const res of results) {
+      expect([200, 201], `unexpected ${res.statusCode}: ${res.body}`).toContain(res.statusCode);
+    }
+    expect(await ProjectDraft.countDocuments({ projectId })).toBe(1);
+    // Exactly one of them created it; the others resumed.
+    expect(results.filter((res) => res.statusCode === 201)).toHaveLength(1);
+  });
+});
+
+describe('the editor’s request sequence', () => {
+  /**
+   * A user watching the network panel saw two 404s after every commit and
+   * reasonably asked what was broken. Nothing was, on the server: commit deletes
+   * the draft, so `GET /draft` and `GET /draft/impact` correctly answer 404. The
+   * client was calling `invalidateQueries` on both, which refetches — and
+   * refetching a resource you have just deleted is a guaranteed 404.
+   *
+   * Fixed in the client (`useForgetDraft` removes those queries instead). This
+   * pins the server side of the contract the fix relies on: after a commit, both
+   * really are gone, so a refetch really would fail. If either of these ever
+   * starts answering 200, the client is silently holding a dead draft.
+   */
+  it('has no draft and no impact left after a commit', async () => {
+    await post(draftUrl());
+    await patch(draftUrl(), { ips: await riskyIps() });
+    const committed = await post(`${draftUrl()}/commit`, {
+      acknowledgeImpact: await currentDigest(),
+    });
+    expect(committed.statusCode).toBe(202);
+
+    expect((await get(draftUrl())).statusCode).toBe(404);
+    expect((await get(`${draftUrl()}/impact`)).statusCode).toBe(404);
+  });
+
+  it('has no draft and no impact left after a discard', async () => {
+    await post(draftUrl());
+    await app.inject({ method: 'DELETE', url: draftUrl(), headers: authHeader(token) });
+
+    expect((await get(draftUrl())).statusCode).toBe(404);
+    expect((await get(`${draftUrl()}/impact`)).statusCode).toBe(404);
+  });
+
+  /**
+   * The loader is `POST /draft`, not `GET`, so opening the editor is one request
+   * that cannot fail with "no draft is open". That only holds while POST stays
+   * idempotent — this is the property the client now depends on.
+   */
+  it('answers POST /draft with the same draft however many times it is called', async () => {
+    const first = await post(draftUrl());
+    expect(first.statusCode).toBe(201);
+
+    await patch(draftUrl(), { ips: await riskyIps() });
+    const digest = await currentDigest();
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const again = await post(draftUrl());
+      expect(again.statusCode).toBe(200);
+      // Idempotent in the sense that matters: the edit is still there.
+      expect(await currentDigest()).toBe(digest);
+    }
+    expect(await ProjectDraft.countDocuments({ projectId })).toBe(1);
+  });
+});

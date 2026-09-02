@@ -1,8 +1,21 @@
 'use client';
 
 /**
- * One entity in the Design Data Model step: its name, identity style, fields,
- * and relationships.
+ * One entity: its name, identity style, fields, and — for relational projects —
+ * its relationships.
+ *
+ * ## Why the relationship section is optional
+ *
+ * A **Single API** project is a set of independent endpoints, not a relational
+ * model. `endpointsToEntities` in `single-api.ts` hardcodes `relations: []` and
+ * `SingleEndpoint` has no relations field at all, so the creation flow cannot
+ * produce one. Nothing on the server enforces that — a single project *with*
+ * relations would generate and host perfectly well — which is exactly why the
+ * editor must not offer it: the only way to get one is by editing, and the result
+ * would be a project whose shape contradicts its own kind.
+ *
+ * Defaults to shown, so the relational wizard and the Demo API keep their
+ * existing behaviour untouched.
  */
 
 import { Button, Card, Field, Input, Select } from '@instantmockapi/ui';
@@ -18,6 +31,8 @@ export function EntityCard({
   removable,
   onChange,
   onRemove,
+  showRelations = true,
+  noun = 'entity',
 }: {
   entity: BuilderEntity;
   targets: string[];
@@ -25,11 +40,21 @@ export function EntityCard({
   removable: boolean;
   onChange: (next: BuilderEntity) => void;
   onRemove: () => void;
+  /** Relational projects only. See the note above. */
+  showRelations?: boolean;
+  /**
+   * What one of these is called to the author.
+   *
+   * A Single API project calls them endpoints — that is the word its own wizard
+   * uses, and "entity" would make the editor read as a different feature from the
+   * one that created the project.
+   */
+  noun?: 'entity' | 'endpoint';
 }) {
   return (
     <Card className="ui-stack">
       <div className="ui-row ui-row--between" style={{ alignItems: 'flex-end' }}>
-        <Field label="Entity name">
+        <Field label={noun === 'endpoint' ? 'Endpoint name' : 'Entity name'}>
           <Input
             value={entity.name}
             placeholder="Student"
@@ -56,7 +81,7 @@ export function EntityCard({
         <div style={{ flex: 1 }} />
         {removable ? (
           <Button variant="ghost" size="sm" onClick={onRemove}>
-            Remove entity
+            Remove {noun}
           </Button>
         ) : null}
       </div>
@@ -93,13 +118,16 @@ export function EntityCard({
         </Button>
       </div>
 
-      <hr style={{ border: 0, borderTop: '1px solid var(--border)', width: '100%' }} />
-
-      <p className="ui-meta">
-        Relationships describe how this entity connects to another one. The selected kind controls
-        cardinality; the delete rule controls what happens to related records.
-      </p>
-      <RelationEditor entity={entity} targets={targets} issues={issues} onChange={onChange} />
+      {showRelations && (
+        <>
+          <hr style={{ border: 0, borderTop: '1px solid var(--border)', width: '100%' }} />
+          <p className="ui-meta">
+            Relationships describe how this entity connects to another one. The selected kind
+            controls cardinality; the delete rule controls what happens to related records.
+          </p>
+          <RelationEditor entity={entity} targets={targets} issues={issues} onChange={onChange} />
+        </>
+      )}
     </Card>
   );
 }

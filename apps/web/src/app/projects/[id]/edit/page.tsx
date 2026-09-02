@@ -36,6 +36,8 @@ import { newEntity, type BuilderEntity } from '../../../../lib/builder';
 import { validateRelations } from '../../../../lib/relations';
 import {
   applyBuilderToIps,
+  draftProblems,
+  editorCapabilities,
   ipsToBuilder,
   isDirty,
   type IpsLike,
@@ -45,7 +47,6 @@ import {
   useDiscardDraft,
   useDraft,
   useDraftImpact,
-  useOpenDraft,
   useProject,
   useReforkDraft,
   useSaveDraft,
@@ -63,7 +64,6 @@ export default function EditProjectPage() {
 
   const project = useProject(id);
   const draft = useDraft(id);
-  const openDraft = useOpenDraft(id);
   const saveDraft = useSaveDraft(id);
   const discardDraft = useDiscardDraft(id);
   const reforkDraft = useReforkDraft(id);
@@ -83,25 +83,6 @@ export default function EditProjectPage() {
   // Impact is only fetched on the review stage. Recomputing it on every
   // keystroke would be a request per character for an answer nobody is reading.
   const impact = useDraftImpact(id, stage === 'review');
-
-  /**
-   * Fork a draft when the page is opened without one.
-   *
-   * A 404 from `/draft` is the ordinary "nothing open" answer, not a failure, so
-   * it is the trigger rather than an error to report. Guarded on `isPending` so a
-   * slow POST is not fired twice.
-   */
-  const draftMissing = draft.isError && (draft.error as ApiError | undefined)?.status === 404;
-  const forkPending = openDraft.isPending || openDraft.isSuccess;
-  useEffect(() => {
-    if (draftMissing && !forkPending) {
-      openDraft.mutate();
-    }
-    // `openDraft` is intentionally absent from the deps: react-query rebuilds
-    // the mutation object on every render, so depending on it would re-run this
-    // effect continuously. The two booleans are the whole of what the condition
-    // reads, so they are the whole of what should retrigger it.
-  }, [draftMissing, forkPending]);
 
   /**
    * Load the server's draft into the form whenever the stored draft changes.
@@ -130,11 +111,26 @@ export default function EditProjectPage() {
     // every save is the correct behaviour rather than a bug.
   }, [loadedAt]);
 
+  // What this project's kind allows. See `editorCapabilities` for why a Single
+  // API gets no relationship editor.
+  const { noun, showRelations } = editorCapabilities(project.data?.kind);
+  const single = !showRelations;
+
   const targets = useMemo(
     () => (entities ?? []).map((entity) => entity.name).filter((name) => name !== ''),
     [entities],
   );
-  const issues = useMemo(() => validateRelations(entities ?? []), [entities]);
+  // Relations cannot be authored on a single project, so their validation has
+  // nothing to check — and an issue raised before the kind was known would
+  // disable the Review button with no way to clear it.
+  // Problems the form can name itself, so an ordinary editing slip is a line of
+  // prose beside the button rather than a 422 with a JSON path.
+  const problems = useMemo(() => draftProblems(entities ?? []), [entities]);
+
+  const issues = useMemo(
+    () => (single ? [] : validateRelations(entities ?? [])),
+    [entities, single],
+  );
   const dirty = base !== null && entities !== null && isDirty(base, entities);
 
   const updateEntity = (entityId: string, next: BuilderEntity): void => {
@@ -181,11 +177,11 @@ export default function EditProjectPage() {
     router.push(`/projects/${id}/schema`);
   };
 
-  if (project.isLoading || (draft.isLoading && !draft.isError)) {
+  if (project.isLoading || draft.isLoading) {
     return <div className="ui-skeleton" />;
   }
 
-  if (draft.isError && (draft.error as ApiError | undefined)?.status !== 404) {
+  if (draft.isError) {
     return (
       <Card className="ui-stack">
         <h2>Could not open the editor</h2>
@@ -271,14 +267,15 @@ export default function EditProjectPage() {
         rename a key that the next save recreates would be a trap.
       */}
       <Note>
-        The identity field and relation foreign keys are managed for you and are not shown here. Add
-        or change a relation and they follow.
+        {single
+          ? 'Each endpoint is independent and gets its own URL. The record id field is managed for you and is not shown here.'
+          : 'The identity field and relation foreign keys are managed for you and are not shown here. Add or change a relation and they follow.'}
       </Note>
 
       {entities.length === 0 ? (
-        <EmptyState title="No entities">
+        <EmptyState title={single ? 'No endpoints' : 'No entities'}>
           <p className="ui-meta">This project has nothing to edit yet.</p>
-          <Button onClick={() => setEntities([newEntity('')])}>Add the first entity</Button>
+          <Button onClick={() => setEntities([newEntity('')])}>Add the first {noun}</Button>
         </EmptyState>
       ) : (
         entities.map((entity) => (
@@ -288,6 +285,8 @@ export default function EditProjectPage() {
             targets={targets}
             issues={issues.filter((issue) => issue.entityId === entity.id)}
             removable={entities.length > 1}
+            showRelations={showRelations}
+            noun={noun}
             onChange={(next) => updateEntity(entity.id, next)}
             onRemove={() =>
               setEntities((current) => (current ?? []).filter((item) => item.id !== entity.id))
@@ -301,9 +300,19 @@ export default function EditProjectPage() {
           variant="secondary"
           onClick={() => setEntities((current) => [...(current ?? []), newEntity('')])}
         >
-          <Icon name="plus" size={16} /> Add entity
+          <Icon name="plus" size={16} /> Add {noun}
         </Button>
       </div>
+
+      {problems.length > 0 && (
+        <Note variant="warning">
+          <span className="ui-stack ui-stack--tight">
+            {problems.map((problem) => (
+              <span key={problem}>{problem}</span>
+            ))}
+          </span>
+        </Note>
+      )}
 
       {saveDraft.isError && <p className="ui-error">{message(saveDraft.error)}</p>}
       {discardDraft.isError && <p className="ui-error">{message(discardDraft.error)}</p>}
@@ -312,6 +321,7 @@ export default function EditProjectPage() {
         <span className="ui-meta">
           {dirty ? 'Unsaved changes' : 'Saved'}
           {issues.length > 0 ? ` · ${issues.length} relation issue(s)` : ''}
+          {problems.length > 0 ? ` · ${problems.length} problem(s)` : ''}
         </span>
         <span className="ui-row">
           <button
@@ -325,12 +335,15 @@ export default function EditProjectPage() {
           <button
             type="button"
             className="ui-btn"
-            disabled={!dirty || saveDraft.isPending}
+            disabled={!dirty || saveDraft.isPending || problems.length > 0}
             onClick={() => void save()}
           >
             {saveDraft.isPending ? 'Saving…' : 'Save draft'}
           </button>
-          <Button disabled={saveDraft.isPending || issues.length > 0} onClick={() => void review()}>
+          <Button
+            disabled={saveDraft.isPending || issues.length > 0 || problems.length > 0}
+            onClick={() => void review()}
+          >
             Review changes <Icon name="chevron-right" size={16} />
           </Button>
         </span>

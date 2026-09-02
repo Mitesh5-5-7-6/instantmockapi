@@ -646,17 +646,29 @@ export function downloadTextFile(filename: string, content: string): void {
 // Drafts (Phase 1)
 // ---------------------------------------------------------------------------
 
+const draftKey = (projectId: string | null) => ['draft', projectId];
+const impactKey = (projectId: string | null) => ['draft-impact', projectId];
+
 /**
- * The editable copy of a project's definition.
+ * The editable copy of a project's definition, forking one if none is open.
  *
- * `retry: false` because a 404 here is the ordinary "no draft is open" answer,
- * not a transient failure — retrying it three times just delays the empty state.
+ * **Loaded with POST, deliberately.** `POST /draft` is idempotent by contract —
+ * it forks when nothing is open and returns the existing draft otherwise — so it
+ * is a read with an upsert, and using it as the loader means opening the editor
+ * is exactly one request that cannot fail with "no draft is open".
+ *
+ * The alternative was `GET /draft`, then watching for its 404 to trigger a POST.
+ * That worked, but it made a 404 part of the ordinary happy path, which is both
+ * two requests and a thing that makes anyone reading a network panel believe
+ * something is broken.
  */
 export function useDraft(projectId: string | null) {
   return useQuery({
-    queryKey: ['draft', projectId],
-    queryFn: () => apiFetch<ProjectDraft>(`/v1/projects/${projectId}/draft`),
+    queryKey: draftKey(projectId),
+    queryFn: () => apiFetch<ProjectDraft>(`/v1/projects/${projectId}/draft`, { method: 'POST' }),
     enabled: projectId !== null,
+    // A failure here is a real failure — a missing project, a revoked session —
+    // not the "nothing open yet" case the GET had to tolerate.
     retry: false,
   });
 }
@@ -672,60 +684,74 @@ export function useDraft(projectId: string | null) {
  */
 export function useDraftImpact(projectId: string | null, enabled = true) {
   return useQuery({
-    queryKey: ['draft-impact', projectId],
+    queryKey: impactKey(projectId),
     queryFn: () => apiFetch<DraftAnalysis>(`/v1/projects/${projectId}/draft/impact`),
     enabled: projectId !== null && enabled,
     retry: false,
   });
 }
 
-/** Everything a draft mutation has to refresh. */
-function useInvalidateDraft(projectId: string) {
+/**
+ * Adopt a draft the server just returned, rather than refetching it.
+ *
+ * Every mutation that leaves a draft in place answers with the draft itself, so
+ * invalidating would throw that response away and ask for it again. The impact
+ * analysis genuinely has to be recomputed, so that one is invalidated.
+ */
+function useAdoptDraft(projectId: string) {
   const queryClient = useQueryClient();
-  return async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['draft', projectId] }),
-      queryClient.invalidateQueries({ queryKey: ['draft-impact', projectId] }),
-      // The project itself carries currentVersion and status, both of which a
-      // commit moves.
-      queryClient.invalidateQueries({ queryKey: ['project', projectId] }),
-    ]);
+  return async (draft: ProjectDraft) => {
+    queryClient.setQueryData(draftKey(projectId), draft);
+    await queryClient.invalidateQueries({ queryKey: impactKey(projectId) });
   };
 }
 
-/** Fork a draft, or resume the one already open. */
-export function useOpenDraft(projectId: string) {
-  const invalidate = useInvalidateDraft(projectId);
-  return useMutation({
-    mutationFn: () => apiFetch<ProjectDraft>(`/v1/projects/${projectId}/draft`, { method: 'POST' }),
-    onSuccess: invalidate,
-  });
+/**
+ * Forget a draft that no longer exists.
+ *
+ * Used after commit and discard, both of which delete it. `invalidateQueries`
+ * would be wrong here in a way that is easy to miss and obvious once seen: it
+ * refetches, and refetching a resource you have just deleted is a guaranteed
+ * 404 — two of them, since the impact query is mounted on the review step. The
+ * requests failed correctly and meant nothing, which is the worst kind of error
+ * to leave in a log.
+ *
+ * The project itself is invalidated rather than removed: a commit moves its
+ * `currentVersion` and status, and it very much still exists.
+ */
+function useForgetDraft(projectId: string) {
+  const queryClient = useQueryClient();
+  return async () => {
+    queryClient.removeQueries({ queryKey: draftKey(projectId) });
+    queryClient.removeQueries({ queryKey: impactKey(projectId) });
+    await queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+  };
 }
 
 export function useSaveDraft(projectId: string) {
-  const invalidate = useInvalidateDraft(projectId);
+  const adopt = useAdoptDraft(projectId);
   return useMutation({
     mutationFn: (input: { ips?: unknown; generationConfig?: unknown }) =>
       apiFetch<ProjectDraft>(`/v1/projects/${projectId}/draft`, { method: 'PATCH', body: input }),
-    onSuccess: invalidate,
+    onSuccess: adopt,
   });
 }
 
 export function useDiscardDraft(projectId: string) {
-  const invalidate = useInvalidateDraft(projectId);
+  const forget = useForgetDraft(projectId);
   return useMutation({
     mutationFn: () => apiFetch<void>(`/v1/projects/${projectId}/draft`, { method: 'DELETE' }),
-    onSuccess: invalidate,
+    onSuccess: forget,
   });
 }
 
 /** Discard a stale draft and fork a fresh one from the current definition. */
 export function useReforkDraft(projectId: string) {
-  const invalidate = useInvalidateDraft(projectId);
+  const adopt = useAdoptDraft(projectId);
   return useMutation({
     mutationFn: () =>
       apiFetch<ProjectDraft>(`/v1/projects/${projectId}/draft/refork`, { method: 'POST' }),
-    onSuccess: invalidate,
+    onSuccess: adopt,
   });
 }
 
@@ -737,13 +763,13 @@ export function useReforkDraft(projectId: string) {
  * could be replayed across an edit the user never reviewed.
  */
 export function useCommitDraft(projectId: string) {
-  const invalidate = useInvalidateDraft(projectId);
+  const forget = useForgetDraft(projectId);
   return useMutation({
     mutationFn: (input: { acknowledgeImpact?: string; artifacts?: string[]; note?: string }) =>
       apiFetch<DraftCommitResult>(`/v1/projects/${projectId}/draft/commit`, {
         method: 'POST',
         body: input,
       }),
-    onSuccess: invalidate,
+    onSuccess: forget,
   });
 }
