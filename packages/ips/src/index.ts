@@ -54,3 +54,22 @@ export {
   createIPSSnapshot,
   restoreIPSFromSnapshot,
 } from './versioning.js';
+
+/**
+ * Stable internal identity for schema elements (Phase 1).
+ *
+ * `ensureSchemaIds` is the idempotent backfill: every project generated before
+ * Phase 1 has no ids, and this mints the missing ones without ever replacing one
+ * that exists.
+ */
+export {
+  ID_PREFIX,
+  SCHEMA_ID_PATTERN,
+  collectSchemaIds,
+  duplicateSchemaIds,
+  ensureSchemaIds,
+  isSchemaId,
+  newSchemaId,
+  type BackfillResult,
+  type SchemaElementKind,
+} from './ids.js';

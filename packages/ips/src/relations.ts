@@ -104,6 +104,12 @@ export function completeRelation(
     (owning ? targetIdentity.field : `${camel(source.name)}${pascal(sourceIdentity.field)}`);
 
   return {
+    // Carried explicitly, and first. This function returns a FRESH literal and
+    // runs on every PATCH via `materializeRelations`, so a stable id that is
+    // not copied here is destroyed on the first save — silently breaking every
+    // dependency-graph edge pointing at this relation. Omitted rather than set
+    // to undefined so an id-less relation does not persist an explicit null.
+    ...(relation.id !== undefined ? { id: relation.id } : {}),
     name: relation.name,
     kind: relation.kind,
     target: relation.target,

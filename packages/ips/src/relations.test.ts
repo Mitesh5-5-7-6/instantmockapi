@@ -10,6 +10,7 @@ import {
   materializeRelations,
   topologicalEntityOrder,
 } from './relations.js';
+import { ensureSchemaIds } from './ids.js';
 import type { Entity, Field, InternalProjectSchema, Relation } from './types.js';
 
 function field(name: string, type: Field['type'] = 'string'): Field {
@@ -368,5 +369,113 @@ describe('topologicalEntityOrder', () => {
       ]),
     ).map((e) => e.name);
     expect(names).toEqual(['A']);
+  });
+});
+
+/**
+ * `materializeRelations` runs on EVERY create and every PATCH
+ * (apps/api/src/routes/projects.ts). It rebuilds each relation through
+ * `completeRelation`, which returns a fresh object literal — so anything not
+ * explicitly carried across is destroyed on the first save.
+ *
+ * That makes these the tests that protect Phase 1's stable ids. Without the
+ * spread in `completeRelation`, a relation id would survive exactly until the
+ * user pressed save, and every dependency-graph edge pointing at it would break
+ * silently — no error, no failing test, just a graph that quietly forgot.
+ */
+describe('stable ids survive materialization', () => {
+  it('preserves a relation id through completeRelation', () => {
+    const result = materializeRelations(
+      ips([
+        entity('Student', {
+          relations: [
+            {
+              ...relation({ name: 'classroom', kind: 'belongsTo', target: 'Classroom' }),
+              id: 'rel_0123456789ab',
+            },
+          ],
+        }),
+        entity('Classroom'),
+      ]),
+    );
+
+    expect(result.entities[0]?.relations?.[0]?.id).toBe('rel_0123456789ab');
+  });
+
+  it('survives repeated materialization', () => {
+    // The function is documented as idempotent and is called at several pipeline
+    // stages, so once is not a sufficient test.
+    const start = ips([
+      entity('Student', {
+        relations: [
+          {
+            ...relation({ name: 'classroom', kind: 'belongsTo', target: 'Classroom' }),
+            id: 'rel_aaaaaaaaaaaa',
+          },
+        ],
+      }),
+      entity('Classroom'),
+    ]);
+
+    const twice = materializeRelations(materializeRelations(materializeRelations(start)));
+
+    expect(twice.entities[0]?.relations?.[0]?.id).toBe('rel_aaaaaaaaaaaa');
+  });
+
+  it('preserves entity and field ids too', () => {
+    // These travel by object spread rather than an explicit copy, so they are
+    // less fragile — but they are on the same code path and worth pinning.
+    const start = ips([
+      {
+        ...entity('Student', { fields: [{ ...field('name'), id: 'fld_1111aaaa2222' }] }),
+        id: 'ent_1111aaaa2222',
+      },
+    ]);
+
+    const result = materializeRelations(start);
+
+    expect(result.entities[0]?.id).toBe('ent_1111aaaa2222');
+    // Note the materialized identity field is unshifted BEFORE the author's
+    // fields, so the named field is no longer at index 0.
+    expect(result.entities[0]?.fields.find((f) => f.name === 'name')?.id).toBe('fld_1111aaaa2222');
+  });
+
+  it('omits the id key entirely when the relation has none', () => {
+    // Every relation written before Phase 1 has no id. Emitting `id: undefined`
+    // would persist an explicit null into Mongo and make `ensureSchemaIds`
+    // unable to tell "absent" from "set to nothing".
+    const result = materializeRelations(
+      ips([
+        entity('Student', {
+          relations: [relation({ name: 'classroom', kind: 'belongsTo', target: 'Classroom' })],
+        }),
+        entity('Classroom'),
+      ]),
+    );
+
+    expect(result.entities[0]?.relations?.[0]).not.toHaveProperty('id');
+  });
+
+  it('leaves server-materialized fields without ids, for the backfill to fill', () => {
+    // materializeRelations unshifts an identity field and pushes reference
+    // fields. It deliberately does NOT mint ids for them — `ensureSchemaIds`
+    // runs afterwards and owns that, so there is exactly one minting site.
+    const result = materializeRelations(
+      ips([
+        entity('Student', {
+          relations: [relation({ name: 'classroom', kind: 'belongsTo', target: 'Classroom' })],
+        }),
+        entity('Classroom'),
+      ]),
+    );
+
+    const identity = result.entities[0]?.fields.find((f) => f.meta.identity === true);
+    expect(identity).toBeDefined();
+    expect(identity).not.toHaveProperty('id');
+
+    // ...and the backfill then gives them one.
+    const minted = ensureSchemaIds(result);
+    expect(minted.minted).toBeGreaterThan(0);
+    expect(result.entities[0]?.fields.find((f) => f.meta.identity === true)?.id).toMatch(/^fld_/);
   });
 });
