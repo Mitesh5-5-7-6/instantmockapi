@@ -242,7 +242,6 @@ describe('a realistic edit session', () => {
     expect(report.artifacts).toEqual([
       'export_zip',
       'hosted_api',
-      'ips',
       'json_schema',
       'mock_data',
       'openapi',

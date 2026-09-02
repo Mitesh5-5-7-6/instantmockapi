@@ -436,7 +436,6 @@ describe('generator edges', () => {
 
     expect(targets).toEqual(
       [
-        generatorNode('ips'),
         generatorNode('json_schema'),
         generatorNode('mock_data'),
         generatorNode('typescript'),

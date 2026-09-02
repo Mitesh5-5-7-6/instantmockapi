@@ -39,12 +39,15 @@ import type {
  * it would let a user commit a definition the live API does not implement. The
  * rest are documentation and generated code: valuable, but a failed OpenAPI build
  * must not be able to hold up a working mock API.
+ *
+ * Mirrors `RUNTIME_REQUIRED_ARTIFACTS` in `@instantmockapi/shared`, which is what
+ * the promotion gate actually enforces. `ips` is deliberately not here — it is
+ * API-managed and never appears in an impact report at all.
  */
-const REQUIRED_ARTIFACTS = new Set(['hosted_api', 'ips']);
+const REQUIRED_ARTIFACTS = new Set(['hosted_api']);
 
 const ARTIFACT_LABELS: Record<string, string> = {
   hosted_api: 'Hosted API',
-  ips: 'Project definition',
   openapi: 'OpenAPI',
   postman: 'Postman',
   typescript: 'TypeScript',

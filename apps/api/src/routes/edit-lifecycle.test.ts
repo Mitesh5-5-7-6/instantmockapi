@@ -409,6 +409,76 @@ describe('the full edit lifecycle', () => {
   });
 });
 
+describe('switching an entity from UUIDs to counting numbers', () => {
+  /**
+   * A real user's first edit, and it failed twice.
+   *
+   * 1. The impact report named `ips` among the artifacts to regenerate. The web
+   *    panel echoed the list back to commit, whose schema validates against
+   *    `REGENERATABLE_ARTIFACTS` — which excludes `ips` because the API owns it.
+   *    Every commit from the editor answered 400.
+   * 2. `materializeRelations` only ever *added* a missing identity field, so
+   *    changing `identity.style` left the stored `id` field typed `uuid`. Mock
+   *    data would have seeded `1, 2, 3` into a runtime validating UUIDs.
+   *
+   * This walks the whole thing through the real routes.
+   */
+  it('commits cleanly and retypes the identity field', async () => {
+    await goLive();
+
+    await app.inject({ method: 'POST', url: draftUrl(), headers: authHeader(token) });
+
+    const project = await reload();
+    const clone = JSON.parse(JSON.stringify(project.ips)) as {
+      entities: { identity: { field: string; style: string } }[];
+    };
+    expect(clone.entities[0]!.identity.style).toBe('uuid');
+    clone.entities[0]!.identity.style = 'int';
+
+    const saved = await app.inject({
+      method: 'PATCH',
+      url: draftUrl(),
+      headers: authHeader(token),
+      payload: { ips: clone as unknown as Record<string, unknown> },
+    });
+    expect(saved.statusCode).toBe(200);
+
+    const analysis = (
+      await app.inject({
+        method: 'GET',
+        url: `${draftUrl()}/impact`,
+        headers: authHeader(token),
+      })
+    ).json() as { artifacts: string[]; digest: string; changes: { kind: string }[] };
+
+    // `ips` must not be offered — no client may request it.
+    expect(analysis.artifacts).not.toContain('ips');
+    // The retype is reported, not silent: the user confirms it.
+    expect(analysis.changes.map((c) => c.kind)).toContain('FIELD_TYPE_CHANGED');
+
+    // The exact round trip the editor performs.
+    const committed = await app.inject({
+      method: 'POST',
+      url: `${draftUrl()}/commit`,
+      headers: authHeader(token),
+      payload: { acknowledgeImpact: analysis.digest, artifacts: analysis.artifacts },
+    });
+    expect(committed.statusCode, JSON.stringify(committed.json())).toBe(202);
+
+    const after = await reload();
+    const entity = (
+      after.ips as {
+        entities: { identity: { style: string }; fields: { name: string; type: string }[] }[];
+      }
+    ).entities[0]!;
+    expect(entity.identity.style).toBe('int');
+    // The invariant: the descriptor and the field agree.
+    expect(entity.fields.find((f) => f.name === 'id')?.type).toBe('integer');
+    // And the live runtime is still on v1 throughout.
+    expect(publishedVersionOf(after)).toBe(1);
+  });
+});
+
 describe('a project from before the published/current split', () => {
   /**
    * The ordering trap, and the one case that can still expose it.

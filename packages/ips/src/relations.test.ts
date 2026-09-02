@@ -479,3 +479,165 @@ describe('stable ids survive materialization', () => {
     expect(result.entities[0]?.fields.find((f) => f.meta.identity === true)?.id).toMatch(/^fld_/);
   });
 });
+
+describe('identity field reconciliation', () => {
+  /**
+   * The bug a user hit on the first real edit: switching an entity from UUIDs to
+   * counting numbers changed `identity.style` but left the stored `id` field
+   * typed `uuid`.
+   *
+   * The two are statements about the same thing and everything downstream assumes
+   * they agree — mock data seeds from the style, the hosted runtime validates
+   * against the field type. Disagreeing, the runtime rejects every id it was just
+   * given.
+   */
+  it('retypes an existing identity field when the style changes', () => {
+    const ips = materializeRelations({
+      projectId: 'p1',
+      version: 1,
+      entities: [
+        {
+          name: 'User',
+          identity: { field: 'id', style: 'int' },
+          fields: [
+            {
+              name: 'id',
+              type: 'uuid',
+              required: false,
+              default: null,
+              children: [],
+              validation: {},
+              meta: { identity: true },
+            },
+            {
+              name: 'email',
+              type: 'string',
+              required: true,
+              default: null,
+              children: [],
+              validation: {},
+              meta: {},
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        validators: ['zod'],
+        types: ['typescript'],
+        methods: ['GET'],
+        mockRecords: 5,
+      },
+    } as never);
+
+    const id = ips.entities[0]!.fields.find((field) => field.name === 'id');
+    expect(id?.type).toBe('integer');
+  });
+
+  it('retypes in the other direction too', () => {
+    const ips = materializeRelations({
+      projectId: 'p1',
+      version: 1,
+      entities: [
+        {
+          name: 'User',
+          identity: { field: 'id', style: 'uuid' },
+          fields: [
+            {
+              name: 'id',
+              type: 'integer',
+              required: false,
+              default: null,
+              children: [],
+              validation: {},
+              meta: { identity: true },
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        validators: ['zod'],
+        types: ['typescript'],
+        methods: ['GET'],
+        mockRecords: 5,
+      },
+    } as never);
+
+    expect(ips.entities[0]!.fields[0]!.type).toBe('uuid');
+  });
+
+  /** Everything else about the field survives — this is a retype, not a rebuild. */
+  it('keeps the identity field’s id, position and metadata', () => {
+    const ips = materializeRelations({
+      projectId: 'p1',
+      version: 1,
+      entities: [
+        {
+          name: 'User',
+          identity: { field: 'ref', style: 'int' },
+          fields: [
+            {
+              id: 'fld_keepme',
+              name: 'ref',
+              type: 'uuid',
+              required: false,
+              default: null,
+              children: [],
+              validation: { message: 'custom' },
+              meta: { identity: true, readOnly: true },
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        validators: ['zod'],
+        types: ['typescript'],
+        methods: ['GET'],
+        mockRecords: 5,
+      },
+    } as never);
+
+    expect(ips.entities[0]!.fields[0]).toMatchObject({
+      id: 'fld_keepme',
+      name: 'ref',
+      type: 'integer',
+      validation: { message: 'custom' },
+      meta: { identity: true, readOnly: true },
+    });
+    // No duplicate was unshifted alongside it.
+    expect(ips.entities[0]!.fields).toHaveLength(1);
+  });
+
+  it('leaves an already-consistent identity field untouched', () => {
+    const input = {
+      projectId: 'p1',
+      version: 1,
+      entities: [
+        {
+          name: 'User',
+          identity: { field: 'id', style: 'uuid' },
+          fields: [
+            {
+              name: 'id',
+              type: 'uuid',
+              required: false,
+              default: null,
+              children: [],
+              validation: {},
+              meta: { identity: true },
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        validators: ['zod'],
+        types: ['typescript'],
+        methods: ['GET'],
+        mockRecords: 5,
+      },
+    } as never;
+
+    const once = materializeRelations(input);
+    const twice = materializeRelations(once);
+    expect(twice).toEqual(once);
+  });
+});

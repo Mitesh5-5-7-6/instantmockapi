@@ -453,6 +453,74 @@ describe('POST /draft/commit', () => {
     expect([...job!.requestedArtifacts].sort()).toEqual([...expected.artifacts].sort());
   });
 
+  /**
+   * The exact round trip the web editor performs, and the one no test made.
+   *
+   * A user changed an identity style and got
+   * 400 `body.artifacts.2 must be equal to one of the allowed values` — the
+   * impact report named `ips`, the panel echoed it back, and the route schema
+   * validates against `REGENERATABLE_ARTIFACTS`, which excludes it. Fixed at the
+   * source (`ips` is no longer a generator), but the missing coverage was the
+   * real defect: "enqueues the artifacts the impact report named" never sent them,
+   * and the explicit-selection test only ever passed two hand-picked values.
+   */
+  it('accepts the impact report’s own artifact list verbatim', async () => {
+    await post(draftUrl());
+    await patch(draftUrl(), { ips: await riskyIps() });
+
+    const analysis = (await get(`${draftUrl()}/impact`)).json() as {
+      artifacts: string[];
+      digest: string;
+    };
+    expect(analysis.artifacts.length).toBeGreaterThan(0);
+
+    const res = await post(`${draftUrl()}/commit`, {
+      acknowledgeImpact: analysis.digest,
+      artifacts: analysis.artifacts,
+    });
+    expect(res.statusCode, JSON.stringify(res.json())).toBe(202);
+
+    const job = await Job.findOne({ projectId, version: 2 });
+    expect([...job!.requestedArtifacts].sort()).toEqual([...analysis.artifacts].sort());
+  });
+
+  /** Every attribution path, since each builds its artifact list differently. */
+  it('accepts the artifact list for an entity rename, an add and a config change', async () => {
+    for (const edit of [
+      async () => {
+        const project = await reload();
+        const clone = JSON.parse(JSON.stringify(project.ips)) as { entities: { name: string }[] };
+        clone.entities[0]!.name = 'Renamed';
+        return { ips: clone as unknown as Record<string, unknown> };
+      },
+      async () => ({
+        generationConfig: {
+          validators: ['zod'],
+          types: ['typescript'],
+          methods: ['GET', 'POST'],
+          mockRecords: 12,
+        },
+      }),
+    ]) {
+      await app.inject({ method: 'DELETE', url: draftUrl(), headers: authHeader(token) });
+      await post(draftUrl());
+      await patch(draftUrl(), await edit());
+
+      const analysis = (await get(`${draftUrl()}/impact`)).json() as {
+        artifacts: string[];
+        digest: string;
+      };
+      const res = await post(`${draftUrl()}/commit`, {
+        acknowledgeImpact: analysis.digest,
+        artifacts: analysis.artifacts,
+      });
+      expect(res.statusCode, JSON.stringify(res.json())).toBe(202);
+
+      // Reset for the next iteration: the commit advanced the definition.
+      await app.inject({ method: 'DELETE', url: draftUrl(), headers: authHeader(token) });
+    }
+  });
+
   it('honours an explicit artifact selection from the dialog', async () => {
     await post(draftUrl());
     await patch(draftUrl(), { ips: await editedIps() });

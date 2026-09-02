@@ -103,6 +103,7 @@ export {
   fieldNode,
   generatorNode,
   relationNode,
+  IMPACTED_ARTIFACTS,
   PROJECT_NODE,
   type DependencyEdge,
   type DependencyGraph,
