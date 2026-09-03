@@ -70,7 +70,13 @@ function ProjectCard({ project }: { project: ProjectSummary }) {
         ) : null}
       </div>
       <div className="ui-row">
-        <Button size="sm" onClick={() => router.push(action.href)}>
+        {/*
+          Secondary, not primary. Open / Continue setup / View progress are
+          navigation, and this renders once per card — ten filled green buttons
+          on one screen is what made the theme unreadable. The single primary on
+          this page is "New Project", which actually creates something.
+        */}
+        <Button size="sm" variant="secondary" onClick={() => router.push(action.href)}>
           {action.label}
         </Button>
         <Button
