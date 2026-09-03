@@ -16,13 +16,16 @@ import {
   useRestoreVersion,
   useVersions,
 } from '../../../../lib/hooks';
+import { useAction } from '../../../../lib/use-action';
 import { ActivityRow } from '../../../../components/dashboard/activity-row';
 
 export default function ActivityPage() {
   const { id } = useParams<{ id: string }>();
   const project = useProject(id);
   const versions = useVersions(id);
-  const restore = useRestoreVersion(id);
+  const restore = useAction(useRestoreVersion(id), {
+    success: (_data: unknown, version: number) => `Restored v${version}`,
+  });
   // A generous limit here: this is the screen where the full feed belongs, unlike
   // the Overview card which shows the most recent few.
   const metrics = useProjectMetrics(id, 30, 20);
@@ -79,7 +82,7 @@ export default function ActivityPage() {
                       variant="ghost"
                       size="sm"
                       disabled={restore.isPending || isCurrent}
-                      onClick={() => restore.mutate(version.version)}
+                      onClick={() => void restore.run(version.version)}
                     >
                       {isCurrent ? 'Current' : 'Restore'}
                     </Button>

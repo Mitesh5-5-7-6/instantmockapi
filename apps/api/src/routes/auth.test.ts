@@ -32,6 +32,23 @@ let mailer: CapturingMailer;
 /** Long enough for a few real scrypt hashes at 64MB each. */
 const SLOW = 30_000;
 
+/**
+ * A response body with the correlation id removed.
+ *
+ * The enumeration guards below assert that two answers are indistinguishable.
+ * Every response now carries a `requestId` that is unique per request whatever
+ * the answer, so it defeats a whole-body comparison while carrying no
+ * information about the account — strip it and compare the rest.
+ */
+function withoutRequestId(response: { json: () => { error?: Record<string, unknown> } }): unknown {
+  const body = response.json();
+  if (body.error === undefined) {
+    return body;
+  }
+  const { requestId: _ignored, ...error } = body.error;
+  return { ...body, error };
+}
+
 const PASSWORD = 'correct-horse-battery';
 const OTHER_PASSWORD = 'a-different-long-one';
 
@@ -287,7 +304,11 @@ describe('POST /v1/auth/login', () => {
       // carefully not.
       expect(wrongPassword.statusCode).toBe(401);
       expect(unknownAddress.statusCode).toBe(401);
-      expect(unknownAddress.json()).toEqual(wrongPassword.json());
+      // Compared without the correlation id, which is unique per request by
+      // design and so carries nothing about whether the account exists. The
+      // guarantee being tested is that everything *else* is identical.
+      expect(withoutRequestId(unknownAddress)).toEqual(withoutRequestId(wrongPassword));
+      expect(unknownAddress.json().error.requestId).not.toBe(wrongPassword.json().error.requestId);
     },
     SLOW,
   );
@@ -912,7 +933,7 @@ describe('when email delivery is broken', () => {
       });
 
       expect(existing.statusCode).toBe(fresh.statusCode);
-      expect(existing.json()).toEqual(fresh.json());
+      expect(withoutRequestId(existing)).toEqual(withoutRequestId(fresh));
     },
     SLOW,
   );

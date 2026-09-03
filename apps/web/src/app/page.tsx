@@ -13,7 +13,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Button, EmptyState, Icon } from '@instantmockapi/ui';
+import { Button, ErrorState, Icon } from '@instantmockapi/ui';
+import { normalizeError } from '../lib/errors';
 import { useDashboard, useMe, useProjects, type DashboardDays } from '../lib/hooks';
 import { StatTiles, StatTilesSkeleton } from '../components/dashboard/stat-tiles';
 import { RequestsOverviewCard } from '../components/dashboard/requests-overview-card';
@@ -46,13 +47,17 @@ export default function DashboardPage() {
         </Link>
       </div>
 
+      {/*
+        An ErrorState, not a toast. The page has no data to show, so a message
+        that fades would leave the user looking at an empty screen with nothing
+        to press.
+      */}
       {dashboard.isError ? (
-        <EmptyState title="Couldn't load your dashboard">
-          <p className="ui-error">{dashboard.error.message}</p>
-          <Button variant="secondary" onClick={() => void dashboard.refetch()}>
-            Retry
-          </Button>
-        </EmptyState>
+        <ErrorState
+          title="Couldn't load your dashboard"
+          detail={normalizeError(dashboard.error).title}
+          onRetry={() => void dashboard.refetch()}
+        />
       ) : null}
 
       {dashboard.isLoading ? <StatTilesSkeleton /> : null}

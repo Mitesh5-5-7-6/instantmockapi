@@ -24,7 +24,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Card, Checkbox, MethodBadge, Note, type ApiMethod } from '@instantmockapi/ui';
+import { Card, Checkbox, FormError, MethodBadge, Note, type ApiMethod } from '@instantmockapi/ui';
 import type {
   AffectedEndpoint,
   ChangeRisk,
@@ -290,7 +290,7 @@ export function ReviewChanges({
         )}
       </section>
 
-      {error !== null && <p className="ui-error">{error}</p>}
+      {error !== null && <FormError title={error} />}
 
       <footer className="ui-row ui-row--between">
         {/*

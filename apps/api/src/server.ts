@@ -5,10 +5,13 @@
  * via inject(); index.ts connects the DB and listens.
  */
 
+import { randomBytes } from 'node:crypto';
+
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
+import { REQUEST_ID_PATTERN } from '@instantmockapi/shared';
 import { loadEnvConfig, assertProductionSecrets, type EnvConfig } from '@instantmockapi/config';
 import { authPlugin } from '@instantmockapi/auth';
 import { createStorage, type StorageClient } from '@instantmockapi/storage';
@@ -66,6 +69,41 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
      * single hop the proxy actually appended and ignores anything before it.
      */
     trustProxy: 1,
+    /**
+     * A correlation id per request, echoed to the caller and quoted in the error
+     * envelope so a user reporting "it failed" can hand over something findable.
+     *
+     * Fastify's default is a per-process counter — `req-1`, `req-2` — which
+     * restarts at 1 on every deploy and collides across instances, so two
+     * unrelated failures a week apart can carry the same id. Random hex, in the
+     * same `prefix_lowercasehex` grammar as `prj_`/`sng_`/`ent_`, is unique
+     * enough to search a log for.
+     *
+     * An inbound `x-request-id` is honoured when it looks like an id we minted,
+     * so a request traced through another service keeps one id end to end. It is
+     * validated rather than trusted: an unvalidated header is a log-injection
+     * vector and a way to make two different requests share an id.
+     */
+    genReqId: (request) => {
+      const inbound = request.headers['x-request-id'];
+      if (typeof inbound === 'string' && REQUEST_ID_PATTERN.test(inbound)) {
+        return inbound;
+      }
+      return `req_${randomBytes(5).toString('hex')}`;
+    },
+  });
+
+  /**
+   * Every response carries its id, not only failures.
+   *
+   * A caller debugging a wrong-looking 200 needs the same handle as one
+   * debugging a 500, and a body-only id is unreadable when the body is not ours
+   * — a gateway 502, an HTML error page, a 413 from the proxy. The header is the
+   * one place the id survives all of those.
+   */
+  app.addHook('onSend', (request, reply, payload, done) => {
+    void reply.header('x-request-id', request.id);
+    done(null, payload);
   });
 
   registerErrorHandling(app);

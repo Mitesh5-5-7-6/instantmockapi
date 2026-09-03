@@ -1,7 +1,13 @@
 // @instantmockapi/shared — Logger, errors, result types, constants
 // Shared utilities consumed by every package in the monorepo.
 
-export { AppError, getErrorMessage, type ErrorCode, type ErrorDetail } from './errors.js';
+export {
+  AppError,
+  getErrorMessage,
+  REQUEST_ID_PATTERN,
+  type ErrorCode,
+  type ErrorDetail,
+} from './errors.js';
 export { type Result, type Ok, type Err, ok, err, unwrap } from './result.js';
 export { Logger, logger, type LogLevel } from './logger.js';
 export {

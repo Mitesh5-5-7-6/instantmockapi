@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react';
-import { Button, Icon } from '@instantmockapi/ui';
+import { Button, FormError, Icon } from '@instantmockapi/ui';
 import {
   challengeFor,
   createVerifier,
@@ -80,10 +80,16 @@ export function GoogleButton({
         <Icon name="google" size={16} />
         {starting ? 'Redirecting…' : label}
       </Button>
+      {/*
+        A FormError rather than a toast: this fires before any request is made —
+        the browser refused to start the flow — and the alternative is the email
+        form immediately below it.
+      */}
       {failed ? (
-        <p className="ui-error" role="alert">
-          Could not start Google sign-in in this browser. Use your email address instead.
-        </p>
+        <FormError
+          title="Could not start Google sign-in"
+          detail="This browser blocked the redirect. Use your email address instead."
+        />
       ) : null}
     </>
   );

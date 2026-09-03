@@ -18,6 +18,9 @@ import { Button, Card, Modal } from '@instantmockapi/ui';
 import { ProjectHeader } from '../../../components/project/project-header';
 import { apiBaseUrl, currentAccessToken } from '../../../lib/api-client';
 import { useDeleteProject, useGenerate, useProject } from '../../../lib/hooks';
+import { normalizeError } from '../../../lib/errors';
+import { notifyFailure } from '../../../lib/toast';
+import { useAction } from '../../../lib/use-action';
 
 export default function ProjectLayout({ children }: { children: ReactNode }) {
   const params = useParams<{ id: string }>();
@@ -26,8 +29,13 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
 
   const project = useProject(projectId);
-  const generate = useGenerate(projectId);
-  const remove = useDeleteProject();
+  /**
+   * The opening half of the generation lifecycle. The progress board announces
+   * the outcome, so between them a user is never left wondering whether the
+   * action took.
+   */
+  const regenerateAll = useAction(useGenerate(projectId), { success: 'Generation started' });
+  const remove = useAction(useDeleteProject(), { success: 'Project deleted' });
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   if (project.isError) {
@@ -64,6 +72,13 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
         headers: token !== null ? { authorization: `Bearer ${token}` } : {},
       });
       if (!response.ok) {
+        // Previously a bare `return`: a failed export was indistinguishable
+        // from a click that did nothing.
+        notifyFailure({
+          ...normalizeError(new Error('export failed')),
+          title: "Couldn't export this project",
+          detail: `The server answered ${response.status}.`,
+        });
         return;
       }
       const url = URL.createObjectURL(await response.blob());
@@ -88,11 +103,13 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
         // `void`. Navigating to the progress board is what every other generate
         // call site in the app does — a job that starts with no visible progress
         // looks like nothing happened.
-        onRegenerate={() =>
-          generate.mutate(undefined, {
-            onSuccess: (job) => router.push(`/projects/${projectId}/progress/${job.jobId}`),
-          })
-        }
+        onRegenerate={() => {
+          void regenerateAll.run(undefined).then((job) => {
+            if (job !== null) {
+              router.push(`/projects/${projectId}/progress/${job.jobId}`);
+            }
+          });
+        }}
         onDelete={() => setConfirmDelete(true)}
       />
 
@@ -115,9 +132,13 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
             <Button
               variant="danger"
               disabled={remove.isPending}
-              onClick={() =>
-                remove.mutate(projectId, { onSuccess: () => router.replace('/projects') })
-              }
+              onClick={() => {
+                void remove.run(projectId).then((deleted) => {
+                  if (deleted !== null) {
+                    router.replace('/projects');
+                  }
+                });
+              }}
             >
               {remove.isPending ? 'Deleting…' : 'Delete permanently'}
             </Button>

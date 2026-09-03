@@ -20,6 +20,7 @@ export function EndpointCard({
   removable,
   onChange,
   onRemove,
+  errors,
 }: {
   endpoint: SingleEndpoint;
   basePath: string;
@@ -27,14 +28,24 @@ export function EndpointCard({
   removable: boolean;
   onChange: (next: SingleEndpoint) => void;
   onRemove: () => void;
+  /** Server-reported problems, keyed by builder node id. */
+  errors?: ReadonlyMap<string, string[]> | undefined;
 }) {
-  const nameIssue = issues.find((issue) => issue.field === 'name')?.message;
+  /**
+   * Client-side issues take precedence over the server's.
+   *
+   * A local problem is more current — the user has typed since the request went
+   * out — and showing both under one input would be two messages about the same
+   * character.
+   */
+  const serverIssues = errors?.get(endpoint.id) ?? [];
+  const nameIssue = issues.find((issue) => issue.field === 'name')?.message ?? serverIssues[0];
   const path = endpointPath(endpoint.name);
 
   return (
     <Card className="ui-stack">
       <div className="ui-row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <Field label="Endpoint name">
+        <Field label="Endpoint name" error={nameIssue ?? null}>
           <Input
             value={endpoint.name}
             placeholder="current"
@@ -85,6 +96,7 @@ export function EndpointCard({
                 fields: endpoint.fields.filter((item) => item.id !== field.id),
               })
             }
+            errors={errors}
           />
         ))}
       </div>

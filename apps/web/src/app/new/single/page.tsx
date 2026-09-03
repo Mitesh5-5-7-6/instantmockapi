@@ -19,9 +19,23 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Card, Field, FlowScope, Input, Note, Stepper, Textarea } from '@instantmockapi/ui';
+import {
+  Button,
+  Card,
+  Field,
+  FlowScope,
+  FormError,
+  Input,
+  Note,
+  Stepper,
+  Textarea,
+} from '@instantmockapi/ui';
 import { useCreateProject } from '../../../lib/hooks';
 import { apiFetch } from '../../../lib/api-client';
+import { PathIndexBuilder } from '../../../lib/error-paths';
+import { normalizeError } from '../../../lib/errors';
+import { notifyFailure } from '../../../lib/toast';
+import { useAction } from '../../../lib/use-action';
 import type { GenerationConfig } from '../../../lib/api-types';
 import {
   basePathToSlug,
@@ -66,7 +80,7 @@ const DEFAULT_CONFIG: GenerationConfig = {
 
 export default function NewSingleApiPage() {
   const router = useRouter();
-  const createProject = useCreateProject();
+  const [fieldErrors, setFieldErrors] = useState<ReadonlyMap<string, string[]>>(new Map());
 
   const [step, setStep] = useState(1);
   const [name, setName] = useState('');
@@ -102,18 +116,34 @@ export default function NewSingleApiPage() {
     }
   }, []);
 
-  const inputSource = useMemo(() => {
+  const { inputSource, pathIndex } = useMemo(() => {
     if (tab === 'json') {
-      return { type: 'json', raw: rawJson };
+      // No index: the payload is raw text, so a server path names a position in
+      // the user's own JSON rather than a control on this screen. Unmappable by
+      // nature, and correctly reported as a toast.
+      return { inputSource: { type: 'json', raw: rawJson }, pathIndex: new Map<string, string>() };
     }
     if (tab === 'swagger') {
-      return { type: 'swagger', raw: swaggerRaw };
+      return {
+        inputSource: { type: 'swagger', raw: swaggerRaw },
+        pathIndex: new Map<string, string>(),
+      };
     }
     return {
-      type: 'builder',
-      raw: { entities: endpointsToEntities(endpoints), generationConfig: config },
+      inputSource: {
+        type: 'builder',
+        raw: { entities: endpointsToEntities(endpoints), generationConfig: config },
+      },
+      pathIndex: endpointPathIndex(endpoints),
     };
   }, [tab, rawJson, swaggerRaw, endpoints, config]);
+
+  const create = useAction(useCreateProject(), {
+    // Declared after the memo it reads, so the dependency is visible in the
+    // reading order rather than relying on the closure being called late.
+    fields: () => pathIndex,
+    onFieldErrors: setFieldErrors,
+  });
 
   function endpointProblem(): string | null {
     if (tab !== 'endpoints') {
@@ -151,14 +181,23 @@ export default function NewSingleApiPage() {
   async function generate(): Promise<void> {
     setBusy(true);
     setError(null);
+    const project = await create.run({
+      name: name.trim(),
+      kind: 'single',
+      ...(slug ? { slug } : {}),
+      ...(description.trim() ? { description: description.trim() } : {}),
+      inputSource,
+    });
+    if (project === null) {
+      setBusy(false);
+      // Step 2 is where the endpoint cards are; sending the user anywhere else
+      // would leave the inline messages off screen.
+      if (fieldErrors.size > 0) {
+        setStep(2);
+      }
+      return;
+    }
     try {
-      const project = await createProject.mutateAsync({
-        name: name.trim(),
-        kind: 'single',
-        ...(slug ? { slug } : {}),
-        ...(description.trim() ? { description: description.trim() } : {}),
-        inputSource,
-      });
       // The JSON and Swagger paths let their parser derive the config, so the
       // toggles chosen on step 3 are pinned here. The endpoints path already
       // carried this config through create, but PATCHing it again is harmless
@@ -175,7 +214,10 @@ export default function NewSingleApiPage() {
       });
       router.push(`/projects/${project.id}/progress/${job.jobId}`);
     } catch (cause) {
-      setError((cause as Error).message);
+      notifyFailure({
+        ...normalizeError(cause),
+        title: 'Project created, but generation did not start',
+      });
       setBusy(false);
     }
   }
@@ -291,6 +333,7 @@ export default function NewSingleApiPage() {
                   endpoint={endpoint}
                   basePath={slug}
                   issues={endpointIssues.filter((issue) => issue.endpointId === endpoint.id)}
+                  errors={fieldErrors}
                   removable={endpoints.length > 1}
                   onChange={(next) => updateEndpoint(endpoint.id, next)}
                   onRemove={() =>
@@ -315,11 +358,7 @@ export default function NewSingleApiPage() {
             </Button>
             <Button onClick={() => goToStep(3)}>Next</Button>
           </div>
-          {error ? (
-            <p className="ui-error" role="alert">
-              {error}
-            </p>
-          ) : null}
+          {error ? <FormError title={error} /> : null}
         </div>
       ) : null}
 
@@ -342,25 +381,42 @@ export default function NewSingleApiPage() {
               Back
             </Button>
             <Button
-              disabled={busy || createProject.isPending || config.methods.length === 0}
+              disabled={busy || create.isPending || config.methods.length === 0}
               onClick={() => void generate()}
             >
               {busy ? 'Starting…' : 'Generate'}
             </Button>
           </div>
-          {error ? (
-            <p className="ui-error" role="alert">
-              {error}
-            </p>
-          ) : null}
+          {error ? <FormError title={error} /> : null}
         </Card>
       ) : null}
 
-      {error && step === 1 ? (
-        <p className="ui-error" role="alert">
-          {error}
-        </p>
-      ) : null}
+      {error && step === 1 ? <FormError title={error} /> : null}
     </FlowScope>
   );
+}
+
+/**
+ * Where each endpoint's controls land in the payload.
+ *
+ * Mirrors `endpointsToEntities`: it filters unnamed endpoints and unnamed
+ * fields, so a form position is not a payload position. Built from the same
+ * filters rather than derived from the result, because the result no longer
+ * knows what was dropped.
+ */
+function endpointPathIndex(endpoints: readonly SingleEndpoint[]): Map<string, string> {
+  const paths = new PathIndexBuilder();
+  const named = endpoints.filter((endpoint) => endpoint.name.trim());
+
+  named.forEach((endpoint, entityPosition) => {
+    paths.at('entities', entityPosition, () => {
+      paths.claim(endpoint.id);
+      const fields = endpoint.fields.filter((field) => field.name.trim());
+      fields.forEach((field, offset) => {
+        paths.at('fields', offset, () => paths.claim(field.id));
+      });
+    });
+  });
+
+  return new Map(paths.build());
 }

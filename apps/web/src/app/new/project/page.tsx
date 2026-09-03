@@ -21,6 +21,7 @@ import {
   Checkbox,
   Field,
   FlowScope,
+  FormError,
   Input,
   Note,
   Select,
@@ -35,6 +36,7 @@ import {
   hasEmptyEnum,
   newEntity,
   type BuilderEntity,
+  type BuilderField,
 } from '../../../lib/builder';
 import {
   builderRelationToIPS,
@@ -44,6 +46,10 @@ import {
   validateRelations,
 } from '../../../lib/relations';
 import { EntityCard } from '../../../components/builder/entity-card';
+import { PathIndexBuilder } from '../../../lib/error-paths';
+import { normalizeError } from '../../../lib/errors';
+import { notifyFailure } from '../../../lib/toast';
+import { useAction } from '../../../lib/use-action';
 import { ErDiagram, ErLegend } from '../../../components/er-diagram';
 import {
   ALL_FEATURES,
@@ -71,7 +77,19 @@ function slugify(value: string): string {
 
 export default function NewProjectPage() {
   const router = useRouter();
-  const createProject = useCreateProject();
+  /**
+   * Server field errors from the last attempt, keyed by builder node id.
+   *
+   * This is the payload of the whole change for this screen: the API answers a
+   * failed generate with `entities[1].fields[1].name`, and this is where that
+   * becomes a message under the right input instead of "IPS validation failed"
+   * under the button.
+   */
+  const [fieldErrors, setFieldErrors] = useState<ReadonlyMap<string, string[]>>(new Map());
+  const create = useAction(useCreateProject(), {
+    fields: () => pathIndex,
+    onFieldErrors: setFieldErrors,
+  });
 
   const [step, setStep] = useState(1);
   const [name, setName] = useState('');
@@ -138,33 +156,63 @@ export default function NewProjectPage() {
    * failing the whole create: the IPS validator rejects a relation whose target
    * is not declared, so relations into excluded entities go with them.
    */
-  const inputSource = useMemo(() => {
+  const { inputSource, pathIndex } = useMemo(() => {
     const pruned = pruneForGeneration(entities);
-    return {
-      type: 'builder',
-      raw: {
-        entities: pruned.map((entity) => ({
+    const paths = new PathIndexBuilder();
+
+    const raw = pruned.map((entity, entityPosition) =>
+      paths.at('entities', entityPosition, () => {
+        paths.claim(entity.id);
+        const named = entity.fields.filter((field) => field.name.trim());
+        return {
           name: entity.name.trim(),
           identity: { field: 'id', style: entity.identityStyle },
-          fields: entity.fields.filter((field) => field.name.trim()).map(builderFieldToIPS),
-          relations: entity.relations.map(builderRelationToIPS),
-        })),
-        generationConfig: config,
-      },
+          // Positions claimed while the array is built. Pruning and the
+          // name filter both shift indices, so nothing about the finished
+          // payload reveals which form row a given index came from.
+          fields: named.map((field, offset) =>
+            paths.at('fields', offset, () => {
+              paths.claim(field.id);
+              claimChildPaths(paths, field);
+              return builderFieldToIPS(field);
+            }),
+          ),
+          relations: entity.relations.map((relation, offset) =>
+            paths.at('relations', offset, () => {
+              paths.claim(relation.id);
+              return builderRelationToIPS(relation);
+            }),
+          ),
+        };
+      }),
+    );
+
+    return {
+      inputSource: { type: 'builder', raw: { entities: raw, generationConfig: config } },
+      pathIndex: paths.build(),
     };
   }, [entities, config]);
 
   async function generate(): Promise<void> {
     setBusy(true);
     setError(null);
+    const project = await create.run({
+      name: name.trim(),
+      kind: 'project',
+      ...(effectiveSlug ? { slug: effectiveSlug } : {}),
+      ...(description.trim() ? { description: description.trim() } : {}),
+      inputSource,
+    });
+    if (project === null) {
+      // Already routed: inline messages on the offending fields, one toast
+      // summarising. Step 2 is where the entity cards are.
+      setBusy(false);
+      if (fieldErrors.size > 0) {
+        setStep(2);
+      }
+      return;
+    }
     try {
-      const project = await createProject.mutateAsync({
-        name: name.trim(),
-        kind: 'project',
-        ...(effectiveSlug ? { slug: effectiveSlug } : {}),
-        ...(description.trim() ? { description: description.trim() } : {}),
-        inputSource,
-      });
       // No config PATCH here, unlike the Single flow: the builder payload already
       // carried this exact config — features block included — through create. A
       // PATCH would bump the project to v2 before its first generation ever ran,
@@ -175,7 +223,13 @@ export default function NewProjectPage() {
       });
       router.push(`/projects/${project.id}/progress/${job.jobId}`);
     } catch (cause) {
-      setError((cause as Error).message);
+      // The project exists but generation would not start. A toast rather than
+      // an inline block: the project was created, so this is not a form error
+      // the user can fix by editing a field.
+      notifyFailure({
+        ...normalizeError(cause),
+        title: 'Project created, but generation did not start',
+      });
       setBusy(false);
     }
   }
@@ -326,11 +380,7 @@ export default function NewProjectPage() {
               Next
             </Button>
           </div>
-          {error ? (
-            <p className="ui-error" role="alert">
-              {error}
-            </p>
-          ) : null}
+          {error ? <FormError title={error} /> : null}
         </Card>
       ) : null}
 
@@ -348,25 +398,34 @@ export default function NewProjectPage() {
               Back
             </Button>
             <Button
-              disabled={busy || createProject.isPending || config.methods.length === 0}
+              disabled={busy || create.isPending || config.methods.length === 0}
               onClick={() => void generate()}
             >
               {busy ? 'Starting…' : 'Generate'}
             </Button>
           </div>
-          {error ? (
-            <p className="ui-error" role="alert">
-              {error}
-            </p>
-          ) : null}
+          {error ? <FormError title={error} /> : null}
         </Card>
       ) : null}
 
-      {error && step < 3 ? (
-        <p className="ui-error" role="alert">
-          {error}
-        </p>
-      ) : null}
+      {error && step < 3 ? <FormError title={error} /> : null}
     </FlowScope>
   );
+}
+
+/**
+ * Claim positions for a field's nested children, recursively.
+ *
+ * `builderFieldToIPS` emits `children` for object and array fields, so a server
+ * path can be several levels deep — `entities[0].fields[2].children[0].name`.
+ * Without this those resolve only as far as their parent.
+ */
+function claimChildPaths(paths: PathIndexBuilder, field: BuilderField): void {
+  const named = field.children.filter((child) => child.name.trim());
+  named.forEach((child, offset) => {
+    paths.at('children', offset, () => {
+      paths.claim(child.id);
+      claimChildPaths(paths, child);
+    });
+  });
 }

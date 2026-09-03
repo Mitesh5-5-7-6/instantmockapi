@@ -34,6 +34,7 @@
  * intact.
  */
 
+import { PathIndexBuilder, type FieldPathIndex } from './error-paths';
 import {
   builderFieldToIPS,
   newEntity,
@@ -255,26 +256,41 @@ function mergeRelation(
  * fields, entity descriptions, relation link fields — is copied from the stored
  * document rather than regenerated.
  */
-export function applyBuilderToIps(stored: IpsLike, entities: readonly BuilderEntity[]): IpsLike {
+export interface AppliedDraft {
+  /** The `ips` body for `PATCH /projects/:id/draft`. */
+  ips: IpsLike;
+  /**
+   * Where each builder node ended up, so a server error path can be routed back
+   * to the control that caused it.
+   *
+   * Built during the same pass that builds `ips`, because the positions are not
+   * recoverable afterwards: nameless entities are dropped and fields are
+   * reordered, so nothing about the finished array reveals which form row a
+   * given index came from.
+   */
+  paths: FieldPathIndex;
+}
+
+export function applyBuilderToIps(
+  stored: IpsLike,
+  entities: readonly BuilderEntity[],
+): AppliedDraft {
   const storedEntities = Array.isArray(stored.entities) ? stored.entities : [];
   const entityIndex = indexById(storedEntities);
+  const paths = new PathIndexBuilder();
 
   // Nameless entities are dropped, exactly as nameless fields are below. A
   // freshly added card is a half-typed thought, and `validateIPS` answers
   // "Entity name is required" — so without this, clicking "Add entity" and then
   // Save is a 422 for having clicked a button.
-  const merged = entities
-    .filter((entity) => entity.name.trim() !== '')
-    .map((entity) => {
+  const kept = entities.filter((entity) => entity.name.trim() !== '');
+  const merged = kept.map((entity, entityPosition) =>
+    paths.at('entities', entityPosition, () => {
+      paths.claim(entity.id);
+
       const previous = entity.schemaId ? entityIndex.get(entity.schemaId) : undefined;
       const storedFields = Array.isArray(previous?.fields) ? previous.fields : [];
       const fieldIndex = indexById(storedFields);
-
-      const authored = entity.fields
-        .filter((field) => field.name !== '')
-        .map((field) =>
-          mergeField(field, field.schemaId ? fieldIndex.get(field.schemaId) : undefined),
-        );
 
       // Derived fields, in the order `materializeRelations` produces them: identity
       // first, foreign keys last. Placed deterministically so repeated saves do not
@@ -282,6 +298,36 @@ export function applyBuilderToIps(stored: IpsLike, entities: readonly BuilderEnt
       const derived = storedFields.filter(isDerivedField);
       const identity = derived.filter((field) => field.meta?.['identity'] === true);
       const references = derived.filter((field) => field.meta?.['identity'] !== true);
+
+      const authoredSource = entity.fields.filter((field) => field.name !== '');
+      const authored = authoredSource.map((field, offset) =>
+        // The offset is what makes server paths resolvable. Identity fields come
+        // first in the payload and the form does not render them, so payload
+        // `fields[0]` is usually not the first authored row — claiming the
+        // position here, while the array is being built, is the only way the two
+        // cannot drift.
+        paths.at('fields', identity.length + offset, () => {
+          paths.claim(field.id);
+          claimChildren(paths, field);
+          return mergeField(field, field.schemaId ? fieldIndex.get(field.schemaId) : undefined);
+        }),
+      );
+
+      const relationSource = entity.relations.filter(
+        (relation) => relation.name !== '' && relation.target !== '',
+      );
+      const storedRelations = indexById(
+        Array.isArray(previous?.relations) ? previous.relations : [],
+      );
+      const relations = relationSource.map((relation, offset) =>
+        paths.at('relations', offset, () => {
+          paths.claim(relation.id);
+          return mergeRelation(
+            relation,
+            relation.schemaId ? storedRelations.get(relation.schemaId) : undefined,
+          );
+        }),
+      );
 
       return {
         ...(previous ?? {}),
@@ -292,22 +338,23 @@ export function applyBuilderToIps(stored: IpsLike, entities: readonly BuilderEnt
           style: entity.identityStyle,
         },
         fields: [...identity, ...authored, ...references],
-        relations: entity.relations
-          .filter((relation) => relation.name !== '' && relation.target !== '')
-          .map((relation) =>
-            mergeRelation(
-              relation,
-              relation.schemaId
-                ? indexById(Array.isArray(previous?.relations) ? previous.relations : []).get(
-                    relation.schemaId,
-                  )
-                : undefined,
-            ),
-          ),
+        relations,
       };
-    });
+    }),
+  );
 
-  return { ...stored, entities: merged };
+  return { ips: { ...stored, entities: merged }, paths: paths.build() };
+}
+
+/** Claim positions for a field's nested children, recursively. */
+function claimChildren(paths: PathIndexBuilder, field: BuilderField): void {
+  const named = field.children.filter((child) => child.name !== '');
+  named.forEach((child, offset) => {
+    paths.at('children', offset, () => {
+      paths.claim(child.id);
+      claimChildren(paths, child);
+    });
+  });
 }
 
 /**
@@ -333,7 +380,7 @@ function canonical(value: unknown): string {
 
 /** Does the form differ meaningfully from what it was loaded with? */
 export function isDirty(stored: IpsLike, entities: readonly BuilderEntity[]): boolean {
-  return canonical(applyBuilderToIps(stored, entities)) !== canonical(stored);
+  return canonical(applyBuilderToIps(stored, entities).ips) !== canonical(stored);
 }
 
 /** What the editor lets an author do, per project kind. */

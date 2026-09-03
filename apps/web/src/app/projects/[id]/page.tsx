@@ -27,6 +27,7 @@ import {
   type ApiMethod,
 } from '@instantmockapi/ui';
 import { useGenerate, useProject, useProjectMetrics, type MetricsDays } from '../../../lib/hooks';
+import { useAction } from '../../../lib/use-action';
 import { projectEndpoints, type IpsEntity } from '../../../lib/endpoints';
 import { toEndpointRows, toProjectStatTiles, toRequestPoints } from '../../../lib/project-metrics';
 import { formatCompact } from '../../../lib/area-chart';
@@ -52,7 +53,7 @@ export default function ProjectOverviewPage() {
 
   const project = useProject(id);
   const metrics = useProjectMetrics(id, days);
-  const generate = useGenerate(id);
+  const generate = useAction(useGenerate(id), { success: 'Generation started' });
 
   if (!project.data) {
     return <div className="ui-skeleton" style={{ minHeight: 320 }} />;
@@ -82,8 +83,10 @@ export default function ProjectOverviewPage() {
             <Button
               disabled={generate.isPending}
               onClick={() =>
-                generate.mutate(undefined, {
-                  onSuccess: (job) => router.push(`/projects/${id}/progress/${job.jobId}`),
+                void generate.run(undefined).then((job) => {
+                  if (job !== null) {
+                    router.push(`/projects/${id}/progress/${job.jobId}`);
+                  }
                 })
               }
             >
@@ -96,8 +99,10 @@ export default function ProjectOverviewPage() {
           detail={detail}
           generating={generate.isPending}
           onGenerate={() =>
-            generate.mutate(undefined, {
-              onSuccess: (job) => router.push(`/projects/${id}/progress/${job.jobId}`),
+            void generate.run(undefined).then((job) => {
+              if (job !== null) {
+                router.push(`/projects/${id}/progress/${job.jobId}`);
+              }
             })
           }
         />
@@ -154,12 +159,27 @@ export default function ProjectOverviewPage() {
           <Card className="ui-stack">
             <div className="ui-row ui-row--between">
               <h2>Endpoints</h2>
-              <Link href={`/projects/${id}/apis`}>View all APIs →</Link>
+              {/*
+                Two links, because they answer two different thoughts. Endpoints
+                are derived from entities × selected methods and are never added
+                one at a time, so "looking at this list, something is wrong" leads
+                to the data model — and the Overview tab is where most people
+                first read that list.
+              */}
+              <span className="ui-row" style={{ gap: 'var(--space-4)' }}>
+                <Link href={`/projects/${id}/edit`}>Edit data model →</Link>
+                <Link href={`/projects/${id}/apis`}>View all APIs →</Link>
+              </span>
             </div>
 
             {allEndpoints.length === 0 ? (
               <EmptyState title="No endpoints yet">
-                Define entities and select HTTP methods, then generate.
+                <p className="ui-meta">
+                  Endpoints come from your entities and the HTTP methods you select.
+                </p>
+                <Link className="ui-btn" href={`/projects/${id}/edit`}>
+                  Edit data model
+                </Link>
               </EmptyState>
             ) : (
               <table className="endpoint-table">

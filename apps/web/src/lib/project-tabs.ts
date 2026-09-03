@@ -59,3 +59,32 @@ export function activeProjectTab(pathname: string, projectId: string): string | 
   const segment = pathname.slice(base.length + 1).split('/')[0] ?? '';
   return PROJECT_TABS.some((tab) => tab.segment === segment) ? segment : null;
 }
+
+/**
+ * Which routes get the wide content measure.
+ *
+ * `.ui-main` caps content at 1100px — a reading measure, and the right default
+ * for prose and for the creation wizards. `--content-wide` (1440px) is an
+ * explicit per-route opt-in, and until now only the dashboard used it, so a
+ * project workspace on a 1920px display sat in a 1100px column with a ~700px
+ * gutter of nothing.
+ *
+ * The project workspace is the same class of screen as the dashboard: tables,
+ * logs, a request list, generated code. It earns the room.
+ *
+ * **The progress board deliberately does not.** The styles.css note is specific
+ * about it — widening pulls each artifact's status chip away from its name,
+ * across a gap nobody can track — so it keeps the narrow measure. The creation
+ * wizards keep it too, being forms.
+ */
+export function usesWideContent(pathname: string): boolean {
+  if (pathname === '/') {
+    return true;
+  }
+  // A project workspace tab: /projects/{id} and /projects/{id}/{tab}.
+  const match = /^\/projects\/[^/]+(?:\/([^/]+))?/.exec(pathname);
+  if (match === null) {
+    return false;
+  }
+  return match[1] !== 'progress';
+}

@@ -12,8 +12,8 @@
 import { useEffect, useId, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Button, Field, Input } from '@instantmockapi/ui';
-import { ApiError } from '../../lib/api-client';
+import { FormError, Button, Field, Input } from '@instantmockapi/ui';
+import { normalizeError } from '../../lib/errors';
 import { useAuthState, useResendVerification, useSignup } from '../../lib/hooks';
 import { passwordProblems } from '../../lib/password';
 import { AuthCard, AuthNotice } from '../../components/auth/auth-card';
@@ -42,10 +42,10 @@ export default function SignupPage() {
     }
   }, [authState, router]);
 
-  const error = signup.error instanceof ApiError ? signup.error : null;
+  const failure = signup.isError ? normalizeError(signup.error) : null;
   // The account exists and only the email failed, so this is the one failure
   // with a useful next action rather than just a message.
-  const emailFailed = error?.code === 'EMAIL_SEND_FAILED';
+  const emailFailed = failure?.code === 'EMAIL_SEND_FAILED';
 
   const problems = passwordProblems(password, email);
   // Only after a submit attempt: flagging a half-typed password as too short on
@@ -147,10 +147,8 @@ export default function SignupPage() {
           {pending ? 'Creating your account…' : 'Create account'}
         </Button>
 
-        {error !== null && !emailFailed ? (
-          <p className="ui-error" role="alert">
-            {error.message}
-          </p>
+        {failure !== null && !emailFailed ? (
+          <FormError title={failure.title} detail={failure.detail} />
         ) : null}
 
         {/* The retry lives here, next to the address that was just typed. An
@@ -159,7 +157,7 @@ export default function SignupPage() {
             rejected login — instructions to somewhere they were not. */}
         {emailFailed ? (
           <AuthNotice tone="warning" icon="alert" title="We could not send the confirmation email">
-            <p className="ui-meta">{error?.message} Your password is saved — nothing is lost.</p>
+            <p className="ui-meta">{failure?.title} Your password is saved — nothing is lost.</p>
             {resend.isSuccess ? (
               <p className="ui-meta">{resend.data.message}</p>
             ) : (

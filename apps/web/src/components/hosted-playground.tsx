@@ -9,6 +9,9 @@
 
 import { useState } from 'react';
 import { Button, Card, CodeBlock, Input, Select, Textarea } from '@instantmockapi/ui';
+import { NetworkError } from '../lib/api-client';
+import { normalizeError } from '../lib/errors';
+import { notifyFailure } from '../lib/toast';
 
 interface PlaygroundEntity {
   name: string;
@@ -61,7 +64,6 @@ export function HostedPlayground({
   const [page, setPage] = useState('');
   const [limit, setLimit] = useState('');
   const [result, setResult] = useState<RequestResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
   const needsId = NEEDS_ID[method] ?? false;
@@ -96,13 +98,13 @@ export function HostedPlayground({
   const sendDisabled = sending || (needsId && recordId.trim() === '') || bodyInvalid;
 
   async function send(): Promise<void> {
-    setError(null);
     setResult(null);
     if (showBody && body.trim() !== '') {
       try {
         JSON.parse(body);
       } catch {
-        setError('Request body is not valid JSON');
+        // Already shown under the textarea by `bodyInvalid`, and Send is
+        // disabled on it — so this is a guard, not a place to report from.
         return;
       }
     }
@@ -121,8 +123,15 @@ export function HostedPlayground({
         durationMs: Math.round(performance.now() - started),
         text,
       });
-    } catch {
-      setError('Request failed — the hosted API may be expired or unreachable.');
+    } catch (cause) {
+      // A toast: this call goes to the *user's own* hosted API rather than the
+      // platform, so the failure is about their project, and the response panel
+      // below should keep whatever the last successful call returned.
+      notifyFailure({
+        ...normalizeError(new NetworkError(cause)),
+        title: "Couldn't reach your hosted API",
+        detail: 'It may have expired, or the URL may no longer resolve.',
+      });
     } finally {
       setSending(false);
     }
@@ -192,9 +201,12 @@ export function HostedPlayground({
           style={{ fontFamily: 'var(--font-mono)' }}
         />
       ) : null}
-      {bodyInvalid ? <span className="ui-error">Request body is not valid JSON.</span> : null}
-
-      {error ? <p className="ui-error">{error}</p> : null}
+      {/* Genuinely field-level: it describes the textarea directly above it. */}
+      {bodyInvalid ? (
+        <span className="ui-error" role="alert">
+          Request body is not valid JSON.
+        </span>
+      ) : null}
       {result ? (
         <div className="ui-stack" style={{ gap: 'var(--space-2)' }}>
           <span

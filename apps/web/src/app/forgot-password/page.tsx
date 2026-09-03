@@ -11,8 +11,8 @@
 
 import { useId, useState } from 'react';
 import Link from 'next/link';
-import { Button, Field, Input } from '@instantmockapi/ui';
-import { ApiError } from '../../lib/api-client';
+import { FormError, Button, Field, Input } from '@instantmockapi/ui';
+import { formErrorProps } from '../../lib/errors';
 import { useForgotPassword } from '../../lib/hooks';
 import { AuthCard, AuthNotice } from '../../components/auth/auth-card';
 
@@ -77,11 +77,11 @@ export default function ForgotPasswordPage() {
           {forgot.isPending ? 'Sending…' : 'Send the link'}
         </Button>
 
-        {forgot.error instanceof ApiError ? (
-          <p className="ui-error" role="alert">
-            {forgot.error.message}
-          </p>
-        ) : null}
+        {/*
+          On the failure, not on `instanceof ApiError`: that guard rendered
+          nothing for a network failure, so the button appeared to do nothing.
+        */}
+        {forgot.isError ? <FormError {...formErrorProps(forgot.error)} /> : null}
       </form>
     </AuthCard>
   );

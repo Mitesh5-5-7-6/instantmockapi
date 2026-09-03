@@ -4,6 +4,20 @@
  * consistent error handling (doc 08 §7, doc 17 §5).
  */
 
+/**
+ * Shape of a request-correlation id: `req_` plus lowercase hex.
+ *
+ * Defined here rather than beside the server that mints them because both sides
+ * validate against it — the API when honouring an inbound `x-request-id`, and
+ * the web client before showing one to a user. Two copies of a regex is how a
+ * header starts being accepted by one side and rejected by the other.
+ *
+ * Validated rather than trusted on the way in: an unchecked header is a
+ * log-injection vector, and it lets a caller make two unrelated requests share
+ * an id.
+ */
+export const REQUEST_ID_PATTERN = /^req_[0-9a-f]{6,32}$/;
+
 /** Field-level error detail for validation and parse errors. */
 export interface ErrorDetail {
   /** JSON-path to the offending field (e.g., "addresses[0].location.city") */

@@ -9,6 +9,7 @@ import {
   isDirty,
   type IpsLike,
 } from './draft-schema';
+import { resolvePath } from './error-paths';
 
 /**
  * A stored definition as the server actually returns one: materialized, with
@@ -186,14 +187,14 @@ describe('applyBuilderToIps', () => {
    */
   it('is a no-op round trip when nothing was edited', () => {
     const stored = storedIps();
-    const result = applyBuilderToIps(stored, ipsToBuilder(stored));
+    const result = applyBuilderToIps(stored, ipsToBuilder(stored)).ips;
     expect(result).toEqual(stored);
     expect(isDirty(stored, ipsToBuilder(stored))).toBe(false);
   });
 
   it('puts the derived fields back, ids and metadata intact', () => {
     const stored = storedIps();
-    const result = applyBuilderToIps(stored, ipsToBuilder(stored));
+    const result = applyBuilderToIps(stored, ipsToBuilder(stored)).ips;
 
     expect(fieldNames(result)).toEqual(['id', 'email', 'age', 'address', 'teamId']);
     const teamId = userEntity(result).fields!.find((f) => f.name === 'teamId');
@@ -206,7 +207,7 @@ describe('applyBuilderToIps', () => {
     const entities = ipsToBuilder(stored);
     entities[0]!.fields[0]!.name = 'emailAddress';
 
-    const result = applyBuilderToIps(stored, entities);
+    const result = applyBuilderToIps(stored, entities).ips;
     const renamed = userEntity(result).fields!.find((f) => f.name === 'emailAddress');
     expect(renamed?.id).toBe('fld_email');
     expect(fieldIds(result)).toEqual(fieldIds(stored));
@@ -217,7 +218,7 @@ describe('applyBuilderToIps', () => {
     const entities = ipsToBuilder(stored);
     entities[0]!.name = 'Customer';
 
-    const result = applyBuilderToIps(stored, entities);
+    const result = applyBuilderToIps(stored, entities).ips;
     expect(userEntity(result)).toMatchObject({ id: 'ent_user', name: 'Customer' });
   });
 
@@ -234,7 +235,7 @@ describe('applyBuilderToIps', () => {
       children: [],
     });
 
-    const result = applyBuilderToIps(stored, entities);
+    const result = applyBuilderToIps(stored, entities).ips;
     const added = userEntity(result).fields!.find((f) => f.name === 'nickname');
     expect(added).toBeDefined();
     expect(added?.id).toBeUndefined();
@@ -245,7 +246,7 @@ describe('applyBuilderToIps', () => {
     const entities = ipsToBuilder(stored);
     entities[0]!.fields = entities[0]!.fields.filter((f) => f.name !== 'age');
 
-    const result = applyBuilderToIps(stored, entities);
+    const result = applyBuilderToIps(stored, entities).ips;
     expect(fieldNames(result)).toEqual(['id', 'email', 'address', 'teamId']);
   });
 
@@ -262,7 +263,7 @@ describe('applyBuilderToIps', () => {
       children: [],
     });
 
-    expect(fieldNames(applyBuilderToIps(stored, entities))).toEqual(fieldNames(stored));
+    expect(fieldNames(applyBuilderToIps(stored, entities).ips)).toEqual(fieldNames(stored));
   });
 
   /**
@@ -274,7 +275,7 @@ describe('applyBuilderToIps', () => {
     stored.entities![0]!.fields![1]!.meta = { unique: true, readOnly: true };
 
     const entities = ipsToBuilder(stored);
-    const result = applyBuilderToIps(stored, entities);
+    const result = applyBuilderToIps(stored, entities).ips;
     const email = userEntity(result).fields!.find((f) => f.name === 'email');
     expect(email?.meta).toEqual({ unique: true, readOnly: true });
   });
@@ -286,14 +287,14 @@ describe('applyBuilderToIps', () => {
     delete entities[0]!.fields[0]!.validation.unique;
     delete entities[0]!.fields[0]!.validation.searchable;
 
-    const result = applyBuilderToIps(stored, entities);
+    const result = applyBuilderToIps(stored, entities).ips;
     const email = userEntity(result).fields!.find((f) => f.name === 'email');
     expect(email?.meta).toEqual({});
   });
 
   it('preserves an entity description the form never shows', () => {
     const stored = storedIps();
-    const result = applyBuilderToIps(stored, ipsToBuilder(stored));
+    const result = applyBuilderToIps(stored, ipsToBuilder(stored)).ips;
     expect(userEntity(result).description).toBe('People who use the product');
   });
 
@@ -302,7 +303,7 @@ describe('applyBuilderToIps', () => {
     const entities = ipsToBuilder(stored);
     entities[0]!.relations[0]!.onDelete = 'cascade';
 
-    const result = applyBuilderToIps(stored, entities);
+    const result = applyBuilderToIps(stored, entities).ips;
     expect(userEntity(result).relations![0]).toMatchObject({
       id: 'rel_team',
       onDelete: 'cascade',
@@ -316,7 +317,7 @@ describe('applyBuilderToIps', () => {
     const entities = ipsToBuilder(stored);
     entities[0]!.identityStyle = 'int';
 
-    const result = applyBuilderToIps(stored, entities);
+    const result = applyBuilderToIps(stored, entities).ips;
     expect(userEntity(result).identity).toEqual({ field: 'id', style: 'int' });
   });
 
@@ -325,14 +326,14 @@ describe('applyBuilderToIps', () => {
     const entities = ipsToBuilder(stored);
     entities[0]!.fields[2]!.children[0]!.name = 'town';
 
-    const result = applyBuilderToIps(stored, entities);
+    const result = applyBuilderToIps(stored, entities).ips;
     const address = userEntity(result).fields!.find((f) => f.name === 'address');
     expect(address?.children![0]).toMatchObject({ id: 'fld_city', name: 'town' });
   });
 
   it('carries top-level definition fields through untouched', () => {
     const stored = storedIps();
-    const result = applyBuilderToIps(stored, ipsToBuilder(stored));
+    const result = applyBuilderToIps(stored, ipsToBuilder(stored)).ips;
     expect(result.projectId).toBe('p1');
     expect(result.version).toBe(4);
     expect(result.generationConfig).toEqual(stored.generationConfig);
@@ -360,7 +361,7 @@ describe('applyBuilderToIps', () => {
       generate: true,
     });
 
-    const result = applyBuilderToIps(stored, entities);
+    const result = applyBuilderToIps(stored, entities).ips;
     expect(result.entities).toHaveLength(2);
     expect(result.entities![1]).toMatchObject({
       name: 'Order',
@@ -455,7 +456,7 @@ describe('a half-typed entity', () => {
     const stored = storedIps();
     const entities = [...ipsToBuilder(stored), blankEntity()];
 
-    const result = applyBuilderToIps(stored, entities);
+    const result = applyBuilderToIps(stored, entities).ips;
     expect(result.entities).toHaveLength(1);
     expect(result.entities![0]!.name).toBe('User');
   });
@@ -475,7 +476,7 @@ describe('a half-typed entity', () => {
     const entities = [...ipsToBuilder(stored), blankEntity()];
     entities[1]!.name = 'Order';
 
-    const result = applyBuilderToIps(stored, entities);
+    const result = applyBuilderToIps(stored, entities).ips;
     expect(result.entities!.map((e) => e.name)).toEqual(['User', 'Order']);
   });
 });
@@ -521,5 +522,101 @@ describe('draftProblems', () => {
     const entities = ipsToBuilder(storedIps());
     entities.push({ ...entities[0]!, id: 'ui-dupe', name: 'user' });
     expect(draftProblems(entities)).toEqual(['Two entities are both called user.']);
+  });
+});
+
+describe('the path index it emits', () => {
+  /**
+   * The reason the index is built during the same pass as the payload: the
+   * positions are not recoverable afterwards. `applyBuilderToIps` writes the
+   * identity field first, so payload `fields[0]` is a control the form does not
+   * render and the first *authored* row lands at `fields[1]`.
+   *
+   * Get this wrong by one and a server error on `email` is shown under `age`.
+   */
+  it('offsets authored fields past the derived identity field', () => {
+    const stored = storedIps();
+    const entities = ipsToBuilder(stored);
+    const { paths } = applyBuilderToIps(stored, entities);
+
+    const [email, age, address] = entities[0]!.fields;
+    expect(paths.get('entities[0]')).toBe(entities[0]!.id);
+    expect(paths.get('entities[0].fields[1]')).toBe(email!.id);
+    expect(paths.get('entities[0].fields[2]')).toBe(age!.id);
+    expect(paths.get('entities[0].fields[3]')).toBe(address!.id);
+  });
+
+  /** `fields[0]` is the identity field, which the form does not show. */
+  it('claims nothing for a derived field', () => {
+    const stored = storedIps();
+    const { paths } = applyBuilderToIps(stored, ipsToBuilder(stored));
+    expect(paths.get('entities[0].fields[0]')).toBeUndefined();
+  });
+
+  it('claims nested children', () => {
+    const stored = storedIps();
+    const entities = ipsToBuilder(stored);
+    const city = entities[0]!.fields[2]!.children[0]!;
+
+    const { paths } = applyBuilderToIps(stored, entities);
+    expect(paths.get('entities[0].fields[3].children[0]')).toBe(city.id);
+  });
+
+  it('claims relations', () => {
+    const stored = storedIps();
+    const entities = ipsToBuilder(stored);
+    const { paths } = applyBuilderToIps(stored, entities);
+    expect(paths.get('entities[0].relations[0]')).toBe(entities[0]!.relations[0]!.id);
+  });
+
+  /**
+   * A dropped nameless entity shifts every index after it. The index has to
+   * describe the payload that was sent, not the form that produced it.
+   */
+  it('numbers entities by their position in the payload, not the form', () => {
+    const stored = storedIps();
+    const entities = ipsToBuilder(stored);
+    entities.unshift({
+      id: 'ui-blank',
+      name: '',
+      fields: [],
+      relations: [],
+      identityStyle: 'int',
+      generate: true,
+    });
+
+    const { ips, paths } = applyBuilderToIps(stored, entities);
+    expect(ips.entities).toHaveLength(1);
+    // User is form index 1 but payload index 0.
+    expect(paths.get('entities[0]')).toBe(entities[1]!.id);
+    expect(paths.get('entities[1]')).toBeUndefined();
+  });
+
+  it('skips half-typed field rows when numbering', () => {
+    const stored = storedIps();
+    const entities = ipsToBuilder(stored);
+    entities[0]!.fields.unshift({
+      id: 'ui-blank-field',
+      name: '',
+      type: 'string',
+      required: false,
+      default: '',
+      validation: {},
+      children: [],
+    });
+
+    const { paths } = applyBuilderToIps(stored, entities);
+    // The blank row is not sent, so `email` keeps its position after identity.
+    expect(paths.get('entities[0].fields[1]')).toBe(entities[0]!.fields[1]!.id);
+    expect([...paths.values()]).not.toContain('ui-blank-field');
+  });
+
+  it('maps a real server path end to end', () => {
+    const stored = storedIps();
+    const entities = ipsToBuilder(stored);
+    const { paths } = applyBuilderToIps(stored, entities);
+
+    // What the API would send for a bad name on the second authored field.
+    expect(resolvePath('entities[0].fields[2].name', paths)).toBe(entities[0]!.fields[1]!.id);
   });
 });
