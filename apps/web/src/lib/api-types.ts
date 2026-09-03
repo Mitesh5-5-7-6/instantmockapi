@@ -144,6 +144,14 @@ export interface ApiErrorEnvelope {
     code: string;
     message: string;
     details?: { path: string; issue: string }[];
+    /**
+     * Correlation id, also sent as the `x-request-id` header.
+     *
+     * Optional because a response that is not ours — a gateway 502, an HTML
+     * error page — has no envelope at all, and because the header is the
+     * preferred source.
+     */
+    requestId?: string;
   };
 }
 

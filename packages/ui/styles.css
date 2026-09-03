@@ -65,6 +65,9 @@
   --z-dropdown: 20;
   --z-sticky: 30;
   --z-modal: 50;
+  /* Above the modal on purpose: a delete can fail from inside its own confirm
+     dialog, and a notification the dialog covers is a notification nobody sees. */
+  --z-toast: 60;
 
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -2190,4 +2193,264 @@ h3 {
    stay readable, and a red panel makes body copy hard work. */
 .settings-danger {
   border-color: color-mix(in srgb, var(--status-error) 35%, var(--border));
+}
+
+/* ── 17 · Feedback: toasts, form errors, error states ───────────────────────
+ *
+ * The error vocabulary of the design system. Semantic colour comes from the
+ * existing `--status-*` tokens, so this inherits any future palette change
+ * rather than hard-coding a red.
+ *
+ * `.ui-chip--*` is deliberately not extended: those variants are already
+ * claimed by project and job statuses, and making `ui-chip--error` mean two
+ * unrelated things is how a token set stops being trustworthy.
+ * ------------------------------------------------------------------------- */
+
+.ui-toast-viewport {
+  position: fixed;
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(400px, calc(100vw - var(--space-6)));
+  /* The column must not swallow clicks on the page it floats over; each toast
+     re-enables pointer events for itself. */
+  pointer-events: none;
+}
+.ui-toast-viewport > * {
+  pointer-events: auto;
+}
+
+/* Newest nearest the anchored edge, so the eye finds it without scanning. */
+.ui-toast-viewport[data-stack='up'] {
+  flex-direction: column-reverse;
+}
+
+.ui-toast-viewport[data-position='top-left'] {
+  top: var(--space-4);
+  left: var(--space-4);
+}
+.ui-toast-viewport[data-position='top-right'] {
+  top: var(--space-4);
+  right: var(--space-4);
+}
+.ui-toast-viewport[data-position='bottom-left'] {
+  bottom: var(--space-4);
+  left: var(--space-4);
+}
+.ui-toast-viewport[data-position='bottom-right'] {
+  bottom: var(--space-4);
+  right: var(--space-4);
+}
+.ui-toast-viewport[data-position='top-center'] {
+  top: var(--space-4);
+  left: 50%;
+  transform: translateX(-50%);
+}
+.ui-toast-viewport[data-position='bottom-center'] {
+  bottom: var(--space-4);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.ui-toast {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  /* The variant reads from the left edge, as `.ui-note` already does — a filled
+     panel makes the body copy hard work, and an error toast is text people have
+     to actually read. */
+  border-left: 3px solid var(--toast-accent, var(--accent));
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  animation: ui-toast-in 160ms ease-out;
+}
+.ui-toast > svg {
+  margin-top: 2px;
+  color: var(--toast-accent, var(--accent));
+}
+
+.ui-toast--success {
+  --toast-accent: var(--status-success);
+}
+.ui-toast--error {
+  --toast-accent: var(--status-error);
+}
+.ui-toast--warning {
+  --toast-accent: var(--status-warning);
+}
+.ui-toast--info {
+  --toast-accent: var(--accent);
+}
+.ui-toast--loading {
+  --toast-accent: var(--accent-2);
+}
+
+.ui-toast__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.ui-toast__title {
+  font-size: var(--text-sm);
+  /* Long server messages wrap rather than being clipped: a truncated error is
+     one the user has to guess at. */
+  overflow-wrap: anywhere;
+}
+.ui-toast__detail {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+.ui-toast__action {
+  align-self: flex-start;
+  margin-top: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--toast-accent, var(--accent));
+  font: inherit;
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.ui-toast__dismiss {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.ui-toast__dismiss:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.ui-toast--loading > svg {
+  animation: ui-spin 1s linear infinite;
+}
+
+@keyframes ui-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes ui-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Someone who asked for less motion still needs the toast, just not the slide. */
+@media (prefers-reduced-motion: reduce) {
+  .ui-toast {
+    animation: none;
+  }
+  .ui-toast--loading > svg {
+    animation: none;
+  }
+}
+
+/* ── Form-level error ── */
+.ui-formerror {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--status-error) 35%, var(--border));
+  border-left: 3px solid var(--status-error);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--status-error) 6%, var(--surface-raised));
+  font-size: var(--text-sm);
+}
+.ui-formerror > svg {
+  margin-top: 2px;
+  color: var(--status-error);
+}
+.ui-formerror__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.ui-formerror__body span {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* ── Error state ── */
+.ui-errorstate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  border-color: color-mix(in srgb, var(--status-error) 30%, var(--border));
+}
+.ui-errorstate > svg {
+  color: var(--status-error);
+}
+
+/* ── Error details panel ── */
+.ui-errordetails__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding-left: var(--space-4);
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+.ui-errordetails__list > li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ui-errordetails__list code {
+  color: var(--accent-2);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.ui-errordetails__meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  margin: 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  gap: var(--space-3);
+}
+.ui-errordetails__meta dt {
+  font-size: var(--text-xs);
+}
+.ui-errordetails__meta dd {
+  margin: 0;
+  font-size: var(--text-xs);
+  /* Selectable, because pasting a request id into a support message is the
+     reason it is shown at all. */
+  user-select: all;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .ui-toast-viewport {
+    width: calc(100vw - var(--space-4));
+    left: var(--space-2);
+    right: var(--space-2);
+    transform: none;
+  }
 }

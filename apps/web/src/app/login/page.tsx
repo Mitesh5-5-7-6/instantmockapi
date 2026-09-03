@@ -11,8 +11,8 @@
 import { useEffect, useId, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Button, Field, Input } from '@instantmockapi/ui';
-import { ApiError } from '../../lib/api-client';
+import { Button, Field, FormError, Input } from '@instantmockapi/ui';
+import { normalizeError } from '../../lib/errors';
 import { useAuthState, useLogin, useResendVerification } from '../../lib/hooks';
 import { AuthCard, AuthNotice } from '../../components/auth/auth-card';
 import { PasswordField } from '../../components/auth/password-field';
@@ -39,8 +39,11 @@ export default function LoginPage() {
     }
   }, [authState, router]);
 
-  const error = login.error instanceof ApiError ? login.error : null;
-  const unverified = error?.code === 'EMAIL_NOT_VERIFIED';
+  // Normalised rather than narrowed to `ApiError`: every kind of failure has to
+  // reach the block below, including a network one, and the normaliser is what
+  // turns `Failed to fetch` into a sentence.
+  const failure = login.isError ? normalizeError(login.error) : null;
+  const unverified = failure?.code === 'EMAIL_NOT_VERIFIED';
   const pending = login.isPending;
 
   if (login.data?.kind === 'password-setup-required') {
@@ -115,17 +118,24 @@ export default function LoginPage() {
           {pending ? 'Signing in…' : 'Sign in'}
         </Button>
 
-        {error !== null && !unverified ? (
-          <p className="ui-error" role="alert">
-            {error.message}
-          </p>
+        {/*
+          Form-level, and no toast: the form is the whole screen and this block
+          sits at the submit button, so a toast would put the identical sentence
+          in a second place at the same moment.
+
+          Conditioned on the failure, not on `instanceof ApiError` — that guard
+          rendered nothing at all for a network failure, so signing in with no
+          connection looked like the button did nothing.
+        */}
+        {failure !== null && !unverified ? (
+          <FormError title={failure.title} detail={failure.detail} />
         ) : null}
 
         {/* Its own branch, because this is not really an error: the password was
             right and there is something useful to do about it. */}
         {unverified ? (
           <AuthNotice tone="warning" icon="alert" title="Confirm your email address first">
-            <p className="ui-meta">{error?.message}</p>
+            <p className="ui-meta">{failure?.title}</p>
             {resend.isSuccess ? (
               <p className="ui-meta">{resend.data.message}</p>
             ) : (

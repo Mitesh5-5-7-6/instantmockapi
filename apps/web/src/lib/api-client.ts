@@ -19,6 +19,8 @@
  * `authenticated` or `anonymous` once the boot refresh returns.
  */
 
+import { REQUEST_ID_PATTERN } from '@instantmockapi/shared';
+
 import type { ApiErrorEnvelope, AuthSession } from './api-types';
 
 export class ApiError extends Error {
@@ -27,9 +29,33 @@ export class ApiError extends Error {
     public readonly code: string,
     message: string,
     public readonly details?: { path: string; issue: string }[],
+    /**
+     * Correlation id for this failure, when the API supplied one.
+     *
+     * Shown only inside "View details" — never as the primary message. A user's
+     * problem is that saving failed; `req_8f3c1a` is what makes it findable
+     * afterwards, not what they need to read first.
+     */
+    public readonly requestId?: string,
   ) {
     super(message);
     this.name = 'ApiError';
+  }
+}
+
+/**
+ * A request that never reached the API.
+ *
+ * Distinct from `ApiError` because there is no status, no code and no server
+ * message to work with — and because the remedy is different: check the
+ * connection, not the payload. Without this the raw `TypeError: Failed to fetch`
+ * escapes to whatever renders `error.message`, which is exactly what §17 of the
+ * error spec forbids.
+ */
+export class NetworkError extends Error {
+  constructor(public readonly cause: unknown) {
+    super('The request did not reach the server');
+    this.name = 'NetworkError';
   }
 }
 
@@ -105,6 +131,25 @@ export function forgetSession(): void {
   setAuth('anonymous', null);
 }
 
+/**
+ * The correlation id for a response, header first.
+ *
+ * The header is set on every reply by the API's `onSend` hook, so it survives
+ * responses our envelope never produced — a gateway 502, an HTML error page, a
+ * 413 from the proxy. The body is the fallback for the same value.
+ *
+ * Validated against the shared pattern rather than trusted: this string ends up
+ * on screen, and a proxy is free to put anything in a header.
+ */
+function readRequestId(response: Response, envelope: ApiErrorEnvelope | null): string | undefined {
+  const header = response.headers.get('x-request-id');
+  if (header !== null && REQUEST_ID_PATTERN.test(header)) {
+    return header;
+  }
+  const body = envelope?.error.requestId;
+  return typeof body === 'string' && REQUEST_ID_PATTERN.test(body) ? body : undefined;
+}
+
 async function parseError(response: Response): Promise<ApiError> {
   let envelope: ApiErrorEnvelope | null = null;
   try {
@@ -112,11 +157,13 @@ async function parseError(response: Response): Promise<ApiError> {
   } catch {
     // non-JSON error body
   }
+  const requestId = readRequestId(response, envelope);
   return new ApiError(
     response.status,
     envelope?.error.code ?? 'INTERNAL_ERROR',
     envelope?.error.message ?? `Request failed with status ${response.status}`,
     envelope?.error.details,
+    requestId,
   );
 }
 
@@ -200,16 +247,25 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const { method = 'GET', body, retryOn401 = true, withCredentials = false } = options;
 
-  const response = await fetch(`${apiBaseUrl()}${path}`, {
-    method,
-    ...(withCredentials ? { credentials: 'include' as const } : {}),
-    headers: {
-      ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-      ...(accessToken !== null ? { authorization: `Bearer ${accessToken}` } : {}),
-      ...(withCredentials ? CSRF_HEADERS : {}),
-    },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseUrl()}${path}`, {
+      method,
+      ...(withCredentials ? { credentials: 'include' as const } : {}),
+      headers: {
+        ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+        ...(accessToken !== null ? { authorization: `Bearer ${accessToken}` } : {}),
+        ...(withCredentials ? CSRF_HEADERS : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+  } catch (cause) {
+    // `fetch` rejects only when the request never completed: offline, DNS
+    // failure, CORS rejection, a connection reset. It does NOT reject on 4xx or
+    // 5xx, so anything landing here has no status to report. Wrapped so the
+    // browser's own `TypeError: Failed to fetch` cannot reach a user's screen.
+    throw new NetworkError(cause);
+  }
 
   if (response.status === 401 && retryOn401 && (await refreshOnce())) {
     return apiFetch<T>(path, { method, body, withCredentials, retryOn401: false });

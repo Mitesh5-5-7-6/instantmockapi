@@ -33,6 +33,7 @@ export function EntityCard({
   onRemove,
   showRelations = true,
   noun = 'entity',
+  errors,
 }: {
   entity: BuilderEntity;
   targets: string[];
@@ -50,15 +51,27 @@ export function EntityCard({
    * one that created the project.
    */
   noun?: 'entity' | 'endpoint';
+  /** Server-reported problems, keyed by builder node id. */
+  errors?: ReadonlyMap<string, string[]> | undefined;
 }) {
+  const entityErrors = errors?.get(entity.id) ?? [];
   return (
     <Card className="ui-stack">
       <div className="ui-row ui-row--between" style={{ alignItems: 'flex-end' }}>
-        <Field label={noun === 'endpoint' ? 'Endpoint name' : 'Entity name'}>
+        {/*
+          `Field` already renders and announces an error; it had simply never
+          been given one. This is the server's message about this entity's name,
+          beside the input rather than at the bottom of the page.
+        */}
+        <Field
+          label={noun === 'endpoint' ? 'Endpoint name' : 'Entity name'}
+          error={entityErrors[0] ?? null}
+        >
           <Input
             value={entity.name}
             placeholder="Student"
             onChange={(event) => onChange({ ...entity, name: event.target.value })}
+            aria-invalid={entityErrors.length > 0 ? true : undefined}
           />
         </Field>
         <Field label="Record id">
@@ -104,9 +117,20 @@ export function EntityCard({
                 fields: entity.fields.filter((item) => item.id !== field.id),
               })
             }
+            errors={errors}
           />
         ))}
       </div>
+
+      {entityErrors.length > 1 ? (
+        <div className="ui-stack" style={{ gap: 2 }}>
+          {entityErrors.slice(1).map((issue) => (
+            <span key={issue} className="ui-error" role="alert">
+              {issue}
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       <div>
         <Button

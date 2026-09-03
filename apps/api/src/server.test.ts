@@ -42,8 +42,15 @@ describe('auth contract', () => {
     const res = await app.inject({ method: 'GET', url: '/v1/projects' });
     expect(res.statusCode).toBe(401);
     expect(res.json()).toEqual({
-      error: { code: 'UNAUTHORIZED', message: expect.any(String) },
+      error: {
+        code: 'UNAUTHORIZED',
+        message: expect.any(String),
+        // Every failure carries a correlation id, echoed in `x-request-id`, so a
+        // user reporting one can hand over something findable in the logs.
+        requestId: expect.stringMatching(/^req_[0-9a-f]+$/),
+      },
     });
+    expect(res.headers['x-request-id']).toMatch(/^req_[0-9a-f]+$/);
   });
 
   it('rejects a malformed bearer token with 401', async () => {
@@ -289,5 +296,75 @@ describe('rate limiting', () => {
     } finally {
       await limited.close();
     }
+  });
+});
+
+describe('request correlation', () => {
+  /**
+   * A user reporting "saving failed" needs to hand over something findable.
+   * Fastify's default `genReqId` is a per-process counter — `req-1`, `req-2` —
+   * which restarts at 1 on every deploy and collides across instances, so two
+   * unrelated failures a week apart can carry the same id.
+   */
+  it('stamps a distinct id on every response, not a counter', async () => {
+    const first = await app.inject({ method: 'GET', url: '/healthz' });
+    const second = await app.inject({ method: 'GET', url: '/healthz' });
+
+    for (const res of [first, second]) {
+      expect(res.headers['x-request-id']).toMatch(/^req_[0-9a-f]{10}$/);
+    }
+    expect(first.headers['x-request-id']).not.toBe(second.headers['x-request-id']);
+  });
+
+  /** Successes carry it too: a wrong-looking 200 needs the same handle as a 500. */
+  it('stamps successes as well as failures', async () => {
+    const ok = await app.inject({ method: 'GET', url: '/healthz' });
+    const missing = await app.inject({ method: 'GET', url: '/v1/nope' });
+
+    expect(ok.statusCode).toBeLessThan(400);
+    expect(ok.headers['x-request-id']).toBeTruthy();
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json().error.requestId).toBe(missing.headers['x-request-id']);
+  });
+
+  /**
+   * An inbound id is honoured so a request traced through another service keeps
+   * one id end to end — but validated first. An unchecked header is a
+   * log-injection vector and a way to make two requests share an id.
+   */
+  it('honours a well-formed inbound id', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/healthz',
+      headers: { 'x-request-id': 'req_abcdef0123' },
+    });
+    expect(res.headers['x-request-id']).toBe('req_abcdef0123');
+  });
+
+  it.each(['nonsense', 'req_NOTHEX', '', 'req_' + 'a'.repeat(64), '<script>alert(1)</script>'])(
+    'mints its own id rather than trusting %o',
+    async (inbound) => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/healthz',
+        headers: { 'x-request-id': inbound },
+      });
+      expect(res.headers['x-request-id']).toMatch(/^req_[0-9a-f]{10}$/);
+      expect(res.headers['x-request-id']).not.toBe(inbound);
+    },
+  );
+
+  /** The ajv-validation branch of the error handler needs the id too. */
+  it('stamps a schema-validation failure', async () => {
+    const session = await login(app, 'correlate@example.com');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(session.accessToken),
+      payload: { nope: true },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.requestId).toMatch(/^req_[0-9a-f]+$/);
   });
 });

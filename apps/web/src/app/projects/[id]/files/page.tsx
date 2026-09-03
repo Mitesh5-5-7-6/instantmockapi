@@ -19,6 +19,9 @@ import {
   useArtifacts,
   useRegenerate,
 } from '../../../../lib/hooks';
+import { normalizeError } from '../../../../lib/errors';
+import { useAction } from '../../../../lib/use-action';
+import { notifyFailure } from '../../../../lib/toast';
 
 /** Artifacts whose payload is a binary bundle, so there is nothing to render. */
 const NON_VIEWABLE = ['export_bundle'];
@@ -27,9 +30,8 @@ export default function FilesPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const artifacts = useArtifacts(id);
-  const regenerate = useRegenerate(id);
+  const regenerate = useAction(useRegenerate(id), { success: 'Regeneration started' });
   const [view, setView] = useState<{ type: string; version: number } | null>(null);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
   const content = useArtifactContent(id, view?.type ?? null, view?.version);
 
   const rows = artifacts.data?.data ?? [];
@@ -47,14 +49,6 @@ export default function FilesPage() {
           </div>
           <span className="ui-meta ui-mono">v{artifacts.data?.meta.version ?? '…'}</span>
         </div>
-
-        {/* Surfaced inline rather than thrown: a failed download must not take the
-            page down, and the message names the artifact that failed. */}
-        {downloadError ? (
-          <p className="ui-error" role="alert">
-            {downloadError}
-          </p>
-        ) : null}
 
         {artifacts.isLoading ? <div className="ui-skeleton" /> : null}
 
@@ -98,10 +92,18 @@ export default function FilesPage() {
                   size="sm"
                   disabled={artifact.status !== 'completed'}
                   onClick={() => {
-                    setDownloadError(null);
+                    // A toast, not an inline message: the page keeps its content
+                    // either way, and a download is an action whose outcome the
+                    // user needs told to them wherever they have scrolled to.
                     downloadArtifact(id, artifact.artifactType, artifact.version).catch(
-                      (cause: Error) =>
-                        setDownloadError(`${artifact.artifactType}: ${cause.message}`),
+                      (cause: unknown) => {
+                        const failure = normalizeError(cause);
+                        notifyFailure({
+                          ...failure,
+                          title: `Couldn't download ${artifact.artifactType}`,
+                          detail: failure.title,
+                        });
+                      },
                     );
                   }}
                 >
@@ -112,8 +114,10 @@ export default function FilesPage() {
                   size="sm"
                   disabled={regenerate.isPending}
                   onClick={() =>
-                    regenerate.mutate([artifact.artifactType], {
-                      onSuccess: (job) => router.push(`/projects/${id}/progress/${job.jobId}`),
+                    void regenerate.run([artifact.artifactType]).then((job) => {
+                      if (job !== null) {
+                        router.push(`/projects/${id}/progress/${job.jobId}`);
+                      }
                     })
                   }
                 >

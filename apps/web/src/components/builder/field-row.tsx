@@ -66,18 +66,29 @@ export function FieldRow({
   removable = true,
   onChange,
   onRemove,
+  errors,
 }: {
   field: BuilderField;
   depth: number;
   removable?: boolean;
   onChange: (next: BuilderField) => void;
   onRemove: () => void;
+  /**
+   * Server-reported problems, keyed by builder node id.
+   *
+   * The whole map is passed down rather than this row's own messages, because a
+   * nested child needs its own and only the map can carry them. Undefined when
+   * the form has no server errors to show, which is the ordinary case.
+   */
+  errors?: ReadonlyMap<string, string[]> | undefined;
 }) {
   const isObject = field.type === 'object';
   const isArray = field.type === 'array';
   const isGroup = isObject || isArray;
   const suggestion = suggestFor(field);
   const element = field.children[0];
+
+  const fieldErrors = errors?.get(field.id) ?? [];
 
   const setValidation = (patch: Partial<BuilderValidation>): void =>
     onChange({ ...field, validation: { ...field.validation, ...patch } });
@@ -111,6 +122,9 @@ export function FieldRow({
           placeholder="field name"
           onChange={(event) => onChange({ ...field, name: event.target.value })}
           style={{ maxWidth: 200 }}
+          // Marked on the control the message belongs to, so a reader is not
+          // left matching a message at the bottom of a form to one of many rows.
+          aria-invalid={fieldErrors.length > 0 ? true : undefined}
         />
         <Select value={field.type} onChange={(event) => changeType(event.target.value)}>
           {FIELD_TYPES.map((type) => (
@@ -269,6 +283,17 @@ export function FieldRow({
         />
       ) : null}
 
+      {/*
+        Under the row they belong to. This is the difference the whole change is
+        about: "IPS validation failed" at the bottom of a form told the user
+        nothing about which of their fields the server rejected.
+      */}
+      {fieldErrors.map((issue) => (
+        <span key={issue} className="ui-error" role="alert">
+          {issue}
+        </span>
+      ))}
+
       {isObject ? (
         <div className="ui-stack" style={{ gap: 'var(--space-3)', paddingLeft: 'var(--space-3)' }}>
           {field.children.map((child) => (
@@ -280,6 +305,7 @@ export function FieldRow({
               onRemove={() =>
                 onChange({ ...field, children: field.children.filter((c) => c.id !== child.id) })
               }
+              errors={errors}
             />
           ))}
           <div>
@@ -305,6 +331,7 @@ export function FieldRow({
               removable={false}
               onChange={(next) => replaceChild(element.id, next)}
               onRemove={() => undefined}
+              errors={errors}
             />
           ) : (
             <div>

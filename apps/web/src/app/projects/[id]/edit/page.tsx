@@ -26,14 +26,17 @@
  * `/draft/impact`. See `review-changes.tsx` for why that matters.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Button, Card, EmptyState, Icon, Note } from '@instantmockapi/ui';
+import { Button, Card, EmptyState, ErrorState, Icon, Note } from '@instantmockapi/ui';
 import { EntityCard } from '../../../../components/builder/entity-card';
 import { ReviewChanges } from '../../../../components/project/review-changes';
 import { newEntity, type BuilderEntity } from '../../../../lib/builder';
 import { validateRelations } from '../../../../lib/relations';
+import { normalizeError } from '../../../../lib/errors';
+import type { FieldPathIndex } from '../../../../lib/error-paths';
+import { useAction } from '../../../../lib/use-action';
 import {
   applyBuilderToIps,
   draftProblems,
@@ -51,12 +54,8 @@ import {
   useReforkDraft,
   useSaveDraft,
 } from '../../../../lib/hooks';
-import { ApiError } from '../../../../lib/api-client';
 
 type Stage = 'edit' | 'review';
-
-const message = (error: unknown): string =>
-  error instanceof ApiError || error instanceof Error ? error.message : String(error);
 
 export default function EditProjectPage() {
   const { id } = useParams<{ id: string }>();
@@ -64,10 +63,30 @@ export default function EditProjectPage() {
 
   const project = useProject(id);
   const draft = useDraft(id);
-  const saveDraft = useSaveDraft(id);
-  const discardDraft = useDiscardDraft(id);
-  const reforkDraft = useReforkDraft(id);
-  const commitDraft = useCommitDraft(id);
+  /**
+   * Field errors from the last save, keyed by builder node id.
+   *
+   * Held here rather than inside `useAction` because the form owns where they
+   * render — `useAction` decides that they go inline, not which component shows
+   * them.
+   */
+  const [fieldErrors, setFieldErrors] = useState<ReadonlyMap<string, string[]>>(new Map());
+  /** The index from the last payload built, for routing the next failure. */
+  const pathIndex = useRef<FieldPathIndex>(new Map());
+
+  const saveDraft = useAction(useSaveDraft(id), {
+    fields: () => pathIndex.current,
+    onFieldErrors: setFieldErrors,
+  });
+  const discardDraft = useAction(useDiscardDraft(id), { success: 'Draft discarded' });
+  const reforkDraft = useAction(useReforkDraft(id), { success: 'Draft re-forked' });
+  /**
+   * No `fields`: a commit sends only the artifact list and the digest, so the
+   * server has no schema path to report. No toast either — the review panel is
+   * the whole screen and its `FormError` sits at the button, so a toast would
+   * put the same sentence in two places at once.
+   */
+  const commitDraft = useAction(useCommitDraft(id), { toast: false });
 
   const [stage, setStage] = useState<Stage>('edit');
   const [entities, setEntities] = useState<BuilderEntity[] | null>(null);
@@ -139,11 +158,15 @@ export default function EditProjectPage() {
     );
   };
 
-  const save = async (): Promise<void> => {
+  const save = async (): Promise<boolean> => {
     if (base === null || entities === null) {
-      return;
+      return false;
     }
-    await saveDraft.mutateAsync({ ips: applyBuilderToIps(base, entities) });
+    // The index is captured from the same call that builds the payload, so a
+    // failure can be routed against exactly what was sent.
+    const applied = applyBuilderToIps(base, entities);
+    pathIndex.current = applied.paths;
+    return (await saveDraft.run({ ips: applied.ips })) !== null;
   };
 
   /**
@@ -153,18 +176,19 @@ export default function EditProjectPage() {
    * unsaved edits would show the user an analysis of something else entirely.
    */
   const review = async (): Promise<void> => {
-    try {
-      if (dirty) {
-        await save();
-      }
-      setStage('review');
-    } catch {
-      // The mutation's own error state renders below; nothing to add here.
+    // Only advance on success. Reviewing after a failed save would analyse the
+    // last *stored* draft, which is not what the user is looking at.
+    if (dirty && !(await save())) {
+      return;
     }
+    setStage('review');
   };
 
   const commit = async (input: { artifacts: string[]; acknowledgeImpact: string }) => {
-    const result = await commitDraft.mutateAsync(input);
+    const result = await commitDraft.run(input);
+    if (result === null) {
+      return;
+    }
     if (result.committed && result.job !== null) {
       router.push(`/projects/${id}/progress/${result.job.jobId}`);
     } else {
@@ -173,8 +197,9 @@ export default function EditProjectPage() {
   };
 
   const discard = async (): Promise<void> => {
-    await discardDraft.mutateAsync();
-    router.push(`/projects/${id}/schema`);
+    if ((await discardDraft.run(undefined)) !== null) {
+      router.push(`/projects/${id}/schema`);
+    }
   };
 
   if (project.isLoading || draft.isLoading) {
@@ -183,10 +208,11 @@ export default function EditProjectPage() {
 
   if (draft.isError) {
     return (
-      <Card className="ui-stack">
-        <h2>Could not open the editor</h2>
-        <p className="ui-error">{message(draft.error)}</p>
-      </Card>
+      <ErrorState
+        title="Could not open the editor"
+        detail={normalizeError(draft.error).title}
+        onRetry={() => void draft.refetch()}
+      />
     );
   }
 
@@ -200,22 +226,22 @@ export default function EditProjectPage() {
     }
     if (impact.data === undefined) {
       return (
-        <Card className="ui-stack">
-          <h2>Could not analyse the changes</h2>
-          <p className="ui-error">{message(impact.error)}</p>
-          <div className="ui-row">
-            <Button variant="secondary" onClick={() => setStage('edit')}>
-              Back to editing
-            </Button>
-          </div>
-        </Card>
+        <ErrorState
+          title="Could not analyse the changes"
+          detail={normalizeError(impact.error).title}
+          onRetry={() => void impact.refetch()}
+        >
+          <Button variant="secondary" onClick={() => setStage('edit')}>
+            Back to editing
+          </Button>
+        </ErrorState>
       );
     }
     return (
       <ReviewChanges
         analysis={impact.data}
         busy={commitDraft.isPending}
-        error={commitDraft.isError ? message(commitDraft.error) : null}
+        error={commitDraft.failure?.title ?? null}
         onCancel={() => setStage('edit')}
         onConfirm={(input) => void commit(input)}
       />
@@ -254,7 +280,7 @@ export default function EditProjectPage() {
             type="button"
             className="ui-btn ui-btn--sm"
             disabled={reforkDraft.isPending}
-            onClick={() => void reforkDraft.mutateAsync()}
+            onClick={() => void reforkDraft.run(undefined)}
           >
             {reforkDraft.isPending ? 'Re-forking…' : 'Re-fork from v' + draft.data.currentVersion}
           </button>
@@ -287,6 +313,7 @@ export default function EditProjectPage() {
             removable={entities.length > 1}
             showRelations={showRelations}
             noun={noun}
+            errors={fieldErrors}
             onChange={(next) => updateEntity(entity.id, next)}
             onRemove={() =>
               setEntities((current) => (current ?? []).filter((item) => item.id !== entity.id))
@@ -313,9 +340,6 @@ export default function EditProjectPage() {
           </span>
         </Note>
       )}
-
-      {saveDraft.isError && <p className="ui-error">{message(saveDraft.error)}</p>}
-      {discardDraft.isError && <p className="ui-error">{message(discardDraft.error)}</p>}
 
       <Card className="ui-row ui-row--between">
         <span className="ui-meta">

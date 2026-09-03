@@ -27,6 +27,7 @@ import {
   type ApiMethod,
 } from '@instantmockapi/ui';
 import { useGenerate, useProject, useProjectMetrics, type MetricsDays } from '../../../lib/hooks';
+import { useAction } from '../../../lib/use-action';
 import { projectEndpoints, type IpsEntity } from '../../../lib/endpoints';
 import { toEndpointRows, toProjectStatTiles, toRequestPoints } from '../../../lib/project-metrics';
 import { formatCompact } from '../../../lib/area-chart';
@@ -52,7 +53,7 @@ export default function ProjectOverviewPage() {
 
   const project = useProject(id);
   const metrics = useProjectMetrics(id, days);
-  const generate = useGenerate(id);
+  const generate = useAction(useGenerate(id), { success: 'Generation started' });
 
   if (!project.data) {
     return <div className="ui-skeleton" style={{ minHeight: 320 }} />;
@@ -82,8 +83,10 @@ export default function ProjectOverviewPage() {
             <Button
               disabled={generate.isPending}
               onClick={() =>
-                generate.mutate(undefined, {
-                  onSuccess: (job) => router.push(`/projects/${id}/progress/${job.jobId}`),
+                void generate.run(undefined).then((job) => {
+                  if (job !== null) {
+                    router.push(`/projects/${id}/progress/${job.jobId}`);
+                  }
                 })
               }
             >
@@ -96,8 +99,10 @@ export default function ProjectOverviewPage() {
           detail={detail}
           generating={generate.isPending}
           onGenerate={() =>
-            generate.mutate(undefined, {
-              onSuccess: (job) => router.push(`/projects/${id}/progress/${job.jobId}`),
+            void generate.run(undefined).then((job) => {
+              if (job !== null) {
+                router.push(`/projects/${id}/progress/${job.jobId}`);
+              }
             })
           }
         />

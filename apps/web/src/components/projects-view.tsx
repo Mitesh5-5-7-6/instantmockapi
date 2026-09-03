@@ -9,9 +9,20 @@
  * the landing page dark.
  */
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Button, Card, CountdownBadge, EmptyState, StatusChip } from '@instantmockapi/ui';
+import {
+  Button,
+  Card,
+  CountdownBadge,
+  EmptyState,
+  ErrorState,
+  Modal,
+  StatusChip,
+} from '@instantmockapi/ui';
+import { normalizeError } from '../lib/errors';
+import { useAction } from '../lib/use-action';
 import { useDeleteProject, useProjects } from '../lib/hooks';
 import type { ProjectSummary } from '../lib/api-types';
 
@@ -30,8 +41,18 @@ function projectAction(project: ProjectSummary): { label: string; href: string }
 
 function ProjectCard({ project }: { project: ProjectSummary }) {
   const router = useRouter();
-  const deleteProject = useDeleteProject();
   const action = projectAction(project);
+  const [confirming, setConfirming] = useState(false);
+
+  /**
+   * Deleting is irreversible and takes the hosted URL down immediately, so the
+   * confirmation says what actually goes — and it is a `Modal` rather than
+   * `window.confirm`, which cannot be styled, cannot be read by the same
+   * assistive-tech path as the rest of the app, and blocks the whole tab.
+   */
+  const remove = useAction(useDeleteProject(), {
+    success: `${project.name} deleted`,
+  });
 
   return (
     <Card interactive className="ui-stack">
@@ -55,16 +76,39 @@ function ProjectCard({ project }: { project: ProjectSummary }) {
         <Button
           size="sm"
           variant="danger"
-          disabled={deleteProject.isPending}
-          onClick={() => {
-            if (window.confirm(`Delete "${project.name}" and everything it generated?`)) {
-              deleteProject.mutate(project.id);
-            }
-          }}
+          disabled={remove.isPending}
+          onClick={() => setConfirming(true)}
         >
           Delete
         </Button>
       </div>
+
+      <Modal
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        title={`Delete ${project.name}?`}
+      >
+        <div className="ui-stack">
+          <p className="ui-meta">
+            The project, its generated files, its mock data and its request history are removed
+            permanently. The hosted URL stops resolving immediately.
+          </p>
+          <div className="ui-row" style={{ gap: 'var(--space-2)' }}>
+            <Button variant="secondary" onClick={() => setConfirming(false)}>
+              Keep it
+            </Button>
+            <Button
+              variant="danger"
+              disabled={remove.isPending}
+              onClick={() => {
+                void remove.run(project.id).then(() => setConfirming(false));
+              }}
+            >
+              {remove.isPending ? 'Deleting…' : 'Delete permanently'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </Card>
   );
 }
@@ -91,12 +135,11 @@ export function ProjectsView({ title, query }: { title: string; query?: string }
       ) : null}
 
       {projects.isError ? (
-        <EmptyState title="Couldn't load projects">
-          <p className="ui-error">{projects.error.message}</p>
-          <Button variant="secondary" onClick={() => void projects.refetch()}>
-            Retry
-          </Button>
-        </EmptyState>
+        <ErrorState
+          title="Couldn't load projects"
+          detail={normalizeError(projects.error).title}
+          onRetry={() => void projects.refetch()}
+        />
       ) : null}
 
       {projects.data && projects.data.data.length === 0 && query ? (

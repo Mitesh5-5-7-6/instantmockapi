@@ -57,3 +57,20 @@ export {
   type SchemaTreeEntity,
   type SchemaTreeField,
 } from './components.js';
+
+// ---------------------------------------------------------------------------
+// Feedback: the error and notification vocabulary
+// ---------------------------------------------------------------------------
+export {
+  Toast,
+  ToastViewport,
+  FormError,
+  ErrorState,
+  ErrorDetails,
+  type FeedbackVariant,
+  type ToastProps,
+  type ToastViewportProps,
+  type FormErrorProps,
+  type ErrorStateProps,
+  type ErrorDetailsProps,
+} from './feedback.js';

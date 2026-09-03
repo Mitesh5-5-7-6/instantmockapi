@@ -11,8 +11,8 @@
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Button } from '@instantmockapi/ui';
-import { ApiError } from '../../lib/api-client';
+import { FormError, Button } from '@instantmockapi/ui';
+import { formErrorProps } from '../../lib/errors';
 import { useResetPassword } from '../../lib/hooks';
 import { passwordProblems } from '../../lib/password';
 import { AuthCard, AuthNotice } from '../../components/auth/auth-card';
@@ -99,11 +99,9 @@ function ResetPasswordForm() {
           {reset.isPending ? 'Saving…' : 'Set password and sign in'}
         </Button>
 
-        {reset.error instanceof ApiError ? (
+        {reset.isError ? (
           <>
-            <p className="ui-error" role="alert">
-              {reset.error.message}
-            </p>
+            <FormError {...formErrorProps(reset.error)} />
             <p className="ui-meta">
               <Link href="/forgot-password">Request a new link</Link>
             </p>

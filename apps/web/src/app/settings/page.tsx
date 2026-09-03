@@ -11,9 +11,19 @@
  */
 
 import { useEffect, useId, useState } from 'react';
-import { Button, Card, Field, Input, Select, StatusChip } from '@instantmockapi/ui';
+import { Button, Card, Field, FormError, Input, Select, StatusChip } from '@instantmockapi/ui';
 import { useChangePassword, useMe, useUpdateMe } from '../../lib/hooks';
 import { passwordProblems } from '../../lib/password';
+import { useAction } from '../../lib/use-action';
+import {
+  readToastPosition,
+  writeToastPosition,
+  TOAST_POSITION_LABELS,
+  TOAST_POSITIONS,
+  DEFAULT_TOAST_POSITION,
+  type ToastPosition,
+} from '../../lib/toast-position';
+import { notifyInfo } from '../../lib/toast';
 import { PasswordField } from '../../components/auth/password-field';
 
 const THEME_KEY = 'instantmockapi.theme';
@@ -40,14 +50,24 @@ function ChangePasswordCard() {
 
   const problems = passwordProblems(next);
   const nextError = submitted && problems.length > 0 ? (problems[0] ?? null) : null;
-  const pending = change.isPending;
+
+  /**
+   * Form-wide, because the reason is about the submission rather than one input.
+   *
+   * A wrong current password is the common case and it *is* field-specific — but
+   * the server answers with an unauthorized code and no path, so there is
+   * nothing to route it by. Guessing would risk marking the new-password field
+   * for a problem with the old one.
+   */
+  const action = useAction(change, {
+    success: 'Password changed. Every other device has been signed out.',
+    formError: true,
+  });
+  const pending = action.isPending;
 
   return (
     <Card className="ui-stack">
       <h2>Password</h2>
-      {change.isSuccess ? (
-        <p className="ui-meta">Your password is changed. Every other device has been signed out.</p>
-      ) : null}
       <form
         className="ui-stack"
         onSubmit={(event) => {
@@ -56,20 +76,20 @@ function ChangePasswordCard() {
           if (problems.length > 0) {
             return;
           }
-          change.mutate(
-            { currentPassword: current, newPassword: next },
-            {
-              onSuccess: () => {
-                // Cleared on success so the fields are not left holding two
-                // live passwords in the DOM.
-                setCurrent('');
-                setNext('');
-                setSubmitted(false);
-              },
-            },
-          );
+          void action.run({ currentPassword: current, newPassword: next }).then((result) => {
+            if (result !== null) {
+              // Cleared on success so the fields are not left holding two live
+              // passwords in the DOM.
+              setCurrent('');
+              setNext('');
+              setSubmitted(false);
+            }
+          });
         }}
       >
+        {action.formError ? (
+          <FormError title={action.formError.title} detail={action.formError.detail} />
+        ) : null}
         <Field label="Current password" htmlFor={currentId}>
           <Input
             id={currentId}
@@ -97,11 +117,7 @@ function ChangePasswordCard() {
           <Button size="sm" type="submit" disabled={pending || current === '' || next === ''}>
             {pending ? 'Changing…' : 'Change password'}
           </Button>
-          {change.isError ? (
-            <span className="ui-error">{change.error.message}</span>
-          ) : (
-            <span className="ui-meta">Signs out every other device.</span>
-          )}
+          <span className="ui-meta">Signs out every other device.</span>
         </div>
       </form>
     </Card>
@@ -110,14 +126,16 @@ function ChangePasswordCard() {
 
 export default function SettingsPage() {
   const me = useMe();
-  const updateMe = useUpdateMe();
+  const saveName = useAction(useUpdateMe(), { success: 'Display name saved' });
   const [theme, setTheme] = useState('dark');
+  const [toastPosition, setToastPosition] = useState<ToastPosition>(DEFAULT_TOAST_POSITION);
   const [name, setName] = useState('');
   const [nameLoaded, setNameLoaded] = useState(false);
 
   useEffect(() => {
     const stored = window.localStorage.getItem(THEME_KEY) ?? 'dark';
     setTheme(stored);
+    setToastPosition(readToastPosition());
   }, []);
 
   // Seed the field once, then leave it alone — re-syncing on every refetch would
@@ -128,6 +146,20 @@ export default function SettingsPage() {
       setNameLoaded(true);
     }
   }, [me.data, nameLoaded]);
+
+  function applyToastPosition(next: ToastPosition) {
+    setToastPosition(next);
+    // Written and announced together, so the viewport moves now rather than on
+    // the next reload — and the sample below is what proves it moved.
+    writeToastPosition(next);
+    notifyInfo(
+      'Notifications appear here',
+      TOAST_POSITION_LABELS[next],
+      // One key, so changing the setting repeatedly moves a single sample
+      // instead of stacking one per click.
+      'toast-position-sample',
+    );
+  }
 
   function applyTheme(next: string) {
     setTheme(next);
@@ -159,16 +191,12 @@ export default function SettingsPage() {
         <div className="ui-row">
           <Button
             size="sm"
-            disabled={updateMe.isPending || !nameLoaded || name === (me.data?.name ?? '')}
-            onClick={() => updateMe.mutate({ name: name.trim() === '' ? null : name.trim() })}
+            disabled={saveName.isPending || !nameLoaded || name === (me.data?.name ?? '')}
+            onClick={() => void saveName.run({ name: name.trim() === '' ? null : name.trim() })}
           >
-            {updateMe.isPending ? 'Saving…' : 'Save'}
+            {saveName.isPending ? 'Saving…' : 'Save'}
           </Button>
-          {updateMe.isError ? (
-            <span className="ui-error">{updateMe.error.message}</span>
-          ) : (
-            <span className="ui-meta">Used to greet you on the dashboard.</span>
-          )}
+          {<span className="ui-meta">Used to greet you on the dashboard.</span>}
         </div>
 
         {limits ? (
@@ -190,6 +218,35 @@ export default function SettingsPage() {
             <option value="light">Light</option>
           </Select>
         </Field>
+      </Card>
+
+      <Card className="ui-stack">
+        <h2>Notifications</h2>
+        <Field
+          label="Position"
+          hint="Where confirmations and errors appear. One place, on every screen."
+        >
+          <Select
+            value={toastPosition}
+            aria-label="Notification position"
+            onChange={(event) => applyToastPosition(event.target.value as ToastPosition)}
+          >
+            {TOAST_POSITIONS.map((position) => (
+              <option key={position} value={position}>
+                {TOAST_POSITION_LABELS[position]}
+                {position === DEFAULT_TOAST_POSITION ? ' (default)' : ''}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {/*
+          Changing the control shows a sample immediately. A position setting
+          whose effect is invisible until the next failure is one nobody can tell
+          they have set correctly.
+        */}
+        <p className="ui-meta">
+          Errors stay until you dismiss them; confirmations fade on their own.
+        </p>
       </Card>
     </div>
   );
