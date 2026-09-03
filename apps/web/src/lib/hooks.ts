@@ -32,10 +32,10 @@ import type {
   ListEnvelope,
   ProjectDetail,
   ProjectDraft,
+  ProjectListRow,
   ProjectLogsEnvelope,
   ProjectLogsParams,
   ProjectMetricsView,
-  ProjectSummary,
 } from './api-types';
 
 /**
@@ -307,7 +307,10 @@ export function useProjects(params: ProjectListParams = {}) {
   const qs = search.toString();
   return useQuery({
     queryKey: ['projects', params],
-    queryFn: () => apiFetch<ListEnvelope<ProjectSummary>>(`/v1/projects${qs ? `?${qs}` : ''}`),
+    // `ProjectListRow`, not `ProjectSummary`: the endpoint already returns
+    // endpoint and request counts per row, and typing them as the narrower shape
+    // is what kept them off the screen.
+    queryFn: () => apiFetch<ListEnvelope<ProjectListRow>>(`/v1/projects${qs ? `?${qs}` : ''}`),
   });
 }
 
