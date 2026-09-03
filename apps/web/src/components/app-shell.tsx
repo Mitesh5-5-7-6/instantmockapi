@@ -14,6 +14,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { Button, Icon, IconTile } from '@instantmockapi/ui';
 import { useMe, useRestoreSession } from '../lib/hooks';
 import { VISIBLE_NAV_ITEMS, isNavActive } from '../lib/nav-items';
+import { usesWideContent } from '../lib/project-tabs';
 import { SidebarPlanCard } from './sidebar-plan-card';
 import { SidebarProfile } from './sidebar-profile';
 import { TopSearch } from './top-search';
@@ -194,7 +195,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
         {/* Opt-in per route: only the dashboard has two columns to fill. Every
             other screen keeps the 1100px reading measure. */}
-        <main className={pathname === '/' ? 'ui-main ui-main--wide' : 'ui-main'}>{children}</main>
+        <main className={usesWideContent(pathname) ? 'ui-main ui-main--wide' : 'ui-main'}>
+          {children}
+        </main>
         <AppFooter />
       </div>
     </div>

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { PROJECT_TABS, activeProjectTab, projectTabHref } from './project-tabs';
+import { PROJECT_TABS, activeProjectTab, projectTabHref, usesWideContent } from './project-tabs';
 
 const ID = '6a8e85c01cd07f3a6413b60a';
 
@@ -103,5 +103,42 @@ describe('activeProjectTab', () => {
    */
   it('does not match a project id that is only a prefix', () => {
     expect(activeProjectTab(`/projects/${ID}extra/logs`, ID)).toBeNull();
+  });
+});
+
+describe('usesWideContent', () => {
+  it('widens the dashboard', () => {
+    expect(usesWideContent('/')).toBe(true);
+  });
+
+  /**
+   * The gutter a user asked about: at 1920px the workspace sat in a 1100px
+   * column. These screens are tables, logs and generated code, not prose.
+   */
+  it('widens every project workspace tab', () => {
+    for (const tab of PROJECT_TABS) {
+      expect(usesWideContent(projectTabHref(ID, tab.segment)), tab.label).toBe(true);
+    }
+  });
+
+  it('widens the editor', () => {
+    expect(usesWideContent(`/projects/${ID}/edit`)).toBe(true);
+  });
+
+  /**
+   * `styles.css` is specific about this one: widening pulls each artifact's
+   * status chip away from its name across a gap nobody can track.
+   */
+  it('leaves the progress board narrow', () => {
+    expect(usesWideContent(`/projects/${ID}/progress`)).toBe(false);
+    expect(usesWideContent(`/projects/${ID}/progress/job-1`)).toBe(false);
+  });
+
+  it('leaves the creation wizards and everything else narrow', () => {
+    expect(usesWideContent('/new/project')).toBe(false);
+    expect(usesWideContent('/new/single')).toBe(false);
+    expect(usesWideContent('/projects')).toBe(false);
+    expect(usesWideContent('/settings')).toBe(false);
+    expect(usesWideContent('/demo-api')).toBe(false);
   });
 });

@@ -299,3 +299,47 @@
 @media (max-width: 700px) {
   .review-changes > li { grid-template-columns: minmax(0, 1fr); row-gap: 2px; }
 }
+
+/* ---------------------------------------------------------------------------
+ * Schema tab: tree beside a summary column
+ *
+ * A field list is intrinsically narrow — a name and a type — so alone in the
+ * workspace's wide measure it is a tall ribbon next to a screen of nothing. The
+ * aside carries what a reader wants beside a schema, and collapses under it once
+ * the two would each be too narrow to read.
+ * ------------------------------------------------------------------------ */
+.schema-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  align-items: start;
+  gap: var(--space-4);
+}
+.schema-aside h3 {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.schema-aside .ui-btn {
+  justify-content: center;
+}
+
+.schema-figures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.schema-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.schema-figure strong {
+  font-size: var(--text-xl);
+  line-height: 1.1;
+}
+
+/* Below this the tree and the aside are both too narrow to read side by side. */
+@media (max-width: 900px) {
+  .schema-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
