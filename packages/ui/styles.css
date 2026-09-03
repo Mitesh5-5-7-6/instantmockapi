@@ -18,8 +18,8 @@
   --text-muted: #a1a1aa;
   --text-subtle: #71717a;
   --text-disabled: #52525b;
-  --accent: #00ed64;
-  --accent-hover: #20f278;
+  --accent: #00c853;
+  --accent-hover: #00e676;
   --accent-muted: color-mix(in srgb, var(--accent) 16%, transparent);
   --accent-2: #7ee2a8;
   --accent-contrast: #001b0b;
@@ -28,7 +28,7 @@
   /* status */
   --status-pending: #6b7280;
   --status-generating: #7ee2a8;
-  --status-success: #00ed64;
+  --status-success: #00c853;
   --status-error: #ff6b6b;
   --status-expired: #a1a1aa;
   --status-warning: #f5b942;
@@ -90,8 +90,8 @@
   --text-muted: #b4b4b8;
   --text-subtle: #85858c;
   --text-disabled: #5f5f66;
-  --accent: #00ed64;
-  --accent-hover: #20f278;
+  --accent: #00c853;
+  --accent-hover: #00e676;
   --accent-muted: color-mix(in srgb, var(--accent) 16%, transparent);
   --accent-2: #9aefba;
   --accent-contrast: #001b0b;
@@ -120,11 +120,12 @@ pre,
 }
 
 a {
-  color: var(--accent);
+  color: var(--text-muted);
   text-decoration: none;
 }
 
 a:hover {
+  color: var(--text);
   text-decoration: underline;
 }
 
@@ -197,8 +198,8 @@ h3 {
 }
 
 .ui-btn--secondary:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--text-muted);
+  color: var(--text);
 }
 
 .ui-btn--ghost {
