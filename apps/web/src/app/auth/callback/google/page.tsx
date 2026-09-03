@@ -13,9 +13,9 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ApiError } from '../../../../lib/api-client';
 import { useGoogleSignIn } from '../../../../lib/hooks';
 import { googleRedirectUri, takeHandshake } from '../../../../lib/pkce';
+import { normalizeError } from '../../../../lib/errors';
 import { AuthCard, AuthNotice } from '../../../../components/auth/auth-card';
 
 function GoogleCallbackInner() {
@@ -73,8 +73,10 @@ function GoogleCallbackInner() {
     );
   }, [params, router, signIn]);
 
-  const message =
-    problem ?? (signIn.error instanceof ApiError ? signIn.error.message : null) ?? null;
+  // Normalised rather than narrowed to `ApiError`: a network failure here left
+  // `message` null, so the page rendered its "still working" state forever with
+  // no indication anything had gone wrong.
+  const message = problem ?? (signIn.isError ? normalizeError(signIn.error).title : null);
 
   if (message !== null) {
     return (

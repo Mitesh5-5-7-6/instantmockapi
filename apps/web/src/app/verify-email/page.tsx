@@ -17,8 +17,8 @@ import { Suspense, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@instantmockapi/ui';
-import { ApiError } from '../../lib/api-client';
 import { useVerifyEmail } from '../../lib/hooks';
+import { normalizeError } from '../../lib/errors';
 import { AuthCard, AuthNotice } from '../../components/auth/auth-card';
 
 function VerifyEmailInner() {
@@ -83,7 +83,7 @@ function VerifyEmailInner() {
       >
         <AuthNotice tone="warning" icon="alert" title="The link has expired or was already used">
           <p className="ui-meta">
-            {verify.error instanceof ApiError ? verify.error.message : 'Request a new one.'}
+            {verify.isError ? normalizeError(verify.error).title : 'Request a new one.'}
           </p>
           <p className="ui-meta">Signing in will offer to send a fresh confirmation link.</p>
         </AuthNotice>
