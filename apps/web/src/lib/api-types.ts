@@ -85,6 +85,23 @@ export interface ProjectSummary {
   updatedAt: string;
 }
 
+/**
+ * What `GET /v1/projects` adds to each row.
+ *
+ * The list endpoint has been computing these all along — `endpointCount` from
+ * the stored IPS and `requestCount` from an `ApiLog` aggregation — and the
+ * client was discarding them because the type never declared them. They are
+ * exactly the columns a table wants, so a card grid was the shape hiding the
+ * most useful data on the screen.
+ */
+export interface ProjectListRow extends ProjectSummary {
+  endpointCount: number;
+  /** Requests in the last `requestWindowDays`, not a lifetime total. */
+  requestCount: number;
+  /** Bounded by the ApiLog 30-day TTL, so it can never mean "ever". */
+  requestWindowDays: number;
+}
+
 export interface ProjectDetail extends ProjectSummary {
   ips: unknown;
   generationConfig: GenerationConfig;

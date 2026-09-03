@@ -954,3 +954,90 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Projects table
+ *
+ * Replaces the card grid. Shares the base table rules in `packages/ui` — this
+ * file only adds what is specific to these columns.
+ * ------------------------------------------------------------------------ */
+.projects-table-wrap {
+  /* Eight columns do not fit a phone, and a horizontally scrolling *document*
+     is worse than a horizontally scrolling table. */
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.projects-table {
+  /* The name column takes the slack; every other column sizes to its content so
+     the figures line up down the page. */
+  table-layout: auto;
+}
+
+.projects-table__row:hover :is(td, th) {
+  /* Grey, like every other hover in the system. */
+  background: var(--muted);
+}
+
+.projects-table__name {
+  /* `th scope="row"`, so it needs the weight reset that a header would carry. */
+  font-weight: 500;
+  text-align: left;
+  min-width: 180px;
+  max-width: 340px;
+}
+
+.projects-table__name a {
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.projects-table__name a:hover {
+  color: var(--accent-text);
+  text-decoration: none;
+}
+
+/* The description is secondary and must not push rows to two lines when long. */
+.projects-table__name .ui-meta {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-table__version,
+.projects-table__updated {
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.projects-table__expiry {
+  white-space: nowrap;
+}
+
+.projects-table__actions {
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Below this the eight columns stop fitting, so the ones that only aid
+   comparison across many projects are dropped rather than squeezed — the
+   remaining columns stay readable instead of every column becoming unreadable. */
+@media (max-width: 900px) {
+  .projects-table__version,
+  .projects-table__updated {
+    display: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .projects-table__num {
+    display: none;
+  }
+  .projects-table__name .ui-meta {
+    display: none;
+  }
+}
