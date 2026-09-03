@@ -9,29 +9,99 @@
 /* ── 1 · Tokens ─────────────────────────────────────────────────────────── */
 
 :root {
-  /* color — dark (default) */
-  --bg: #000000;
-  --surface: #080808;
-  --surface-raised: #111111;
-  --border: #242424;
-  --text: #f2f2f2;
-  --text-muted: #a1a1aa;
-  --text-subtle: #71717a;
-  --text-disabled: #52525b;
-  --accent: #00c853;
-  --accent-hover: #00e676;
-  --accent-muted: color-mix(in srgb, var(--accent) 16%, transparent);
-  --accent-2: #7ee2a8;
-  --accent-contrast: #001b0b;
-  --focus-ring: color-mix(in srgb, var(--accent) 55%, transparent);
+  /* ── surfaces · Vercel black ───────────────────────────────────────────────
+   *
+   * Pure neutrals, chroma zero, so green is the only hue in the system and
+   * therefore the only thing that can draw the eye.
+   *
+   * `--muted` is where every hover lands. That is the Vercel/shadcn rule and it
+   * is load-bearing: interaction moves the GREY, it never adds colour. shadcn's
+   * own dark `--accent` — the token its `hover:bg-accent` points at — is
+   * `oklch(0.371 0 0)`, chroma zero. A hover that turns something green is a bug.
+   * -------------------------------------------------------------------------- */
+  --background: #000000;
+  --card: #0a0a0a;
+  --popover: #141414;
+  --muted: #1a1a1a;
+  --muted-strong: #242424;
+  /* Lifted from #242424, which was all but invisible on pure black — so green
+     was the only thing giving the layout landmarks. A visible hairline lets
+     neutral structure carry the page, which lowers the *perceived* green before
+     a single green is removed. */
+  --border: #282828;
+  --border-strong: #3a3a3a;
+
+  /* ── text ── */
+  --foreground: #fafafa;
+  --muted-foreground: #a1a1a1;
+  --subtle-foreground: #737373;
+  --disabled-foreground: #52525b;
+
+  /* ── green · MongoDB hue (H≈145, from LeafyGreen Green/Base) ───────────────
+   *
+   * Three intensities, chosen by AREA rather than by importance. This is the
+   * whole design:
+   *
+   *   a mark  (7px dot, 1px ring)   vivid   — 203x a card's light, over nothing
+   *   a label (accent text, icon)   lifted  — 184x, still a few hundred px²
+   *   a FILL  (one button)          deep    —  33x, and only once per screen
+   *
+   * One bright green used for all three is what made the product read as a green
+   * interface: `#00c853` as a button fill throws 44x the luminance of a card, and
+   * ten of those on one screen is a wall. A vivid green is *correct* at 7px and
+   * glaring at button size.
+   * -------------------------------------------------------------------------- */
+  --primary: #086830;
+  --primary-hover: #0a7b39;
+  --primary-active: #065226;
+  /* White, not black. A deep fill needs a light label — 6.63:1, comfortably AA. */
+  --primary-foreground: #fafafa;
+  --accent-text: #3de07f;
+  --accent-mark: #00ed64;
+  --accent-subtle: rgb(0 237 100 / 8%);
+  --ring: rgb(0 237 100 / 45%);
+
+  /* ── semantic · MongoDB's own ramps ────────────────────────────────────────
+   * Real hues, so the interface can carry variety without green standing in for
+   * every meaning. `--info` exists because "generating" is in progress, not
+   * successful, and had been rendering green.
+   * -------------------------------------------------------------------------- */
+  --destructive: #ff6960;
+  --warning: #ffc010;
+  --info: #0498ec;
+  --violet: #b45af2;
+  --pending: #737373;
+
+  /* ── legacy aliases ────────────────────────────────────────────────────────
+   * The stylesheet has ~800 references to the older names. Aliasing rather than
+   * renaming keeps this change to the palette itself, and leaves the eventual
+   * shadcn component migration a swap rather than a translation.
+   *
+   * `--accent` deliberately resolves to the MARK, not the fill: anything still
+   * asking for "the accent" wants a small highlight. The places that wanted a
+   * fill have been pointed at `--primary` explicitly.
+   * -------------------------------------------------------------------------- */
+  --bg: var(--background);
+  --surface: var(--card);
+  --surface-raised: var(--popover);
+  --text: var(--foreground);
+  --text-muted: var(--muted-foreground);
+  --text-subtle: var(--subtle-foreground);
+  --text-disabled: var(--disabled-foreground);
+  --accent: var(--accent-mark);
+  --accent-hover: var(--primary-hover);
+  --accent-muted: var(--accent-subtle);
+  --accent-2: var(--accent-text);
+  --accent-contrast: var(--background);
+  --focus-ring: var(--ring);
 
   /* status */
-  --status-pending: #6b7280;
-  --status-generating: #7ee2a8;
-  --status-success: #00c853;
-  --status-error: #ff6b6b;
-  --status-expired: #a1a1aa;
-  --status-warning: #f5b942;
+  --status-pending: var(--pending);
+  --status-generating: var(--info);
+  --status-success: var(--accent-mark);
+  --status-error: var(--destructive);
+  --status-expired: var(--violet);
+  --status-warning: var(--warning);
 
   /* type */
   --font-ui: 'Geist', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -80,22 +150,27 @@
 }
 
 [data-theme='light'] {
-  /* Kept as a high-contrast dark variant for backwards-compatible preference
-     storage; the product visual system remains black-first in every mode. */
-  --bg: #050505;
-  --surface: #0d0d0d;
-  --surface-raised: #161616;
+  /* Kept as a higher-contrast dark variant for backwards-compatible preference
+     storage; the product visual system remains black-first in every mode.
+     Only the canonical tokens are redefined — the legacy aliases in `:root`
+     point at these, so they follow automatically. */
+  --background: #050505;
+  --card: #0d0d0d;
+  --popover: #161616;
+  --muted: #1f1f1f;
+  --muted-strong: #2a2a2a;
   --border: #303030;
-  --text: #fafafa;
-  --text-muted: #b4b4b8;
-  --text-subtle: #85858c;
-  --text-disabled: #5f5f66;
-  --accent: #00c853;
-  --accent-hover: #00e676;
-  --accent-muted: color-mix(in srgb, var(--accent) 16%, transparent);
-  --accent-2: #9aefba;
-  --accent-contrast: #001b0b;
-  --focus-ring: color-mix(in srgb, var(--accent) 55%, transparent);
+  --border-strong: #454545;
+  --foreground: #fafafa;
+  --muted-foreground: #b4b4b8;
+  --subtle-foreground: #85858c;
+  --disabled-foreground: #5f5f66;
+  /* One step brighter than the black theme's fill: the surfaces it sits on are
+     lighter here, so the same green would read as flatter against them. */
+  --primary: #0a7b39;
+  --primary-hover: #0c8f43;
+  --primary-active: #086830;
+  --accent-text: #57e88f;
 }
 
 /* ── 2 · Base ───────────────────────────────────────────────────────────── */
@@ -182,45 +257,85 @@ h3 {
   cursor: not-allowed;
 }
 
+/* Only ONE variant is ever filled.
+ *
+ * Everything else is transparent with a grey hover — shadcn's `outline` is
+ * `border bg-background hover:bg-accent` and its `ghost` is `hover:bg-accent`,
+ * where `--accent` is a chroma-zero grey. Interaction moves the grey.
+ *
+ * Reserve `primary` for the actions that commit something: Generate, Create,
+ * Publish, Save, Confirm. It is meant to be the only filled thing on a screen —
+ * a grid of ten filled buttons is what made this theme unreadable. */
 .ui-btn--primary {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-foreground);
 }
 
 .ui-btn--primary:hover:not(:disabled) {
-  background: var(--accent-hover);
+  background: var(--primary-hover);
+}
+
+.ui-btn--primary:active:not(:disabled) {
+  background: var(--primary-active);
 }
 
 .ui-btn--secondary {
   background: transparent;
-  color: var(--text);
+  color: var(--foreground);
   border-color: var(--border);
 }
 
+/* The hover fills grey rather than only tinting the border. A border-only
+   change is easy to miss on a dark surface, and shadcn's `outline` fills. */
 .ui-btn--secondary:hover:not(:disabled) {
-  border-color: var(--text-muted);
-  color: var(--text);
+  background: var(--muted);
+  border-color: var(--border-strong);
+}
+
+.ui-btn--secondary:active:not(:disabled) {
+  background: var(--muted-strong);
 }
 
 .ui-btn--ghost {
   background: transparent;
-  color: var(--text-muted);
+  color: var(--muted-foreground);
 }
 
 .ui-btn--ghost:hover:not(:disabled) {
-  color: var(--text);
-  background: var(--surface-raised);
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.ui-btn--ghost:active:not(:disabled) {
+  background: var(--muted-strong);
+}
+
+/* An accent-flavoured action that must not become a fill: grey surface, green
+   label. The idea is right and the naive version is unreadable — dark green on
+   a same-lightness grey is about 1.3:1. `--accent-text` on `--muted` is 10:1. */
+.ui-btn--accent {
+  background: transparent;
+  color: var(--accent-text);
+  border-color: var(--border);
+}
+
+.ui-btn--accent:hover:not(:disabled) {
+  background: var(--muted);
+  border-color: var(--accent-text);
 }
 
 .ui-btn--danger {
   background: transparent;
-  color: var(--status-error);
-  border-color: var(--status-error);
+  color: var(--destructive);
+  border-color: color-mix(in srgb, var(--destructive) 45%, var(--border));
 }
 
+/* Tints rather than fills. A Delete button that turns solid red on hover
+   becomes the loudest thing on the card, which is the opposite of what a
+   destructive action should be before it is chosen. */
 .ui-btn--danger:hover:not(:disabled) {
-  background: var(--status-error);
-  color: var(--accent-contrast);
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
+  border-color: var(--destructive);
 }
 
 .ui-btn--sm {
@@ -263,11 +378,17 @@ h3 {
   --chip-color: var(--status-pending);
 }
 
+/* The DOT carries the colour; the label stays neutral.
+ *
+ * Colouring the label made a projects list render as ten green pills. The dot is
+ * 7px — vivid there costs almost nothing and reads instantly — while the word
+ * beside it is information, not a signal. `● Active` in grey text.
+ *
+ * The exceptions are below: a failure and a warning DO colour their label,
+ * because losing red at a glance costs more than the restraint is worth. */
 .ui-chip--running,
 .ui-chip--generating {
-  --chip-color: var(--status-generating);
-  color: var(--status-generating);
-  border-color: color-mix(in srgb, var(--status-generating) 40%, var(--border));
+  --chip-color: var(--info);
 }
 
 .ui-chip--running::before,
@@ -277,19 +398,22 @@ h3 {
 
 .ui-chip--completed,
 .ui-chip--active {
-  --chip-color: var(--status-success);
-  color: var(--status-success);
+  --chip-color: var(--accent-mark);
 }
 
+/* Deliberately still coloured throughout — see the note above. */
 .ui-chip--failed,
 .ui-chip--failed_partial {
-  --chip-color: var(--status-error);
-  color: var(--status-error);
+  --chip-color: var(--destructive);
+  color: var(--destructive);
+  border-color: color-mix(in srgb, var(--destructive) 35%, var(--border));
 }
 
+/* Also keeps its label colour: an expired hosted API is a thing to act on, and
+   violet is distinct enough from the destructive red not to read as a failure. */
 .ui-chip--expired {
-  --chip-color: var(--status-expired);
-  color: var(--status-expired);
+  --chip-color: var(--violet);
+  color: var(--violet);
 }
 
 .ui-chip--draft {
@@ -327,7 +451,10 @@ h3 {
 }
 
 .ui-card--interactive:hover {
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  /* Grey, not green. Every card in a grid hovers, so a green hover put the
+     accent under the cursor on ten cards in turn. */
+  border-color: var(--border-strong);
+  background: var(--muted);
 }
 
 /* ── 6 · Form controls ──────────────────────────────────────────────────── */
@@ -536,7 +663,7 @@ h3 {
 }
 
 .ui-sidebar__brand span {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .ui-nav {
@@ -561,7 +688,7 @@ h3 {
 }
 
 .ui-nav a[aria-current='page'] {
-  color: var(--accent);
+  color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
@@ -668,10 +795,17 @@ h3 {
   min-width: 160px;
 }
 
+/* Metadata, not an accent.
+ *
+ * These were green, and a seven-field entity therefore rendered seven green
+ * labels — the Schema tab was one of the greenest screens in the product. A
+ * type annotation is information about a field, not a highlight, so the
+ * hierarchy comes from weight and size instead: the field name is `--foreground`
+ * and its type is muted mono beside it. */
 .ui-tree__type {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  color: var(--accent-2);
+  color: var(--muted-foreground);
 }
 
 .ui-tree__nested {
@@ -700,12 +834,12 @@ h3 {
 }
 
 .ui-steps__step--active {
-  color: var(--accent);
+  color: var(--accent-text);
   border-color: var(--accent);
 }
 
 .ui-steps__step--done {
-  color: var(--status-success);
+  color: var(--accent-text);
 }
 
 .ui-tabs {
@@ -727,7 +861,7 @@ h3 {
 }
 
 .ui-tabs button[aria-selected='true'] {
-  color: var(--accent);
+  color: var(--accent-text);
   border-bottom-color: var(--accent);
 }
 
@@ -789,9 +923,11 @@ h3 {
 }
 
 .ui-stepper__step[aria-current='step'] .ui-stepper__num {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--accent-mark);
+  border-color: var(--accent-mark);
+  /* Black on the vivid green: 13:1. The fill is 24px, so vividness costs
+     nothing here — this is the size at which bright green belongs. */
+  color: var(--background);
 }
 
 .ui-stepper__step--done .ui-stepper__num {
@@ -828,8 +964,8 @@ h3 {
   align-items: center;
   padding: 1px var(--space-2);
   border-radius: var(--radius-sm);
-  border: 1px solid var(--accent);
-  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent-text) 40%, var(--border));
+  color: var(--accent-text);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   letter-spacing: 0.04em;
@@ -891,20 +1027,27 @@ h3 {
   background: color-mix(in srgb, var(--method-color) 14%, transparent);
 }
 
+/* Reads are quiet; only the methods that CHANGE something take colour.
+ *
+ * GET was green, and GET is by far the most common method — so an eighteen-
+ * endpoint list rendered as a column of green. Reading is the default action,
+ * so it should be the default appearance: no tint, muted text. The eye then
+ * lands on the four verbs that mutate. */
 .ui-method--GET {
-  --method-color: var(--status-success);
+  --method-color: var(--muted-foreground);
+  background: transparent;
 }
 .ui-method--POST {
-  --method-color: var(--accent);
+  --method-color: var(--accent-mark);
 }
 .ui-method--PUT {
-  --method-color: var(--status-warning);
+  --method-color: var(--warning);
 }
 .ui-method--PATCH {
-  --method-color: var(--status-expired);
+  --method-color: var(--violet);
 }
 .ui-method--DELETE {
-  --method-color: var(--status-error);
+  --method-color: var(--destructive);
 }
 
 /* ---------------------------------------------------------- endpoint rows -- */
@@ -925,7 +1068,8 @@ h3 {
 }
 
 .ui-endpoint:hover {
-  border-color: var(--accent);
+  border-color: var(--border-strong);
+  background: var(--muted);
 }
 
 .ui-endpoint[aria-pressed='true'] {
@@ -1003,23 +1147,36 @@ h3 {
  * at an existing token, so anything the theme re-points follows automatically —
  * `--accent` in particular flips per theme AND per `[data-flow]` scope.
  * -------------------------------------------------------------------------- */
+/* Each tone must actually be the hue its name claims.
+ *
+ * Three of these were lying, and it was the single biggest source of green:
+ * `success` was byte-identical to `accent`, `cyan` resolved to a light GREEN
+ * (#7ee2a8) and `violet` to a GREY. So screens that deliberately asked for six
+ * different colours — the dashboard tiles, the quick-start cards — got green for
+ * seven of thirteen usages.
+ *
+ * Pointing them at real values removes green WITHOUT removing information,
+ * which is why this matters more than it looks. */
 .ui-tone--accent {
-  --tone: var(--accent);
+  --tone: var(--accent-mark);
 }
 .ui-tone--cyan {
-  --tone: var(--accent-2);
+  --tone: var(--info);
 }
 .ui-tone--success {
-  --tone: var(--status-success);
+  --tone: var(--accent-mark);
 }
 .ui-tone--warning {
-  --tone: var(--status-warning);
+  --tone: var(--warning);
 }
 .ui-tone--error {
-  --tone: var(--status-error);
+  --tone: var(--destructive);
 }
 .ui-tone--violet {
-  --tone: var(--status-expired);
+  --tone: var(--violet);
+}
+.ui-tone--neutral {
+  --tone: var(--muted-foreground);
 }
 
 /* -------------------------------------------------------------- icon tile --- */
@@ -1190,7 +1347,7 @@ h3 {
 }
 
 .ui-stat__delta--up {
-  color: var(--status-success);
+  color: var(--accent-text);
 }
 
 /* Down is the same glyph rotated, so there is one arrow in the icon set. */
@@ -1671,7 +1828,7 @@ h3 {
 /* Colour is not the only signal — the icon changes from × to ✓ as well, so the
    state survives a monochrome display and colour-blindness. */
 .auth-rules li[data-met='true'] {
-  color: var(--status-success);
+  color: var(--accent-text);
 }
 
 /* ── Notices ── */
@@ -1792,7 +1949,7 @@ h3 {
 /* `aria-current` is the source of truth for selection, so the style cannot
    drift from what a screen reader announces. */
 .ui-tabs__link[aria-current='page'] {
-  color: var(--accent);
+  color: var(--accent-text);
   border-bottom-color: var(--accent);
 }
 

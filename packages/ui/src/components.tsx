@@ -22,7 +22,16 @@ function cx(...parts: (string | false | null | undefined)[]): string {
 
 /* ── Button ── */
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+/**
+ * Only `primary` is filled.
+ *
+ * Everything else is transparent with a grey hover, following shadcn's
+ * `outline`/`ghost` treatment. `primary` is for the actions that commit
+ * something — Generate, Create, Publish, Save, Confirm — and is meant to be the
+ * only filled thing on a screen; `accent` is the middle ground, a grey surface
+ * with a green label for an accent-flavoured action that should not be a fill.
+ */
+export type ButtonVariant = 'primary' | 'secondary' | 'accent' | 'ghost' | 'danger';
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;

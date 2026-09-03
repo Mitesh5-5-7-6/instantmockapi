@@ -76,8 +76,12 @@ export default function TemplatesPage() {
             <p className="ui-meta">{template.description}</p>
             <span className="ui-meta ui-mono">entities: {template.entities}</span>
             <div>
+              {/* Secondary: this renders once per template card, and it opens
+                  the wizard rather than creating anything. The primary lives at
+                  the end of that wizard. */}
               <Button
                 size="sm"
+                variant="secondary"
                 onClick={() => {
                   window.sessionStorage.setItem(
                     TEMPLATE_KEY,
