@@ -10,26 +10,31 @@
 
 :root {
   /* color — dark (default) */
-  --bg: #0f1117;
-  --surface: #171a22;
-  --surface-raised: #1f232d;
-  --border: #2a2f3a;
-  --text: #e7eaf0;
-  --text-muted: #9aa3b2;
-  --accent: #5b8cff;
-  --accent-2: #33d6e0;
-  --accent-contrast: #0b0e14;
+  --bg: #000000;
+  --surface: #080808;
+  --surface-raised: #111111;
+  --border: #242424;
+  --text: #f2f2f2;
+  --text-muted: #a1a1aa;
+  --text-subtle: #71717a;
+  --text-disabled: #52525b;
+  --accent: #00ed64;
+  --accent-hover: #20f278;
+  --accent-muted: color-mix(in srgb, var(--accent) 16%, transparent);
+  --accent-2: #7ee2a8;
+  --accent-contrast: #001b0b;
+  --focus-ring: color-mix(in srgb, var(--accent) 55%, transparent);
 
   /* status */
   --status-pending: #6b7280;
-  --status-generating: #33d6e0;
-  --status-success: #3fb950;
-  --status-error: #f85149;
-  --status-expired: #6e5fa6;
-  --status-warning: #e3a008;
+  --status-generating: #7ee2a8;
+  --status-success: #00ed64;
+  --status-error: #ff6b6b;
+  --status-expired: #a1a1aa;
+  --status-warning: #f5b942;
 
   /* type */
-  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-ui: 'Geist', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, 'Cascadia Mono', monospace;
   --text-xs: 12px;
   --text-sm: 14px;
@@ -75,15 +80,22 @@
 }
 
 [data-theme='light'] {
-  --bg: #f7f8fa;
-  --surface: #ffffff;
-  --surface-raised: #ffffff;
-  --border: #e3e6ec;
-  --text: #1a1d24;
-  --text-muted: #5b6472;
-  --accent: #3366f0;
-  --accent-2: #0fb5c0;
-  --accent-contrast: #ffffff;
+  /* Kept as a high-contrast dark variant for backwards-compatible preference
+     storage; the product visual system remains black-first in every mode. */
+  --bg: #050505;
+  --surface: #0d0d0d;
+  --surface-raised: #161616;
+  --border: #303030;
+  --text: #fafafa;
+  --text-muted: #b4b4b8;
+  --text-subtle: #85858c;
+  --text-disabled: #5f5f66;
+  --accent: #00ed64;
+  --accent-hover: #20f278;
+  --accent-muted: color-mix(in srgb, var(--accent) 16%, transparent);
+  --accent-2: #9aefba;
+  --accent-contrast: #001b0b;
+  --focus-ring: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 /* ── 2 · Base ───────────────────────────────────────────────────────────── */
@@ -137,7 +149,7 @@ h3 {
 }
 
 :is(button, input, select, textarea, a, [tabindex]):focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
@@ -175,7 +187,7 @@ h3 {
 }
 
 .ui-btn--primary:hover:not(:disabled) {
-  filter: brightness(1.1);
+  background: var(--accent-hover);
 }
 
 .ui-btn--secondary {
@@ -427,7 +439,7 @@ h3 {
 
 .ui-progress__fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  background: var(--accent);
   border-radius: 999px;
   transition: width 250ms ease-out;
 }
@@ -718,31 +730,8 @@ h3 {
   border-bottom-color: var(--accent);
 }
 
-/* ---------------------------------------------------------------------------
- * Flow accent scopes (doc 19 §Phase 5 / sample design)
- *
- * The two creation flows are distinguished by colour: Project is purple, Single
- * API is blue. Rather than threading a colour prop through every control, each
- * flow re-points the SINGLE `--accent` token on a wrapper. Everything already
- * built from that token — buttons, tabs, focus rings, the stepper — recolours
- * with no component changes, and a screen that forgets to set a flow simply
- * keeps the default.
- * ------------------------------------------------------------------------- */
-[data-flow='project'] {
-  --accent: #7c5cff;
-  --accent-2: #a78bfa;
-}
-
-[data-flow='single'] {
-  --accent: #5b8cff;
-  --accent-2: #33d6e0;
-}
-
-[data-theme='light'] [data-flow='project'] {
-  --accent: #6d3fe0;
-  --accent-2: #8b5cf6;
-}
-
+/* Creation flows share the product accent so the wizard feels like one
+ * workflow rather than two unrelated products. */
 /* --------------------------------------------------------------- stepper --- */
 .ui-stepper {
   display: flex;

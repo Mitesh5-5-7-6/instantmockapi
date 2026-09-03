@@ -38,14 +38,14 @@ export default function GlobalError({
           padding: 24,
           // Hard-coded to the dark theme's tokens. The stylesheet may not have
           // loaded, and unreadable text is a worse failure than the wrong theme.
-          background: '#0f1117',
-          color: '#e7eaf0',
-          fontFamily: "'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif",
+          background: '#000000',
+          color: '#f2f2f2',
+          fontFamily: "'Geist', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif",
         }}
       >
         <main style={{ maxWidth: 420, textAlign: 'center' }}>
           <h1 style={{ fontSize: 25, fontWeight: 600, margin: '0 0 8px' }}>Something went wrong</h1>
-          <p style={{ color: '#9aa3b2', fontSize: 14, margin: '0 0 20px' }}>
+          <p style={{ color: '#a1a1aa', fontSize: 14, margin: '0 0 20px' }}>
             The application could not be loaded. Reloading will usually fix it.
           </p>
           <button
@@ -54,10 +54,10 @@ export default function GlobalError({
             style={{
               minHeight: 40,
               padding: '0 16px',
-              border: '1px solid #2a2f3a',
+              border: '1px solid #242424',
               borderRadius: 10,
               background: 'transparent',
-              color: '#e7eaf0',
+              color: '#f2f2f2',
               font: 'inherit',
               fontSize: 14,
               cursor: 'pointer',
@@ -69,7 +69,7 @@ export default function GlobalError({
             <p
               style={{
                 marginTop: 20,
-                color: '#9aa3b2',
+                color: '#a1a1aa',
                 fontSize: 12,
                 fontFamily: "'JetBrains Mono', ui-monospace, monospace",
               }}
