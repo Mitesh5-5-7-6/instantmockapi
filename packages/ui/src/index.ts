@@ -6,6 +6,7 @@ export {
   Button,
   type ButtonProps,
   type ButtonVariant,
+  type ButtonSize,
   StatusChip,
   type StatusChipProps,
   Card,
@@ -74,3 +75,22 @@ export {
   type ErrorStateProps,
   type ErrorDetailsProps,
 } from './feedback.js';
+
+// ---------------------------------------------------------------------------
+// shadcn components (src/ui/*) — migrated behind this same barrel, so call
+// sites never had to change as each one landed.
+// ---------------------------------------------------------------------------
+export { cn } from './lib/utils.js';
+
+export {
+  Table,
+  TableHeader,
+  TableBody,
+  TableFooter,
+  TableRow,
+  TableHead,
+  TableCell,
+  TableRowHeader,
+  TableCaption,
+  tableNumeric,
+} from './ui/table.js';

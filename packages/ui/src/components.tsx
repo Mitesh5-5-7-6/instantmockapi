@@ -4,16 +4,7 @@
  * swapping tokens without touching component code.
  */
 
-import {
-  useEffect,
-  useState,
-  type ButtonHTMLAttributes,
-  type InputHTMLAttributes,
-  type KeyboardEvent,
-  type ReactNode,
-  type SelectHTMLAttributes,
-  type TextareaHTMLAttributes,
-} from 'react';
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Icon, type IconName, type IconSize } from './icons.js';
 
 function cx(...parts: (string | false | null | undefined)[]): string {
@@ -23,29 +14,19 @@ function cx(...parts: (string | false | null | undefined)[]): string {
 /* ── Button ── */
 
 /**
- * Only `primary` is filled.
- *
- * Everything else is transparent with a grey hover, following shadcn's
- * `outline`/`ghost` treatment. `primary` is for the actions that commit
- * something — Generate, Create, Publish, Save, Confirm — and is meant to be the
- * only filled thing on a screen; `accent` is the middle ground, a grey surface
- * with a green label for an accent-flavoured action that should not be a fill.
+ * Ported to `./ui/button.tsx` — shadcn structure, cva variants, Tailwind
+ * utilities. Re-exported here so the ~90 existing import sites keep working
+ * while the rest of the set is migrated behind the same barrel.
  */
-export type ButtonVariant = 'primary' | 'secondary' | 'accent' | 'ghost' | 'danger';
+import { Button } from './ui/button.js';
 
-export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: ButtonVariant;
-  size?: 'md' | 'sm';
-}
-
-export function Button({ variant = 'primary', size = 'md', className, ...rest }: ButtonProps) {
-  return (
-    <button
-      className={cx('ui-btn', `ui-btn--${variant}`, size === 'sm' && 'ui-btn--sm', className)}
-      {...rest}
-    />
-  );
-}
+export {
+  Button,
+  buttonVariants,
+  type ButtonProps,
+  type ButtonVariant,
+  type ButtonSize,
+} from './ui/button.js';
 
 /* ── StatusChip ── */
 
@@ -60,99 +41,20 @@ export function StatusChip({ status, label }: StatusChipProps) {
 
 /* ── Card ── */
 
-export interface CardProps {
-  children: ReactNode;
-  interactive?: boolean;
-  className?: string;
-}
-
-export function Card({ children, interactive, className }: CardProps) {
-  return (
-    <div className={cx('ui-card', interactive && 'ui-card--interactive', className)}>
-      {children}
-    </div>
-  );
-}
+export {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+} from './ui/card.js';
+export type { CardProps } from './ui/card.js';
 
 /* ── Form controls ── */
 
-export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
-  const { className, ...rest } = props;
-  return <input className={cx('ui-input', className)} {...rest} />;
-}
-
-export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
-  const { className, ...rest } = props;
-  return <select className={cx('ui-select', className)} {...rest} />;
-}
-
-export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  const { className, ...rest } = props;
-  return <textarea className={cx('ui-textarea', className)} {...rest} />;
-}
-
-export interface CheckboxProps {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  label: ReactNode;
-  disabled?: boolean;
-}
-
-export function Checkbox({ checked, onChange, label, disabled }: CheckboxProps) {
-  return (
-    <label className="ui-checkbox">
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      {label}
-    </label>
-  );
-}
-
-export interface FieldProps {
-  label: string;
-  children: ReactNode;
-  /**
-   * The id of the control this labels.
-   *
-   * When given, the label is a real `<label htmlFor>` — which is what lets a
-   * screen reader announce the field and what makes clicking the text focus the
-   * input. Without it the text is only visually adjacent, so a placeholder ends
-   * up doing the labelling and disappears on the first keystroke (WCAG 3.3.2).
-   *
-   * Optional so the existing call sites keep working; pass it on anything a
-   * person has to fill in.
-   */
-  htmlFor?: string;
-  /** Small explanatory text under the label — units, formats, constraints. */
-  hint?: ReactNode;
-  /** Validation message. Rendered with role="alert" so it is announced. */
-  error?: string | null;
-}
-
-export function Field({ label, children, htmlFor, hint, error }: FieldProps) {
-  return (
-    <div>
-      {htmlFor !== undefined ? (
-        <label className="ui-label" htmlFor={htmlFor}>
-          {label}
-        </label>
-      ) : (
-        <span className="ui-label">{label}</span>
-      )}
-      {children}
-      {hint !== undefined && hint !== null ? <p className="ui-field__hint">{hint}</p> : null}
-      {error !== undefined && error !== null && error !== '' ? (
-        <p className="ui-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </div>
-  );
-}
+export { Input, Select, Textarea, Checkbox, Field } from './ui/input.js';
+export type { CheckboxProps, FieldProps } from './ui/input.js';
 
 /* ── CodeBlock ── */
 
@@ -257,38 +159,20 @@ export function CodeViewer({
 
 /* ── Modal ── */
 
-export interface ModalProps {
-  open: boolean;
-  onClose: () => void;
-  title: string;
-  children: ReactNode;
-}
-
-export function Modal({ open, onClose, title, children }: ModalProps) {
-  if (!open) {
-    return null;
-  }
-  return (
-    <div
-      className="ui-modal-backdrop"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose();
-        }
-      }}
-    >
-      <div className="ui-modal" role="dialog" aria-label={title}>
-        <div className="ui-row ui-row--between" style={{ marginBottom: 'var(--space-4)' }}>
-          <h3>{title}</h3>
-          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close">
-            <Icon name="x" size={16} />
-          </Button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
+export {
+  Modal,
+  Dialog,
+  DialogTrigger,
+  DialogPortal,
+  DialogClose,
+  DialogOverlay,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from './ui/dialog.js';
+export type { ModalProps } from './ui/dialog.js';
 
 /* ── Worker board (doc 12 §6) ── */
 

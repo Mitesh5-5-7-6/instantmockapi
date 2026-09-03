@@ -33,6 +33,14 @@ import {
   Icon,
   Modal,
   StatusChip,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+  tableNumeric,
 } from '@instantmockapi/ui';
 import { normalizeError } from '../lib/errors';
 import { useAction } from '../lib/use-action';
@@ -70,44 +78,56 @@ function ProjectRow({ project }: { project: ProjectListRow }) {
   });
 
   return (
-    <tr className="projects-table__row">
-      <th scope="row" className="projects-table__name">
+    <TableRow>
+      <TableRowHeader className="max-w-[340px] min-w-[180px]">
         {/*
           The name is the link, so the whole row does not have to be clickable.
           A clickable row with buttons inside it makes Delete a gamble.
         */}
-        <Link href={action.href}>{project.name}</Link>
-        {project.description ? <span className="ui-meta">{project.description}</span> : null}
-      </th>
+        <Link href={action.href} className="font-medium text-foreground hover:text-accent-text">
+          {project.name}
+        </Link>
+        {project.description ? (
+          // Truncates rather than wrapping: a long description would otherwise
+          // push one row to two lines and break the scan down the column.
+          <span className="mt-0.5 block truncate text-xs text-muted-foreground max-md:hidden">
+            {project.description}
+          </span>
+        ) : null}
+      </TableRowHeader>
 
-      <td>
+      <TableCell>
         <StatusChip status={project.status} />
-      </td>
+      </TableCell>
 
-      <td className="ui-mono projects-table__version">v{project.currentVersion}</td>
+      <TableCell className="font-[var(--font-mono)] text-xs whitespace-nowrap max-lg:hidden">
+        v{project.currentVersion}
+      </TableCell>
 
       {/* Endpoints and requests are the two figures worth comparing down a
           column, which is the whole argument for a table here. */}
-      <td className="projects-table__num ui-mono">
+      <TableCell className={`${tableNumeric} font-[var(--font-mono)] max-md:hidden`}>
         {project.endpointCount > 0 ? formatCompact(project.endpointCount) : '—'}
-      </td>
+      </TableCell>
 
-      <td className="projects-table__num ui-mono">
+      <TableCell className={`${tableNumeric} font-[var(--font-mono)] max-md:hidden`}>
         {project.requestCount > 0 ? formatCompact(project.requestCount) : '—'}
-      </td>
+      </TableCell>
 
-      <td className="projects-table__expiry">
+      <TableCell className="whitespace-nowrap">
         {project.hosted.expiresAt ? (
           <CountdownBadge expiresAt={project.hosted.expiresAt} />
         ) : (
-          <span className="ui-meta">—</span>
+          <span className="text-muted-foreground">—</span>
         )}
-      </td>
+      </TableCell>
 
-      <td className="ui-meta projects-table__updated">{formatAgo(project.updatedAt)}</td>
+      <TableCell className="text-xs whitespace-nowrap text-muted-foreground max-lg:hidden">
+        {formatAgo(project.updatedAt)}
+      </TableCell>
 
-      <td className="projects-table__actions">
-        <span className="ui-row" style={{ gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
+      <TableCell className="w-[1%] text-right whitespace-nowrap">
+        <span className="flex justify-end gap-2">
           <Button size="sm" variant="secondary" onClick={() => router.push(action.href)}>
             {action.label}
           </Button>
@@ -118,7 +138,7 @@ function ProjectRow({ project }: { project: ProjectListRow }) {
             colour belongs on the confirmation, where the decision is.
           */}
           <Button
-            size="sm"
+            size="icon"
             variant="ghost"
             disabled={remove.isPending}
             aria-label={`Delete ${project.name}`}
@@ -154,8 +174,8 @@ function ProjectRow({ project }: { project: ProjectListRow }) {
             </div>
           </div>
         </Modal>
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -205,49 +225,42 @@ export function ProjectsView({ title, query }: { title: string; query?: string }
 
       {rows.length > 0 ? (
         <Card className="ui-stack ui-stack--tight">
-          {/* The table scrolls inside its own container rather than widening the
-              page — eight columns do not fit a phone, and a horizontally
-              scrolling document is worse than a horizontally scrolling table. */}
-          <div className="projects-table-wrap">
-            <table className="projects-table">
-              <thead>
-                <tr>
-                  <th scope="col">Project</th>
-                  <th scope="col">Status</th>
-                  <th scope="col" className="projects-table__version">
-                    Version
-                  </th>
-                  <th scope="col" className="projects-table__num">
-                    Endpoints
-                  </th>
-                  {/*
-                    The window is in the header rather than a footnote, because
-                    `requestCount` is bounded by the ApiLog 30-day TTL and a bare
-                    "Requests" column would read as a lifetime total.
-                  */}
-                  <th scope="col" className="projects-table__num">
-                    Requests
-                    <span className="ui-meta"> · {windowDays}d</span>
-                  </th>
-                  <th scope="col" className="projects-table__expiry">
-                    Expires
-                  </th>
-                  <th scope="col" className="projects-table__updated">
-                    Updated
-                  </th>
-                  {/* Announced, not shown: the column holds only controls. */}
-                  <th scope="col" className="ui-visually-hidden">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((project) => (
-                  <ProjectRow key={project.id} project={project} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {/* `Table` brings its own scroll container — eight columns do not fit a
+              phone, and a horizontally scrolling document is worse than a
+              horizontally scrolling table. */}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Project</TableHead>
+                <TableHead>Status</TableHead>
+                {/*
+                  Each header carries the same responsive class as its cells. It
+                  has to: hiding a column by class shifts every column after it
+                  if the header stays behind.
+                */}
+                <TableHead className="max-lg:hidden">Version</TableHead>
+                <TableHead className={`${tableNumeric} max-md:hidden`}>Endpoints</TableHead>
+                {/*
+                  The window is in the header rather than a footnote, because
+                  `requestCount` is bounded by the ApiLog 30-day TTL and a bare
+                  "Requests" column would read as a lifetime total.
+                */}
+                <TableHead className={`${tableNumeric} max-md:hidden`}>
+                  Requests
+                  <span className="font-normal"> · {windowDays}d</span>
+                </TableHead>
+                <TableHead>Expires</TableHead>
+                <TableHead className="max-lg:hidden">Updated</TableHead>
+                {/* Announced, not shown: the column holds only controls. */}
+                <TableHead className="sr-only">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((project) => (
+                <ProjectRow key={project.id} project={project} />
+              ))}
+            </TableBody>
+          </Table>
         </Card>
       ) : null}
     </div>
