@@ -22,12 +22,19 @@
  *
  * Presentation only. Every decision about *which* of these to use lives in
  * `apps/web/src/lib` as pure, tested functions.
+ *
+ * Styling follows the same shadcn conventions as `./ui/*` — Tailwind utilities
+ * and `cn()`. These stay in their own module rather than moving under `ui/`
+ * because they are a product decision (the four destinations above), not a
+ * primitive.
  */
 
 import type { ReactNode } from 'react';
 
-import { Button } from './components.js';
 import { Icon, type IconName } from './icons.js';
+import { cn } from './lib/utils.js';
+import { Button } from './ui/button.js';
+import { EMPTY_STATE } from './ui/alert.js';
 
 export type FeedbackVariant = 'success' | 'error' | 'warning' | 'info' | 'loading';
 
@@ -37,6 +44,30 @@ const VARIANT_ICONS: Record<FeedbackVariant, IconName> = {
   warning: 'alert',
   info: 'lightbulb',
   loading: 'refresh',
+};
+
+/**
+ * The variant reads from the **left edge**, as `Note` does.
+ *
+ * A filled panel makes body copy hard work, and an error toast is text people
+ * have to actually read. `info` is the deep primary rather than the vivid mark:
+ * a 3px rule is small, but a notification is the one element that appears
+ * unbidden, so it should not also be the brightest thing on screen.
+ */
+const TOAST_MARK: Record<FeedbackVariant, { border: string; icon: string; action: string }> = {
+  success: {
+    border: 'border-l-accent-mark',
+    icon: 'text-accent-mark',
+    action: 'text-accent-text',
+  },
+  error: {
+    border: 'border-l-destructive',
+    icon: 'text-destructive',
+    action: 'text-destructive',
+  },
+  warning: { border: 'border-l-warning', icon: 'text-warning', action: 'text-warning' },
+  info: { border: 'border-l-primary', icon: 'text-accent-text', action: 'text-accent-text' },
+  loading: { border: 'border-l-info', icon: 'text-info', action: 'text-info' },
 };
 
 /* ── Toast ────────────────────────────────────────────────────────────────── */
@@ -58,16 +89,42 @@ export interface ToastProps {
  * refreshed in place by deduplication.
  */
 export function Toast({ variant, title, detail, action, onDismiss }: ToastProps) {
+  const mark = TOAST_MARK[variant];
   return (
-    <div className={`ui-toast ui-toast--${variant}`}>
-      <Icon name={VARIANT_ICONS[variant]} size={16} />
-      <div className="ui-toast__body">
-        <strong className="ui-toast__title">{title}</strong>
+    <div
+      className={cn(
+        'grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3',
+        'rounded-[var(--radius-md)] border border-border border-l-[3px] px-4 py-3',
+        'bg-popover shadow-[0_8px_24px_rgb(0_0_0/35%)]',
+        // Someone who asked for less motion still needs the toast, just not the
+        // slide.
+        'motion-safe:animate-[ui-toast-in_160ms_ease-out]',
+        mark.border,
+      )}
+    >
+      <Icon
+        name={VARIANT_ICONS[variant]}
+        size={16}
+        className={cn('mt-0.5', mark.icon, variant === 'loading' && 'motion-safe:animate-spin')}
+      />
+      <div className="flex min-w-0 flex-col gap-[3px]">
+        {/* Long server messages wrap rather than being clipped: a truncated
+            error is one the user has to guess at. */}
+        <strong className="text-sm break-words [overflow-wrap:anywhere]">{title}</strong>
         {detail !== null && detail !== undefined && detail !== '' ? (
-          <span className="ui-toast__detail">{detail}</span>
+          <span className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{detail}</span>
         ) : null}
         {action ? (
-          <button type="button" className="ui-toast__action" onClick={action.onClick}>
+          <button
+            type="button"
+            className={cn(
+              'mt-[3px] cursor-pointer self-start border-0 bg-transparent p-0',
+              'font-[inherit] text-xs underline',
+              'outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              mark.action,
+            )}
+            onClick={action.onClick}
+          >
             {action.label}
           </button>
         ) : null}
@@ -79,7 +136,12 @@ export function Toast({ variant, title, detail, action, onDismiss }: ToastProps)
       */}
       <button
         type="button"
-        className="ui-toast__dismiss"
+        className={cn(
+          'flex size-[22px] shrink-0 cursor-pointer items-center justify-center',
+          'rounded-[var(--radius-sm)] border-0 bg-transparent p-0',
+          'text-muted-foreground transition-colors hover:bg-card hover:text-foreground',
+          'outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        )}
         onClick={onDismiss}
         aria-label={`Dismiss: ${title}`}
       >
@@ -100,6 +162,23 @@ export interface ToastViewportProps {
 }
 
 /**
+ * Where each anchor puts the column.
+ *
+ * A lookup keyed by the same strings the settings store persists, so an
+ * unrecognised saved value falls back to a corner that exists rather than
+ * pinning the stack to the top-left of the document. The `*-center` entries
+ * carry their own `-translate-x-1/2` because the anchor is `left: 50%`.
+ */
+const TOAST_ANCHORS: Record<string, string> = {
+  'top-left': 'top-4 left-4',
+  'top-right': 'top-4 right-4',
+  'bottom-left': 'bottom-4 left-4',
+  'bottom-right': 'bottom-4 right-4',
+  'top-center': 'top-4 left-1/2 -translate-x-1/2 max-sm:translate-x-0',
+  'bottom-center': 'bottom-4 left-1/2 -translate-x-1/2 max-sm:translate-x-0',
+};
+
+/**
  * The single outlet every notification renders into.
  *
  * Two live regions rather than one, and the split is the reason this component
@@ -110,7 +189,17 @@ export interface ToastViewportProps {
 export function ToastViewport({ position, stackUpward, children, hasUrgent }: ToastViewportProps) {
   return (
     <div
-      className="ui-toast-viewport"
+      className={cn(
+        'fixed z-[var(--z-toast)] flex w-[min(400px,calc(100vw-1.5rem))] flex-col gap-2',
+        // On a phone the column spans the viewport instead of hugging a corner.
+        'max-sm:right-2 max-sm:left-2 max-sm:w-[calc(100vw-1rem)]',
+        // The column must not swallow clicks on the page it floats over; each
+        // toast re-enables pointer events for itself.
+        'pointer-events-none [&>*]:pointer-events-auto',
+        // Newest nearest the anchored edge, so the eye finds it without scanning.
+        stackUpward && 'flex-col-reverse',
+        TOAST_ANCHORS[position] ?? TOAST_ANCHORS['bottom-right'],
+      )}
       data-position={position}
       data-stack={stackUpward ? 'up' : 'down'}
       role="region"
@@ -145,11 +234,22 @@ export interface FormErrorProps {
  */
 export function FormError({ title, detail, children }: FormErrorProps) {
   return (
-    <div className="ui-formerror" role="alert">
-      <Icon name="alert" size={16} />
-      <div className="ui-formerror__body">
+    <div
+      className={cn(
+        'flex items-start gap-2 rounded-[var(--radius-sm)] p-3 text-sm',
+        'border border-destructive/35 border-l-[3px] border-l-destructive',
+        // A 6% wash rather than a fill — enough to mark the panel as a failure
+        // without fighting the text inside it.
+        'bg-destructive/[0.06]',
+      )}
+      role="alert"
+    >
+      <Icon name="alert" size={16} className="mt-0.5 shrink-0 text-destructive" />
+      <div className="flex min-w-0 flex-col gap-[3px]">
         <strong>{title}</strong>
-        {detail !== null && detail !== undefined && detail !== '' ? <span>{detail}</span> : null}
+        {detail !== null && detail !== undefined && detail !== '' ? (
+          <span className="text-xs text-muted-foreground">{detail}</span>
+        ) : null}
         {children}
       </div>
     </div>
@@ -172,7 +272,8 @@ export interface ErrorStateProps {
  * The fourth destination, and the one the error spec does not name explicitly.
  * A toast is the wrong answer for a query failure: it fades, and it leaves the
  * user looking at a blank page with no explanation and nothing to press. This is
- * the counterpart to `EmptyState` — same shape, different reason for the absence.
+ * the counterpart to `EmptyState` — same container, different reason for the
+ * absence — so it reuses that container's classes and only re-tints the border.
  */
 export function ErrorState({
   title,
@@ -182,11 +283,14 @@ export function ErrorState({
   children,
 }: ErrorStateProps) {
   return (
-    <div className="ui-empty ui-errorstate" role="alert">
-      <Icon name="alert" size={24} />
+    <div
+      className={cn(EMPTY_STATE, 'flex flex-col items-center gap-3 border-destructive/30')}
+      role="alert"
+    >
+      <Icon name="alert" size={24} className="text-destructive" />
       <strong>{title}</strong>
       {detail !== null && detail !== undefined && detail !== '' ? (
-        <span className="ui-meta">{detail}</span>
+        <span className="text-xs text-muted-foreground">{detail}</span>
       ) : null}
       {children}
       {onRetry ? (
@@ -234,31 +338,33 @@ export function ErrorDetails({ details, code, status, requestId, occurredAt }: E
   }
 
   return (
-    <div className="ui-stack ui-errordetails">
+    <div className="flex flex-col gap-4">
       {details.length > 0 ? (
-        <ol className="ui-errordetails__list">
+        <ol className="m-0 flex flex-col gap-3 pl-4 text-sm">
           {details.map((entry, position) => (
-            <li key={`${entry.path}:${position}`}>
-              <code className="ui-mono">{entry.path}</code>
+            <li key={`${entry.path}:${position}`} className="flex flex-col gap-0.5">
+              <code className="font-mono text-xs text-accent-text [overflow-wrap:anywhere]">
+                {entry.path}
+              </code>
               <span>{entry.issue}</span>
             </li>
           ))}
         </ol>
       ) : (
-        <p className="ui-meta">No field-level detail was reported.</p>
+        <p className="text-xs text-muted-foreground">No field-level detail was reported.</p>
       )}
 
       {meta.length > 0 ? (
-        <dl className="ui-errordetails__meta">
+        <dl className="m-0 grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3 border-t border-border pt-3">
           {meta.map(([label, value]) => (
             <div key={label}>
-              <dt className="ui-meta">{label}</dt>
+              <dt className="text-xs text-muted-foreground">{label}</dt>
               {/*
                 The request id is selectable text rather than a copy button: a
                 user pasting it into a support message is the whole point, and
                 one more control in a diagnostic panel earns less than it costs.
               */}
-              <dd className="ui-mono">{value}</dd>
+              <dd className="m-0 font-mono text-xs select-all [overflow-wrap:anywhere]">{value}</dd>
             </div>
           ))}
         </dl>

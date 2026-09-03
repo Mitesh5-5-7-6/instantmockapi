@@ -42,22 +42,30 @@
   --color-primary-foreground: var(--primary-foreground);
   --color-accent-text: var(--accent-text);
   --color-accent-mark: var(--accent-mark);
+  --color-accent-subtle: var(--accent-subtle);
 
   --color-destructive: var(--destructive);
   --color-warning: var(--warning);
   --color-info: var(--info);
   --color-violet: var(--violet);
+  --color-pending: var(--pending);
 
   --font-sans: var(--font-ui);
+  /*
+   * `--font-code`, not `--font-mono`: Tailwind's theme namespace uses the name
+   * `--font-mono` itself, so mapping it to `var(--font-mono)` would be a
+   * self-reference that resolves through `:root` by accident. The shared
+   * stylesheet holds the stack under `--font-code` for exactly this reason and
+   * aliases `--font-mono` to it, so `font-mono` here and `var(--font-mono)` in
+   * the legacy CSS are the same JetBrains Mono stack, declared once.
+   */
+  --font-mono: var(--font-code);
 
   /*
-   * Radius and mono are deliberately NOT mapped. Tailwind's theme namespace uses
-   * `--radius-*` and `--font-mono` too, so `--radius-sm: var(--radius-sm)` is a
-   * self-reference — it happens to resolve through `:root`, which is exactly the
-   * kind of accident that breaks silently later.
-   *
-   * Components use `rounded-[var(--radius-md)]` and `font-[var(--font-mono)]`
-   * instead: longer to read, and unambiguous about which variable it means.
+   * Radius is deliberately NOT mapped, for the same collision: `--radius-sm:
+   * var(--radius-sm)` is self-referential. Components use
+   * `rounded-[var(--radius-md)]` instead — longer to read, and unambiguous about
+   * which variable it means.
    */
 }
 

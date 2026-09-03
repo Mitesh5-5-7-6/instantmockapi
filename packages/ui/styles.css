@@ -103,9 +103,18 @@
   --status-expired: var(--violet);
   --status-warning: var(--warning);
 
-  /* type */
+  /* type
+   *
+   * `--font-code` holds the value and `--font-mono` aliases it, which looks
+   * redundant and is not. Tailwind's own theme namespace uses the name
+   * `--font-mono`, so the app's `@theme inline` bridge cannot write
+   * `--font-mono: var(--font-mono)` — that is a self-reference that happens to
+   * resolve through `:root` today and would break silently later. The bridge
+   * points at `--font-code` instead, the ~40 existing `var(--font-mono)`
+   * references keep working, and the stack is still declared exactly once. */
   --font-ui: 'Geist', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, 'Cascadia Mono', monospace;
+  --font-code: 'JetBrains Mono', 'Fira Code', ui-monospace, 'Cascadia Mono', monospace;
+  --font-mono: var(--font-code);
   --text-xs: 12px;
   --text-sm: 14px;
   --text-base: 16px;

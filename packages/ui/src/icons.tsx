@@ -22,6 +22,8 @@
  * already permit that.
  */
 
+import { cn } from './lib/utils.js';
+
 /**
  * An icon is paths plus circles. Lines, polylines and rects are all expressible
  * as paths, so two primitives cover the whole set and the renderer stays trivial.
@@ -239,13 +241,26 @@ export interface IconProps {
    * button.
    */
   label?: string;
+  /**
+   * Extra utilities on the `<svg>` — a colour, or a rotation.
+   *
+   * Colour normally comes from the container through `currentColor`, so reach
+   * for this only when the glyph must differ from the text beside it (a red
+   * alert icon in a black-text panel) or when the geometry itself is being
+   * transformed (`rotate-180` on the arrow, which is how one arrow serves both
+   * directions).
+   */
+  className?: string;
 }
 
-export function Icon({ name, size = 18, label }: IconProps) {
+export function Icon({ name, size = 18, label, className }: IconProps) {
   const shape: IconShape = ICONS[name];
   return (
     <svg
-      className="ui-icon"
+      // `block` kills the inline baseline gap that otherwise makes an icon sit a
+      // pixel low next to text, and `shrink-0` stops a flex row from stretching
+      // a square glyph into a rectangle.
+      className={cn('block shrink-0', className)}
       width={size}
       height={size}
       viewBox="0 0 24 24"
