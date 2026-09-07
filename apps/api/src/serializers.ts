@@ -4,7 +4,9 @@
  */
 
 import { getPlanConfig } from '@instantmockapi/config';
+import { hasPendingRegeneration } from '@instantmockapi/db';
 import type { IArtifact, IJob, IProject, IUser, IVersion } from '@instantmockapi/db';
+import type { VersionStatus } from '@instantmockapi/shared';
 
 /**
  * A plan limit on the wire.
@@ -55,6 +57,22 @@ export function toProjectSummary(project: IProject) {
     description: project.description ?? null,
     status: project.status,
     currentVersion: project.currentVersion,
+    /*
+     * The two version numbers, both on the wire (Phase 2).
+     *
+     * `currentVersion` is the DEFINITION — what the user is editing.
+     * `publishedVersion` is what the hosted API SERVES. They diverge the moment
+     * anything is edited, and the client had no way to know: only
+     * `currentVersion` was ever exposed, so every screen showing "v4" was
+     * naming a version that may not be live.
+     *
+     * `publishedVersion` can be `null` — a project that has never generated has
+     * nothing live — which is a different statement from "v1", and the reason
+     * this is not collapsed into one number here.
+     */
+    publishedVersion: project.publishedVersion ?? null,
+    /** `currentVersion > publishedVersion`: edits are waiting to be generated. */
+    pendingRegeneration: hasPendingRegeneration(project),
     inputType: project.inputSource.type,
     hosted: project.hosted,
     createdAt: project.createdAt,
@@ -128,12 +146,34 @@ export function toArtifactView(artifact: IArtifact) {
   };
 }
 
-export function toVersionView(version: IVersion) {
+/**
+ * One row of the version history (Phase 2 §8, §28).
+ *
+ * `status` is **derived**, and is passed in rather than read off the document
+ * because it depends on the project's published pointer and on the version's
+ * artifact rows — neither of which a `Version` document knows about. Storing it
+ * would make it a cache of the artifact rows that nothing recomputes; see
+ * `versionStatus` in `@instantmockapi/shared`.
+ *
+ * §28: metadata only. The snapshot bodies never cross the wire from here — the
+ * comparison endpoint is where a caller pays for those, and only on demand.
+ */
+export function toVersionView(version: IVersion, status?: VersionStatus) {
   return {
     id: String(version._id),
     projectId: String(version.projectId),
     version: version.version,
     note: version.note ?? null,
     createdAt: version.createdAt,
+
+    // Phase 2 metadata. `null` rather than absent for the fields a pre-Phase-2
+    // row simply does not have, so a client never has to distinguish "not
+    // recorded" from "not sent".
+    parentVersion: version.parentVersion ?? null,
+    changeType: version.changeType ?? null,
+    changeSummary: version.changeSummary ?? null,
+    publishedAt: version.publishedAt ?? null,
+    rollbackSourceVersion: version.rollbackSourceVersion ?? null,
+    ...(status === undefined ? {} : { status }),
   };
 }

@@ -4,6 +4,7 @@ import {
   highestRisk,
   needsAttention,
   summariseChanges,
+  validationDirection,
   type SchemaChange,
 } from './changes.js';
 import { ensureSchemaIds } from './ids.js';
@@ -258,6 +259,115 @@ describe('validation rules', () => {
     const changes = diffSchemas(active, draft);
     expect(find(changes, 'VALIDATION_CHANGED')).toHaveLength(2);
   });
+
+  /**
+   * A loosened bound is SAFE, which the flat `WARNING` used to get wrong.
+   *
+   * `SAFE` is defined in this file's own header as "strictly additive… a relaxed
+   * rule", so scoring `min: 8 → 3` as WARNING contradicted the vocabulary and
+   * made the user acknowledge a change that cannot reject anything.
+   */
+  it('reports a loosened bound as safe, not as needing attention', () => {
+    const { active, draft } = fork(
+      ips([entity('User', [field('name', { validation: { min: 8 } })])]),
+    );
+    draft.entities[0]!.fields[0]!.validation.min = 3;
+
+    expect(one(diffSchemas(active, draft), 'VALIDATION_CHANGED')).toMatchObject({
+      risk: 'SAFE',
+      before: 8,
+      after: 3,
+    });
+  });
+
+  it('reports a raised ceiling as safe and a lowered one as needing attention', () => {
+    const relax = fork(ips([entity('User', [field('bio', { validation: { max: 10 } })])]));
+    relax.draft.entities[0]!.fields[0]!.validation.max = 100;
+    expect(one(diffSchemas(relax.active, relax.draft), 'VALIDATION_CHANGED').risk).toBe('SAFE');
+
+    const tighten = fork(ips([entity('User', [field('bio', { validation: { max: 100 } })])]));
+    tighten.draft.entities[0]!.fields[0]!.validation.max = 10;
+    expect(one(diffSchemas(tighten.active, tighten.draft), 'VALIDATION_CHANGED').risk).toBe(
+      'WARNING',
+    );
+  });
+
+  it('keeps a changed regex at WARNING, because the direction is genuinely unknowable', () => {
+    // Deciding this would mean comparing the languages two patterns accept.
+    // `unknown` resolves to the cautious side rather than guessing.
+    const { active, draft } = fork(
+      ips([entity('User', [field('code', { validation: { regex: '^a' } })])]),
+    );
+    draft.entities[0]!.fields[0]!.validation.regex = '^ab';
+
+    expect(one(diffSchemas(active, draft), 'VALIDATION_CHANGED').risk).toBe('WARNING');
+  });
+
+  it('treats an exact length as a narrowing whichever way it moves', () => {
+    // Values of the old length are rejected in both directions.
+    for (const to of [4, 12]) {
+      const { active, draft } = fork(
+        ips([entity('User', [field('code', { validation: { length: 8 } })])]),
+      );
+      draft.entities[0]!.fields[0]!.validation.length = to;
+      expect(one(diffSchemas(active, draft), 'VALIDATION_CHANGED').risk).toBe('WARNING');
+    }
+  });
+
+  it('scores an arrayLength floor rising as a tightening even when the ceiling opens', () => {
+    // A tighter floor rejects arrays that used to pass, however generous the
+    // ceiling became — so the tightening outranks the relaxation.
+    const { active, draft } = fork(
+      ips([entity('User', [field('tags', { validation: { arrayLength: { min: 1, max: 5 } } })])]),
+    );
+    draft.entities[0]!.fields[0]!.validation.arrayLength = { min: 3, max: 50 };
+
+    expect(one(diffSchemas(active, draft), 'VALIDATION_CHANGED').risk).toBe('WARNING');
+  });
+
+  it('treats a message as safe in either direction', () => {
+    // Wire-visible only inside an error body; it can never reject a request.
+    const { active, draft } = fork(ips([entity('User', [field('name')])]));
+    draft.entities[0]!.fields[0]!.validation.message = 'Please supply a name';
+
+    expect(one(diffSchemas(active, draft), 'VALIDATION_ADDED').risk).toBe('SAFE');
+  });
+});
+
+describe('validationDirection', () => {
+  /**
+   * Tested directly as well as through the diff, because `classification.ts`
+   * reads it too — it is the single reader of the evidence that keeps `risk` and
+   * the three-value impact axis from disagreeing about the same edit.
+   */
+  it('scores appearance as a tightening and disappearance as a relaxation', () => {
+    expect(validationDirection('min', undefined, 3)).toBe('tightened');
+    expect(validationDirection('min', 3, undefined)).toBe('relaxed');
+    expect(validationDirection('email', false, true)).toBe('tightened');
+    expect(validationDirection('email', true, false)).toBe('relaxed');
+  });
+
+  it('scores numeric bounds by direction', () => {
+    expect(validationDirection('min', 3, 8)).toBe('tightened');
+    expect(validationDirection('min', 8, 3)).toBe('relaxed');
+    expect(validationDirection('max', 100, 10)).toBe('tightened');
+    expect(validationDirection('max', 10, 100)).toBe('relaxed');
+  });
+
+  it('returns unknown rather than guessing', () => {
+    expect(validationDirection('regex', '^a', '^b')).toBe('unknown');
+    // Non-numeric junk in a numeric bound: an old document can hold anything,
+    // and this must not throw or invent an answer.
+    expect(validationDirection('min', 'three', 8)).toBe('unknown');
+    expect(validationDirection('max', {}, [])).toBe('unknown');
+  });
+
+  it('never throws on an arbitrary historical value', () => {
+    for (const value of [null, undefined, 0, '', [], {}, NaN, Infinity]) {
+      expect(() => validationDirection('arrayLength', value, value)).not.toThrow();
+      expect(() => validationDirection('min', value, 1)).not.toThrow();
+    }
+  });
 });
 
 describe('nested fields and arrays', () => {
@@ -358,6 +468,70 @@ describe('entities', () => {
     });
   });
 
+  /**
+   * The payload carries what the entity contains, so a comparison view can
+   * expand "Order added" into its fields and relations (§10).
+   *
+   * As a payload rather than as per-field `FIELD_ADDED` rows: a 51-field entity
+   * would otherwise emit 52 changes for one addition, which is the flat-row
+   * problem §37 forbids, and every summary would double-count.
+   */
+  it('carries what an added entity contains, without emitting a change per field', () => {
+    const { active, draft } = fork(ips([entity('User', [field('email')])]));
+    draft.entities.push(
+      entity('Order', [field('total', { type: 'decimal', required: true })], {
+        relations: [
+          {
+            name: 'buyer',
+            kind: 'belongsTo',
+            target: 'User',
+            localField: 'userId',
+            foreignField: 'id',
+            required: false,
+            onDelete: 'restrict',
+          },
+        ],
+      }),
+    );
+    ensureSchemaIds(draft);
+
+    const changes = diffSchemas(active, draft);
+    const added = one(changes, 'ENTITY_ADDED');
+    const shape = added.after as {
+      name: string;
+      fields: { name: string; type: string; required: boolean }[];
+      relations: { name: string; kind: string; target: string }[];
+    };
+
+    expect(shape.name).toBe('Order');
+    // `toMatchObject`, because the stable ids travel too — which is the point:
+    // a comparison view can key its rows on them rather than on names.
+    expect(shape.fields).toMatchObject([{ name: 'total', type: 'decimal', required: true }]);
+    expect(shape.relations).toMatchObject([{ name: 'buyer', kind: 'belongsTo', target: 'User' }]);
+    expect(shape.fields[0]).toHaveProperty('id');
+
+    // One row for the entity, not one per field.
+    expect(find(changes, 'FIELD_ADDED')).toEqual([]);
+    expect(find(changes, 'RELATION_ADDED')).toEqual([]);
+  });
+
+  it('carries what a removed entity contained, so the loss is inspectable', () => {
+    const { active, draft } = fork(
+      ips([entity('User', [field('email')]), entity('Order', [field('total'), field('note')])]),
+    );
+    draft.entities.splice(1, 1);
+
+    const shape = one(diffSchemas(active, draft), 'ENTITY_REMOVED').before as {
+      name: string;
+      fields: { name: string }[];
+    };
+    // The identity field materialization would add is absent here because this
+    // fixture is not materialized — what matters is that the authored fields
+    // travel with the change rather than being lost with the entity.
+    expect(shape.name).toBe('Order');
+    expect(shape.fields.map((f) => f.name)).toEqual(['total', 'note']);
+  });
+
   it('reports a removed entity as breaking', () => {
     const { active, draft } = fork(
       ips([entity('User', [field('email')]), entity('Order', [field('total')])]),
@@ -415,6 +589,43 @@ describe('relations', () => {
         entity('Classroom', [field('label')]),
       ]),
     );
+
+  /**
+   * A relation rename used to produce NO change at all.
+   *
+   * `diffRelations` compared kind, target, join fields, onDelete and required —
+   * never the name. So renaming `classroom` to `room` was invisible: the diff
+   * said nothing changed while `?include=classroom` started returning 400. §1 of
+   * the Phase 2 spec forbids a rename reading as delete-plus-create; reading as
+   * *nothing* is worse, because there is no wrong answer to notice.
+   */
+  it('reports a renamed relation, which used to be silent', () => {
+    const { active, draft } = withRelation();
+    draft.entities[0]!.relations![0]!.name = 'room';
+
+    const change = one(diffSchemas(active, draft), 'RELATION_RENAMED');
+    expect(change).toMatchObject({
+      // Same risk as RELATION_REMOVED: the runtime rejects an unknown
+      // `?include=` with a 400 rather than ignoring it, so the old key fails
+      // hard rather than degrading.
+      risk: 'BREAKING',
+      // `read`, not `both` — narrower than its siblings on purpose. A rename
+      // leaves `localField` alone, so no request body moves.
+      aspect: 'read',
+      before: 'classroom',
+      after: 'room',
+    });
+    expect(change.summary).toContain('?include=classroom');
+  });
+
+  it('reports a rename as a rename, not a removal plus an addition', () => {
+    const { active, draft } = withRelation();
+    draft.entities[0]!.relations![0]!.name = 'room';
+
+    const changes = diffSchemas(active, draft);
+    expect(find(changes, 'RELATION_REMOVED')).toHaveLength(0);
+    expect(find(changes, 'RELATION_ADDED')).toHaveLength(0);
+  });
 
   it('reports a removed relation as breaking', () => {
     // `?include=classroom` stops resolving for every existing caller.

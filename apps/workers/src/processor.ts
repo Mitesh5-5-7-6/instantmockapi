@@ -12,13 +12,11 @@
  */
 
 import {
-  evaluatePromotion,
+  evaluateAutoPublish,
   getErrorMessage,
-  hostedUrl,
   logger,
   type ArtifactType,
 } from '@instantmockapi/shared';
-import { calculateExpiresAt } from '@instantmockapi/config';
 import {
   Job,
   MockStore,
@@ -26,6 +24,8 @@ import {
   User,
   Version,
   ensurePublicIdentity,
+  hasLiveDeployment,
+  publishFields,
   versionArtifactOutcomes,
   type IProject,
 } from '@instantmockapi/db';
@@ -384,13 +384,28 @@ async function settle(
       : 'failed_partial';
   }
 
-  // Project status: anything completed → 'active'; hosting success also
-  // stamps the hosted URL + plan-based expiry (doc 07, doc 13 §2 plan gates)
+  // ── Addressing, which is NOT deployment ──
+  //
+  // `publicId`/`slug` are properties of the project: versionless, idempotent,
+  // and needed before publish so the UI can say where a READY version *will*
+  // serve. The hosted URL itself is not minted here — see the publish branch.
   const anyCompleted = [...outcomes.values()].some((o) => o === 'completed');
   if (anyCompleted) {
-    project.status = 'active';
-  } else if (project.status === 'generating') {
-    project.status = 'draft';
+    await ensurePublicIdentity(project);
+  }
+
+  // ── Project status ──
+  //
+  // `status` is read by the mock runtime as a live-or-not gate, so generation
+  // must not set it to 'active': that is a claim that something is being served,
+  // and only publishing can make it true. A zod-only job on a fresh project used
+  // to leave `status: 'active'` with no live API at all.
+  //
+  // The 'expired' case is load-bearing too. `generate-again` requires
+  // `status === 'expired'`, so flipping an expired project to 'active' on a
+  // failed re-run permanently locked it out of the only route that could fix it.
+  if (project.status === 'generating') {
+    project.status = hasLiveDeployment(project) ? 'active' : 'draft';
   }
 
   // ── Promotion ──
@@ -409,13 +424,19 @@ async function settle(
   // OpenAPI degrades a version rather than blocking it" is stated once and is
   // testable without spinning up a worker.
   const versionOutcomes = await versionArtifactOutcomes(project._id, payload.version);
-  const decision = evaluatePromotion({
+  const decision = evaluateAutoPublish({
     candidate: payload.version,
     published: project.publishedVersion,
+    // `hosted.url`, NOT `publishedVersion != null`: `pinPublishedVersion` stamps
+    // that field speculatively on the first edit, so a project whose first
+    // action was a partial regenerate has `publishedVersion = 1` pointing at a
+    // version with no artifacts. Keying the exception on it would withhold the
+    // first publish from exactly the user it exists for.
+    live: hasLiveDeployment(project),
     outcomes: versionOutcomes,
   });
 
-  log.info(decision.promote ? 'Promoting version' : 'Not promoting version', {
+  log.info(decision.promote ? 'Publishing first version' : 'Not publishing', {
     version: payload.version,
     livePublished: project.publishedVersion ?? null,
     reason: decision.reason,
@@ -425,23 +446,27 @@ async function settle(
   });
 
   if (decision.promote) {
-    // The ONLY place `publishedVersion` advances. Everything upstream of here —
-    // every edit, every restore, every enqueue — leaves it alone, which is the
-    // invariant: a failed generation can never destroy or temporarily disable
-    // the currently live version.
-    project.publishedVersion = payload.version;
-    // Mint addressing first so the URL is the pretty form; a project that somehow
-    // has none falls back to the legacy id form, which still resolves.
-    await ensurePublicIdentity(project);
+    // Generation does NOT publish (Phase 2 §1). The single exception is a
+    // project with nothing live: onboarding must end on a working URL, and
+    // there is no live runtime to disturb. Every other version stops at READY
+    // and waits for `POST /versions/:version/publish`.
+    //
+    // The invariant this preserves either way: a failed generation can never
+    // destroy or temporarily disable the currently live version.
     const owner = await User.findById(project.ownerId);
-    project.hosted = {
-      url: hostedUrl(HOSTED_BASE_URL, {
-        projectId: String(project._id),
-        publicId: project.publicId,
-        slug: project.slug,
+    project.set(
+      publishFields(project, payload.version, {
+        baseUrl: HOSTED_BASE_URL,
+        plan: owner?.plan ?? 'free',
       }),
-      expiresAt: calculateExpiresAt(owner?.plan ?? 'free'),
-    };
+    );
+    // The publish event, which nothing else records: "was live and is not any
+    // more" leaves no trace in the artifact rows, so the history list and the
+    // derived SUPERSEDED status both need this stamped.
+    await Version.updateOne(
+      { projectId: project._id, version: payload.version, publishedAt: null },
+      { $set: { publishedAt: new Date() } },
+    );
   }
   await project.save();
 

@@ -23,6 +23,7 @@ import { buildDependencyGraph } from './graph.js';
 import { ensureSchemaIds } from './ids.js';
 import { analyseDraftImpact } from './impact.js';
 import { materializeRelations } from './relations.js';
+import { reconcileEntityRenames } from './renames.js';
 import { validateIPS } from './validator.js';
 import type { Entity, Field, InternalProjectSchema } from './types.js';
 
@@ -88,9 +89,32 @@ function forkDraft(active: InternalProjectSchema): InternalProjectSchema {
   return JSON.parse(JSON.stringify(active)) as InternalProjectSchema;
 }
 
-/** Stage 4: what `PATCH /projects/:id/draft` does after applying an edit. */
-function saveDraft(draft: InternalProjectSchema): InternalProjectSchema {
-  const saved = materializeRelations(draft);
+/**
+ * Stage 4: what `PATCH /projects/:id/draft` does after applying an edit.
+ *
+ * The `previous` argument and the `validateIPS` call are both load-bearing, and
+ * their absence hid a real bug: this helper used to materialize and backfill
+ * only, which is *not* what the route does. The route reconciles renames first
+ * and validates in the middle — and validation is what rejects a
+ * `relation.target` naming an entity that was just renamed. So "renaming an
+ * entity broke saving entirely" passed through here unnoticed. If this helper
+ * ever drifts from `applyDraftEdit` again, the same class of bug comes back.
+ */
+function saveDraft(
+  draft: InternalProjectSchema,
+  previous: InternalProjectSchema = draft,
+): InternalProjectSchema {
+  const reconciled = reconcileEntityRenames(
+    previous,
+    draft as unknown as Record<string, unknown>,
+  ) as unknown as InternalProjectSchema;
+  const validated = validateIPS(reconciled);
+  if (!validated.ok) {
+    throw new Error(
+      `saveDraft produced an invalid definition: ${JSON.stringify(validated.error.details)}`,
+    );
+  }
+  const saved = materializeRelations(validated.value);
   ensureSchemaIds(saved);
   return saved;
 }
@@ -282,10 +306,88 @@ describe('the identity invariant across the session', () => {
     draft.entities.find((e) => e.name === 'Item')!.fields.find((f) => f.name === 'title')!.name =
       'name';
 
-    const changes = diffSchemas(active, saveDraft(draft));
-    expect(changes.map((c) => c.kind).sort()).toEqual(['ENTITY_RENAMED', 'FIELD_RENAMED']);
+    // `active` as the previous side, so the rename is detectable — and this
+    // saves at all only because `Order.product` now follows `Product → Item`.
+    const changes = diffSchemas(active, saveDraft(draft, active));
+
+    // The two renames are the news. Nothing is reported as added or removed,
+    // which is the property stable ids exist to give.
     expect(changes.some((c) => c.kind.endsWith('_ADDED'))).toBe(false);
     expect(changes.some((c) => c.kind.endsWith('_REMOVED'))).toBe(false);
+    expect(changes.filter((c) => c.kind.endsWith('_RENAMED')).map((c) => c.kind)).toEqual([
+      'ENTITY_RENAMED',
+      'FIELD_RENAMED',
+    ]);
+
+    // The rest is the cascade: `Order.product`'s target and `Order.productId`'s
+    // `meta.relation` both spell the entity by name, so both moved. They are
+    // reported — a diff that omitted them would not explain the byte difference
+    // between the two definitions — but at INFO with no aspect, so they cannot
+    // reach an endpoint or raise the report's risk.
+    const echoes = changes.filter((c) => !c.kind.endsWith('_RENAMED'));
+    expect(echoes.map((c) => c.kind).sort()).toEqual([
+      'FIELD_META_CHANGED',
+      'RELATION_TARGET_CHANGED',
+    ]);
+    expect(echoes.every((c) => c.risk === 'INFO' && c.aspect === 'none')).toBe(true);
+  });
+
+  /**
+   * The demotion has to be narrow, or it becomes a way to smuggle a real change
+   * past the review gate: rename an entity in the same edit as tightening a
+   * field, and the tightening rides along at INFO.
+   */
+  it('does not demote a real metadata change that happens alongside a rename', () => {
+    const active = activeDefinition();
+    const draft = forkDraft(active);
+    draft.entities.find((e) => e.name === 'Product')!.name = 'Item';
+    const fk = draft.entities
+      .find((e) => e.name === 'Order')!
+      .fields.find((f) => f.name === 'productId')!;
+    fk.meta = { ...fk.meta, unique: true };
+
+    const changes = diffSchemas(active, saveDraft(draft, active));
+    const meta = changes.find((c) => c.kind === 'FIELD_META_CHANGED')!;
+
+    // `meta.relation` followed the rename AND `unique` was set. The second is
+    // real, so the row keeps its own risk rather than being written off.
+    expect(meta.risk).toBe('SAFE');
+    expect(meta.aspect).toBe('write');
+  });
+
+  it('does not demote a genuine retarget to a different entity', () => {
+    const active = activeDefinition();
+    const draft = forkDraft(active);
+    // No rename at all — the relation is repointed at a real other entity.
+    draft.entities.find((e) => e.name === 'Order')!.relations![0]!.target = 'Order';
+
+    const retarget = diffSchemas(active, saveDraft(draft, active)).find(
+      (c) => c.kind === 'RELATION_TARGET_CHANGED',
+    )!;
+    expect(retarget.risk).toBe('BREAKING');
+    expect(retarget.aspect).toBe('both');
+  });
+
+  /**
+   * The rename above is only two changes because the cascade is silent.
+   *
+   * `Order.product` targeted `Product` and now targets `Item`, and its derived
+   * `productId` field's `meta.relation` moved with it. Neither shows up as a
+   * change — `diffRelations` does not compare targets that were reconciled, and
+   * `FIELD_META_CHANGED` is not emitted for the follow. That is the intended
+   * shape for Phase 1; Phase 2 surfaces the cascade at INFO beneath the rename
+   * rather than as breaking peers, and this test pins where it starts from.
+   */
+  it('carries inbound relations to the new entity name', () => {
+    const active = activeDefinition();
+    const draft = forkDraft(active);
+    draft.entities.find((e) => e.name === 'Product')!.name = 'Item';
+
+    const saved = saveDraft(draft, active);
+    const order = saved.entities.find((e) => e.name === 'Order')!;
+
+    expect(order.relations?.[0]?.target).toBe('Item');
+    expect(order.fields.find((f) => f.name === 'productId')?.meta['relation']).toBe('Item');
   });
 
   it('keeps every schema id byte-identical through save', () => {
@@ -318,7 +420,7 @@ describe('the identity invariant across the session', () => {
     const draft = forkDraft(active);
     draft.entities.find((e) => e.name === 'Product')!.name = 'Item';
 
-    const report = analyseDraftImpact(active, saveDraft(draft));
+    const report = analyseDraftImpact(active, saveDraft(draft, active));
     expect(report.risk).toBe('ROUTING');
     expect(report.affected.map(label).sort()).toEqual([
       'DELETE /item/{id}',

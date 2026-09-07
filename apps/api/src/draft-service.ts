@@ -39,6 +39,7 @@ import {
   highestRisk,
   materializeRelations,
   needsAttention,
+  reconcileEntityRenames,
   summariseChanges,
   validateIPS,
   type GenerationConfig,
@@ -213,10 +214,21 @@ export async function applyDraftEdit(
   }
 
   if (body.ips) {
+    // Follow entity renames through the references that name entities by string
+    // — `relation.target` and `meta.relation`. This runs BEFORE validation on
+    // purpose: `validateIPS` is what rejects a target naming an entity that no
+    // longer exists, so reconciling after it would never get the chance, and
+    // renaming an entity that anything relates to would stay unsavable.
+    //
+    // The previous draft state is the comparison side: the client sends the
+    // whole document with the new name, and `draft.ips` still holds the old one
+    // under the same stable id.
+    const reconciled = reconcileEntityRenames(draft.ips, body.ips);
+
     const validated = unwrap(
       validateIPS(
         {
-          ...body.ips,
+          ...reconciled,
           projectId: String(project._id),
           ...addressing(project),
           // The draft's schema version tracks the definition it was forked from,

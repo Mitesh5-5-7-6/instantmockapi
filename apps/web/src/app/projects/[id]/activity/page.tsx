@@ -1,36 +1,30 @@
 'use client';
 
 /**
- * The Activity tab: version history and what has happened to the project.
+ * The Activity tab: what has happened to this project.
  *
  * Distinct from Logs, and the distinction is the point — Activity is what *you*
  * did to the project, Logs is what *callers* did to its API. Merging them would
  * interleave "v3 generated" with 5,000 request rows.
+ *
+ * **The version list moved to the Versions tab.** It used to live here, and the
+ * two are genuinely different questions: this page is a feed of events, while
+ * Versions is a list of things you can act on — publish, restore, compare. One
+ * list serving both meant the publish action had nowhere sensible to go.
  */
 
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Button, Card, EmptyState, ListRow } from '@instantmockapi/ui';
-import {
-  useProject,
-  useProjectMetrics,
-  useRestoreVersion,
-  useVersions,
-} from '../../../../lib/hooks';
-import { useAction } from '../../../../lib/use-action';
+import { Card, EmptyState, buttonVariants } from '@instantmockapi/ui';
+import { useProjectMetrics } from '../../../../lib/hooks';
 import { ActivityRow } from '../../../../components/dashboard/activity-row';
 
 export default function ActivityPage() {
   const { id } = useParams<{ id: string }>();
-  const project = useProject(id);
-  const versions = useVersions(id);
-  const restore = useAction(useRestoreVersion(id), {
-    success: (_data: unknown, version: number) => `Restored v${version}`,
-  });
   // A generous limit here: this is the screen where the full feed belongs, unlike
   // the Overview card which shows the most recent few.
   const metrics = useProjectMetrics(id, 30, 20);
 
-  const rows = versions.data?.data ?? [];
   const events = metrics.data?.activity ?? [];
 
   return (
@@ -57,41 +51,20 @@ export default function ActivityPage() {
         <div>
           <h2>Versions</h2>
           <p className="ui-meta">
-            Each generation snapshots the schema and configuration. Restoring one makes it current
-            without deleting anything newer.
+            Version history, publishing and restore moved to their own tab, where each version can
+            carry the actions that belong to it.
           </p>
         </div>
-        {rows.length === 0 ? (
-          <EmptyState title="No snapshots yet">Versions appear here when you generate.</EmptyState>
-        ) : (
-          <div>
-            {rows.map((version) => {
-              const isCurrent = version.version === project.data?.currentVersion;
-              return (
-                <ListRow
-                  key={version.id}
-                  title={<span className="ui-mono">v{version.version}</span>}
-                  meta={
-                    <>
-                      {version.note ? `${version.note} · ` : ''}
-                      {new Date(version.createdAt).toLocaleString()}
-                    </>
-                  }
-                  trailing={
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={restore.isPending || isCurrent}
-                      onClick={() => void restore.run(version.version)}
-                    >
-                      {isCurrent ? 'Current' : 'Restore'}
-                    </Button>
-                  }
-                />
-              );
-            })}
-          </div>
-        )}
+        <div className="ui-row">
+          {/* The variant's classes on the link itself — a `Button` nested inside
+              an anchor would be a button inside a link. */}
+          <Link
+            className={buttonVariants({ variant: 'secondary' })}
+            href={`/projects/${id}/versions`}
+          >
+            Open Versions
+          </Link>
+        </div>
       </Card>
     </div>
   );

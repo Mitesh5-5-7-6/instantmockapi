@@ -84,11 +84,15 @@ export { entitySlug, type RoutableEntity } from './routing.js';
  */
 export {
   RUNTIME_REQUIRED_ARTIFACTS,
+  VERSION_STATUSES,
+  evaluateAutoPublish,
   evaluatePromotion,
   evaluateRuntimeReadiness,
   isRuntimeRequiredArtifact,
+  versionStatus,
   type ArtifactOutcome,
   type PromotionDecision,
   type RuntimeReadiness,
   type RuntimeRequiredArtifact,
+  type VersionStatus,
 } from './promotion.js';

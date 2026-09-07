@@ -62,6 +62,15 @@ export type ErrorCode =
    * a definition that no longer exists.
    */
   | 'STALE_DRAFT'
+  /**
+   * The version cannot be published because it is not runtime-ready.
+   *
+   * Its own code rather than a bare CONFLICT for the same reason STALE_DRAFT is:
+   * the client can do something specific with it. The response carries the
+   * blocking artifacts in `details`, so a screen can name them and offer to
+   * retry generation instead of leaving the user to guess.
+   */
+  | 'VERSION_NOT_READY'
   | 'RATE_LIMIT_EXCEEDED'
   | 'PLAN_LIMIT_EXCEEDED'
   | 'DEPTH_LIMIT_EXCEEDED'
@@ -128,6 +137,9 @@ function errorCodeToStatus(code: ErrorCode): number {
     // 409, like CONFLICT: the request was well-formed and authorised, and the
     // only problem is that the world moved underneath it.
     STALE_DRAFT: 409,
+    // 409: the request was well-formed and authorised, and the version simply
+    // is not in a publishable state yet.
+    VERSION_NOT_READY: 409,
     RATE_LIMIT_EXCEEDED: 429,
     PLAN_LIMIT_EXCEEDED: 403,
     DEPTH_LIMIT_EXCEEDED: 422,

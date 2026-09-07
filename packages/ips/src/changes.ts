@@ -63,6 +63,7 @@ export const CHANGE_KINDS = [
   'ENUM_VALUES_REMOVED',
   'RELATION_ADDED',
   'RELATION_REMOVED',
+  'RELATION_RENAMED',
   'RELATION_KIND_CHANGED',
   'RELATION_TARGET_CHANGED',
   'RELATION_FIELDS_CHANGED',
@@ -138,19 +139,267 @@ export interface SchemaChange {
   after?: unknown;
   /** One sentence, written for the user rather than for a log. */
   summary: string;
+  /**
+   * How the two sides of this change were paired up. Absent means `'id'`.
+   *
+   * Only ever `'name'` when diffing with `match: 'auto'` — i.e. comparing
+   * version snapshots that predate stable ids. It is per-change rather than
+   * per-report on purpose: one entity can be id-matched while its neighbour is
+   * name-matched, and the warning belongs on the group that earned it rather
+   * than over the whole page.
+   *
+   * A `'name'` pairing means **a rename cannot have been detected**: the names
+   * are equal by construction, so a renamed element appears as one removal plus
+   * one addition. Anything rendering these must say so.
+   */
+  matchedBy?: MatchBasis;
 }
 
 /* ────────────────────────── helpers ────────────────────────── */
 
-/** Index a list by stable id, skipping anything not yet backfilled. */
-function byId<T extends { id?: string }>(items: readonly T[]): Map<string, T> {
-  const map = new Map<string, T>();
-  for (const item of items) {
-    if (typeof item.id === 'string' && item.id !== '') {
-      map.set(item.id, item);
+/**
+ * Facts about the diff as a whole that a per-element comparison needs.
+ *
+ * Only one so far: which entities were renamed. `Relation.target` and
+ * `FieldMeta.relation` hold entity **names**, so renaming `Product` to `Item`
+ * *also* moves every inbound relation's target and every derived foreign key's
+ * `meta.relation`. Compared element by element those look like a retarget and a
+ * metadata edit — `RELATION_TARGET_CHANGED` at BREAKING, once per inbound
+ * relation — when they are one rename that was already reported.
+ *
+ * On a schema with ten relations, one rename would otherwise produce eleven
+ * breaking rows and raise the whole report from ROUTING to BREAKING. So the
+ * echoes are demoted to INFO and attributed to the rename that caused them.
+ *
+ * **Demoted, not dropped.** Dropping them would mean the diff of two
+ * definitions no longer explains the byte difference between them, and the next
+ * person to compare the raw JSON finds a delta the diff never mentioned.
+ *
+ * This is what keeps `diffSchemas` a pure function of its two arguments: the
+ * context is derived from those same two documents, not passed in from outside.
+ */
+interface DiffContext {
+  /** Old entity name → new entity name, for entities whose stable id persisted. */
+  renamedEntities: ReadonlyMap<string, string>;
+  /** How elements are paired. See `MatchMode`. */
+  match: MatchMode;
+}
+
+/**
+ * The dependency-graph key for an element, so impact analysis can resolve it.
+ *
+ * **The `name:` shape is copied verbatim from `graph.ts`** (`entityNode(entity.id
+ * ?? \`name:${entity.name}\`)` and its field/relation siblings). That is not
+ * cosmetic: `changeCandidates` in `impact.ts` turns these ids into graph node
+ * ids, so a name-matched change resolves to a real node only if the key matches
+ * the one the graph minted. Diverge by a character and every name-matched change
+ * lands in `unattributed` instead of naming the endpoints it affects.
+ *
+ * Only used in `'auto'` mode. In `'id'` mode an element without a stable id is
+ * left with `undefined`, exactly as before — so the draft path, which backfills
+ * ids first, is byte-identical to Phase 1.
+ */
+function entityKeyOf(ctx: DiffContext, entity: Entity): string | undefined {
+  return entity.id ?? (ctx.match === 'auto' ? `name:${entity.name}` : undefined);
+}
+
+function fieldKeyOf(
+  ctx: DiffContext,
+  entity: Entity,
+  field: Field,
+  path: string,
+): string | undefined {
+  return field.id ?? (ctx.match === 'auto' ? `name:${entity.name}.${path}` : undefined);
+}
+
+function relationKeyOf(ctx: DiffContext, entity: Entity, relation: Relation): string | undefined {
+  return relation.id ?? (ctx.match === 'auto' ? `name:${entity.name}.${relation.name}` : undefined);
+}
+
+/** `matchedBy` only when it is worth saying — absent means `'id'`. */
+function basis(by: MatchBasis): { matchedBy?: MatchBasis } {
+  return by === 'name' ? { matchedBy: 'name' } : {};
+}
+
+/** Whether a before/after pair is exactly the echo of a reported entity rename. */
+function isRenameEcho(ctx: DiffContext, before: unknown, after: unknown): boolean {
+  return (
+    typeof before === 'string' &&
+    typeof after === 'string' &&
+    ctx.renamedEntities.get(before) === after
+  );
+}
+
+/**
+ * Whether `meta` differs *only* by a `relation` key that followed a rename.
+ *
+ * The narrowness is the point. A field whose `unique` flag changed in the same
+ * edit as a rename must keep its real risk — so this compares the two metas with
+ * `relation` held equal, and demotes only when nothing else moved.
+ */
+function onlyRelationMetaChanged(
+  ctx: DiffContext,
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): boolean {
+  if (!isRenameEcho(ctx, before['relation'], after['relation'])) {
+    return false;
+  }
+  const { relation: _b, ...restBefore } = before;
+  const { relation: _a, ...restAfter } = after;
+  return sameValue(restBefore, restAfter);
+}
+
+/** What an added or removed entity contained, for the comparison view. */
+export interface EntityShape {
+  name: string;
+  fields: { id?: string; name: string; type: string; required: boolean }[];
+  relations: { id?: string; name: string; kind: string; target: string }[];
+}
+
+/**
+ * An added or removed entity's contents, carried on the change itself.
+ *
+ * `ENTITY_ADDED` used to carry `{ name }` and nothing else, so a comparison view
+ * could say "Customer added" but never what it contained — and §10 of the spec
+ * wants that expandable.
+ *
+ * Carried as a **payload** rather than as per-field `FIELD_ADDED` changes, and
+ * that is deliberate: `diffSchemas` skips the field loop entirely for a new
+ * entity, because a 51-field entity would otherwise emit 52 rows for one
+ * addition. That is exactly the "50 separate flat change rows" §37 forbids, and
+ * it would double-count every summary — the entity and each of its fields.
+ */
+function entityShape(entity: Entity): EntityShape {
+  return {
+    name: entity.name,
+    fields: (entity.fields ?? []).map((field) => ({
+      ...(field.id === undefined ? {} : { id: field.id }),
+      name: field.name,
+      type: field.type,
+      required: field.required,
+    })),
+    relations: (entity.relations ?? []).map((relation) => ({
+      ...(relation.id === undefined ? {} : { id: relation.id }),
+      name: relation.name,
+      kind: relation.kind,
+      target: relation.target,
+    })),
+  };
+}
+
+/** How the two sides of a pair were matched up. */
+export type MatchBasis = 'id' | 'name';
+
+/**
+ * How to pair the two sides.
+ *
+ * `'id'` — stable ids only, and anything without one is invisible. The Phase 1
+ * behaviour, and correct for a draft, because `POST /draft` backfills ids on
+ * the active definition first so both sides are guaranteed to carry them.
+ *
+ * `'auto'` — ids first, then names for whatever is left over. Required for
+ * comparing **version snapshots**, which may predate the id backfill entirely.
+ * Under `'id'`, two such snapshots diff to *nothing* — `byId` skips every
+ * id-less entity on both sides — and a comparison view would render that as
+ * "no changes detected", which is a confident lie.
+ */
+export type MatchMode = 'id' | 'auto';
+
+export interface DiffOptions {
+  match?: MatchMode;
+}
+
+interface Pairing<T> {
+  matched: { before: T; after: T; by: MatchBasis }[];
+  /** Present only on the `after` side. */
+  addedOnly: T[];
+  /** Present only on the `before` side. */
+  removedOnly: T[];
+  /** True when any pair was resolved by name rather than by id. */
+  usedNames: boolean;
+}
+
+/**
+ * Pair two sibling lists, by id and then — in `'auto'` — by name.
+ *
+ * Two passes rather than one key map, because the common case is *partially*
+ * identified: `materializeRelations` regenerates the identity field and every
+ * derived foreign key with no id on both sides, so even a fully backfilled
+ * project has unidentified elements once a snapshot is materialized for
+ * comparison. A single map keyed on `id ?? name` would then pair an id-carrying
+ * element on one side against a name-keyed one on the other only by accident.
+ *
+ * Order is preserved: `matched` follows the `after` list, which is what keeps
+ * the rendered change list document-ordered.
+ */
+function pair<T>(
+  before: readonly T[],
+  after: readonly T[],
+  idOf: (item: T) => string | undefined,
+  nameOf: (item: T) => string,
+  mode: MatchMode,
+): Pairing<T> {
+  const result: Pairing<T> = { matched: [], addedOnly: [], removedOnly: [], usedNames: false };
+
+  const beforeById = new Map<string, T>();
+  for (const item of before) {
+    const id = idOf(item);
+    if (typeof id === 'string' && id !== '') {
+      beforeById.set(id, item);
     }
   }
-  return map;
+
+  const claimed = new Set<T>();
+  const leftoverAfter: T[] = [];
+
+  // Pass 1 — stable id.
+  for (const item of after) {
+    const id = idOf(item);
+    const partner = typeof id === 'string' && id !== '' ? beforeById.get(id) : undefined;
+    if (partner === undefined) {
+      leftoverAfter.push(item);
+      continue;
+    }
+    result.matched.push({ before: partner, after: item, by: 'id' });
+    claimed.add(partner);
+  }
+
+  if (mode === 'id') {
+    // Anything unmatched on the after side is an addition, but only if it could
+    // have been matched at all. An element with no id is skipped rather than
+    // reported — see the call sites, which each decide what "skipped" means.
+    result.addedOnly = leftoverAfter;
+    result.removedOnly = before.filter((item) => !claimed.has(item));
+    return result;
+  }
+
+  // Pass 2 — name, among what each side has left.
+  const beforeByName = new Map<string, T>();
+  for (const item of before) {
+    if (!claimed.has(item)) {
+      const name = nameOf(item);
+      // First wins. Duplicate names are invalid per `validateIPS`, so this only
+      // arises on a document that could not have been saved.
+      if (!beforeByName.has(name)) {
+        beforeByName.set(name, item);
+      }
+    }
+  }
+
+  for (const item of leftoverAfter) {
+    const partner = beforeByName.get(nameOf(item));
+    if (partner === undefined || claimed.has(partner)) {
+      result.addedOnly.push(item);
+      continue;
+    }
+    result.matched.push({ before: partner, after: item, by: 'name' });
+    claimed.add(partner);
+    result.usedNames = true;
+  }
+
+  result.removedOnly = before.filter((item) => !claimed.has(item));
+  return result;
 }
 
 /**
@@ -184,6 +433,114 @@ const VALIDATION_KEYS = [
   'message',
 ] as const;
 
+export type ValidationKey = (typeof VALIDATION_KEYS)[number];
+
+/** Whether a validation rule got stricter, looser, or neither knowably. */
+export type ValidationDirection = 'tightened' | 'relaxed' | 'unknown';
+
+function numberOr(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/** `arrayLength` is a `{min, max}` pair rather than a scalar. */
+function boundOf(value: unknown, key: 'min' | 'max'): number | null {
+  return value !== null && typeof value === 'object'
+    ? numberOr((value as Record<string, unknown>)[key])
+    : null;
+}
+
+/**
+ * Which way a validation rule moved.
+ *
+ * Exported and used by **both** risk (here) and the three-value impact
+ * projection in `classification.ts`. One reader of the evidence, so the two
+ * axes cannot give different answers about the same edit — the alternative was
+ * the commit dialog calling a relaxed bound "needs attention" while the compare
+ * page called it non-breaking.
+ *
+ * `unknown` is a real answer, not a failure. A changed `regex` can be either
+ * direction and deciding which would need to compare the languages two patterns
+ * accept; the honest report is "we cannot tell", which resolves to the cautious
+ * side at both call sites.
+ */
+export function validationDirection(
+  key: ValidationKey,
+  before: unknown,
+  after: unknown,
+): ValidationDirection {
+  const absent = (value: unknown): boolean =>
+    value === undefined || value === null || value === false;
+
+  // Appearing tightens, disappearing relaxes — for every key. A `message` is
+  // the exception in spirit (it is only visible in an error body) but follows
+  // the same shape, and treating it as relaxed either way is handled below.
+  if (key === 'message') {
+    return 'relaxed';
+  }
+  if (absent(before) && !absent(after)) {
+    return 'tightened';
+  }
+  if (!absent(before) && absent(after)) {
+    return 'relaxed';
+  }
+
+  switch (key) {
+    case 'email':
+    case 'url':
+    case 'uuid':
+      // Both present and both truthy — nothing moved that we can score.
+      return 'unknown';
+    case 'regex':
+      // Deciding this needs to compare the languages two patterns accept.
+      return 'unknown';
+    case 'length': {
+      // An exact length is a narrowing whichever way it moves: values of the
+      // old length are now rejected regardless of direction.
+      return 'tightened';
+    }
+    case 'min': {
+      const from = numberOr(before);
+      const to = numberOr(after);
+      if (from === null || to === null) {
+        return 'unknown';
+      }
+      return to > from ? 'tightened' : 'relaxed';
+    }
+    case 'max': {
+      const from = numberOr(before);
+      const to = numberOr(after);
+      if (from === null || to === null) {
+        return 'unknown';
+      }
+      return to < from ? 'tightened' : 'relaxed';
+    }
+    case 'arrayLength': {
+      const minFrom = boundOf(before, 'min');
+      const minTo = boundOf(after, 'min');
+      const maxFrom = boundOf(before, 'max');
+      const maxTo = boundOf(after, 'max');
+
+      // Either bound closing in tightens the rule, and that outranks the other
+      // bound opening out — a tighter floor rejects arrays that used to pass
+      // however generous the ceiling became.
+      const tightened =
+        (minFrom !== null && minTo !== null && minTo > minFrom) ||
+        (maxFrom !== null && maxTo !== null && maxTo < maxFrom) ||
+        (minFrom === null && minTo !== null) ||
+        (maxFrom === null && maxTo !== null);
+      if (tightened) {
+        return 'tightened';
+      }
+      const relaxed =
+        (minFrom !== null && minTo !== null && minTo < minFrom) ||
+        (maxFrom !== null && maxTo !== null && maxTo > maxFrom) ||
+        (minFrom !== null && minTo === null) ||
+        (maxFrom !== null && maxTo === null);
+      return relaxed ? 'relaxed' : 'unknown';
+    }
+  }
+}
+
 function sameValue(a: unknown, b: unknown): boolean {
   // JSON comparison rather than deep-equal: every value in an IPS is
   // JSON-serialisable by construction (it round-trips through Mongo as Mixed),
@@ -197,14 +554,24 @@ function enumOf(validation: ValidationRules | undefined): string[] {
 
 /* ────────────────────────── field diff ────────────────────────── */
 
-function diffField(entity: Entity, before: Field, after: Field, path: string): SchemaChange[] {
+function diffField(
+  ctx: DiffContext,
+  entity: Entity,
+  before: Field,
+  after: Field,
+  path: string,
+  by: MatchBasis = 'id',
+): SchemaChange[] {
   const changes: SchemaChange[] = [];
+  const entityId = entityKeyOf(ctx, entity);
+  const fieldId = fieldKeyOf(ctx, entity, after, path);
   const at = {
-    entityId: entity.id,
+    ...(entityId === undefined ? {} : { entityId }),
     entityName: entity.name,
-    fieldId: after.id,
+    ...(fieldId === undefined ? {} : { fieldId }),
     fieldName: after.name,
     ...(path === after.name ? {} : { path }),
+    ...basis(by),
   };
 
   if (before.name !== after.name) {
@@ -317,11 +684,20 @@ function diffField(entity: Entity, before: Field, after: Field, path: string): S
       ...at,
       path: `${path}.validation.${key}`,
       kind,
-      // Adding or tightening a rule rejects bodies that used to pass; removing
-      // one only widens what is accepted. Tightening-vs-loosening within a
-      // numeric bound is not inferred — reporting a possible break is the safe
-      // direction, and the user can see the before/after.
-      risk: kind === 'VALIDATION_REMOVED' ? 'SAFE' : 'WARNING',
+      /*
+       * Scored on which WAY the rule moved, not merely on whether it moved.
+       *
+       * This used to be a flat `WARNING` for anything but a removal, with a
+       * comment admitting the direction "is not inferred — reporting a possible
+       * break is the safe direction". But `SAFE` is defined a hundred lines up
+       * as "strictly additive… a relaxed rule", so a loosened `max` scored
+       * WARNING while the file's own vocabulary called it SAFE.
+       *
+       * `min: 8 → 3` cannot reject a body that used to pass, so it no longer
+       * demands acknowledgement at commit. `unknown` — a changed `regex` — stays
+       * WARNING, which is the cautious side of a genuine cannot-tell.
+       */
+      risk: validationDirection(key, from, to) === 'relaxed' ? 'SAFE' : 'WARNING',
       aspect: 'write',
       before: from ?? null,
       after: to ?? null,
@@ -335,16 +711,23 @@ function diffField(entity: Entity, before: Field, after: Field, path: string): S
   }
 
   if (!sameValue(before.meta, after.meta)) {
+    // `meta.relation` names the target entity, so a derived foreign key's
+    // metadata moves whenever that entity is renamed. When that is the ONLY
+    // difference, this row is the rename's echo rather than a metadata edit —
+    // and there is one per foreign key pointing at the renamed entity.
+    const echo = onlyRelationMetaChanged(ctx, before.meta, after.meta);
     changes.push({
       ...at,
       kind: 'FIELD_META_CHANGED',
       // `unique` and `searchable` change what the hosted query layer accepts and
       // what a write may collide on, but no response shape moves.
-      risk: 'SAFE',
-      aspect: 'write',
+      risk: echo ? 'INFO' : 'SAFE',
+      aspect: echo ? 'none' : 'write',
       before: before.meta,
       after: after.meta,
-      summary: `Metadata on ${entity.name}.${after.name} changed`,
+      summary: echo
+        ? `${entity.name}.${after.name} follows the rename of ${String(before.meta['relation'])} to ${String(after.meta['relation'])}`
+        : `Metadata on ${entity.name}.${after.name} changed`,
     });
   }
 
@@ -353,53 +736,62 @@ function diffField(entity: Entity, before: Field, after: Field, path: string): S
 
 /* ────────────────────────── entity diff ────────────────────────── */
 
-function diffEntityFields(before: Entity, after: Entity): SchemaChange[] {
+function diffEntityFields(ctx: DiffContext, before: Entity, after: Entity): SchemaChange[] {
   const changes: SchemaChange[] = [];
 
+  // Paired on the DOTTED PATH, not the bare name — so a nested `address.id`
+  // never pairs with the entity's own identity field.
   const beforeFlat = flattenFields(before.fields ?? []);
   const afterFlat = flattenFields(after.fields ?? []);
-  const beforeById = byId(beforeFlat.map((entry) => entry.field));
-  const afterIds = new Set(
-    afterFlat.map((entry) => entry.field.id).filter((id): id is string => typeof id === 'string'),
+  const fields = pair(
+    beforeFlat,
+    afterFlat,
+    (entry) => entry.field.id,
+    (entry) => entry.path,
+    ctx.match,
   );
 
-  for (const { field, path } of afterFlat) {
-    const previous = field.id === undefined ? undefined : beforeById.get(field.id);
-    if (!previous) {
-      changes.push({
-        entityId: after.id,
-        entityName: after.name,
-        fieldId: field.id,
-        fieldName: field.name,
-        ...(path === field.name ? {} : { path }),
-        kind: 'FIELD_ADDED',
-        // A new optional field is additive; a new required one rejects every
-        // existing request body that does not carry it.
-        risk: field.required ? 'WARNING' : 'SAFE',
-        aspect: 'both',
-        after: { name: field.name, type: field.type, required: field.required },
-        summary: field.required
-          ? `Required field ${after.name}.${field.name} added`
-          : `Field ${after.name}.${field.name} added`,
-      });
-      continue;
-    }
-    changes.push(...diffField(after, previous, field, path));
+  const entityId = entityKeyOf(ctx, after);
+  const locate = (field: Field, path: string) => {
+    const fieldId = fieldKeyOf(ctx, after, field, path);
+    return {
+      ...(entityId === undefined ? {} : { entityId }),
+      entityName: after.name,
+      ...(fieldId === undefined ? {} : { fieldId }),
+      fieldName: field.name,
+      ...(path === field.name ? {} : { path }),
+    };
+  };
+
+  for (const { before: previous, after: field, by } of fields.matched) {
+    changes.push(...diffField(ctx, after, previous.field, field.field, field.path, by));
   }
 
-  for (const { field, path } of beforeFlat) {
-    // Skip anything unmatchable. A field with no id cannot be paired, and
-    // reporting it as REMOVED would be a lie about an un-backfilled schema —
-    // the field is very likely still there, just unidentified.
-    if (field.id === undefined || afterIds.has(field.id)) {
+  for (const { field, path } of fields.addedOnly) {
+    changes.push({
+      ...locate(field, path),
+      kind: 'FIELD_ADDED',
+      // A new optional field is additive; a new required one rejects every
+      // existing request body that does not carry it.
+      risk: field.required ? 'WARNING' : 'SAFE',
+      aspect: 'both',
+      after: { name: field.name, type: field.type, required: field.required },
+      summary: field.required
+        ? `Required field ${after.name}.${field.name} added`
+        : `Field ${after.name}.${field.name} added`,
+    });
+  }
+
+  for (const { field, path } of fields.removedOnly) {
+    // In 'id' mode, skip anything unmatchable: a field with no id cannot be
+    // paired, and reporting it as REMOVED would be a lie about an un-backfilled
+    // schema — the field is very likely still there, just unidentified.
+    // 'auto' pairs it by path, so a leftover there really is gone.
+    if (ctx.match === 'id' && field.id === undefined) {
       continue;
     }
     changes.push({
-      entityId: after.id,
-      entityName: after.name,
-      fieldId: field.id,
-      fieldName: field.name,
-      ...(path === field.name ? {} : { path }),
+      ...locate(field, path),
       kind: 'FIELD_REMOVED',
       risk: 'BREAKING',
       aspect: 'both',
@@ -411,37 +803,82 @@ function diffEntityFields(before: Entity, after: Entity): SchemaChange[] {
   return changes;
 }
 
-function diffRelations(before: Entity, after: Entity): SchemaChange[] {
+function diffRelations(ctx: DiffContext, before: Entity, after: Entity): SchemaChange[] {
   const changes: SchemaChange[] = [];
-  const beforeById = byId(before.relations ?? []);
-  const afterById = byId(after.relations ?? []);
+  const relations = pair(
+    before.relations ?? [],
+    after.relations ?? [],
+    (relation) => relation.id,
+    (relation) => relation.name,
+    ctx.match,
+  );
 
-  const at = (relation: Relation) => ({
-    entityId: after.id,
-    entityName: after.name,
-    relationId: relation.id,
-    relationName: relation.name,
-  });
+  const entityId = entityKeyOf(ctx, after);
+  const at = (relation: Relation, by: MatchBasis = 'id') => {
+    const relationId = relationKeyOf(ctx, after, relation);
+    return {
+      ...(entityId === undefined ? {} : { entityId }),
+      entityName: after.name,
+      ...(relationId === undefined ? {} : { relationId }),
+      relationName: relation.name,
+      ...basis(by),
+    };
+  };
 
-  for (const [id, relation] of afterById) {
-    const previous = beforeById.get(id);
-    if (!previous) {
+  for (const relation of relations.addedOnly) {
+    changes.push({
+      ...at(relation),
+      kind: 'RELATION_ADDED',
+      // Adds an `?include=` key and, on owning sides, a derived foreign-key
+      // field. Nothing existing stops working.
+      risk: 'SAFE',
+      aspect: 'both',
+      after: { name: relation.name, kind: relation.kind, target: relation.target },
+      summary: `Relation ${after.name}.${relation.name} → ${relation.target} added`,
+    });
+  }
+
+  for (const { before: previous, after: relation, by } of relations.matched) {
+    if (previous.name !== relation.name) {
       changes.push({
-        ...at(relation),
-        kind: 'RELATION_ADDED',
-        // Adds an `?include=` key and, on owning sides, a derived foreign-key
-        // field. Nothing existing stops working.
-        risk: 'SAFE',
-        aspect: 'both',
-        after: { name: relation.name, kind: relation.kind, target: relation.target },
-        summary: `Relation ${after.name}.${relation.name} → ${relation.target} added`,
+        ...at(relation, by),
+        kind: 'RELATION_RENAMED',
+        /*
+         * BREAKING, and unconditionally so.
+         *
+         * `relation.name` is the `?include=` key AND the property the expansion
+         * lands on in the response. The hosted runtime **rejects an unknown
+         * include with a 400** rather than ignoring it, so `?include=oldName`
+         * fails hard the moment this ships. That is `RELATION_REMOVED`'s
+         * justification verbatim, so the two keep the same risk — there is a
+         * case for WARNING (only callers that pass `?include=` are hit, and only
+         * when the feature is on) but it applies equally to both, and moving one
+         * without the other is worse than either choice.
+         */
+        risk: 'BREAKING',
+        /*
+         * `read`, deliberately narrower than the `both` its siblings use.
+         *
+         * A relation node emits only `read` and `query` edges in the dependency
+         * graph, and a rename leaves `localField` alone — the stored foreign key
+         * and every request body are untouched, so `both` would over-claim and
+         * mark POST/PUT/PATCH affected for no reason.
+         *
+         * `RELATION_ADDED`/`REMOVED` legitimately use `both` for a different
+         * reason: their node is absent from one side's graph, so impact falls
+         * through to the ENTITY node, where `both` correctly picks up the writes
+         * that gain or lose the derived key. A renamed relation's node is present
+         * on both sides. Not an inconsistency — do not "fix" it.
+         */
+        aspect: 'read',
+        before: previous.name,
+        after: relation.name,
+        summary: `Relation ${after.name}.${previous.name} renamed to ${relation.name} — '?include=${previous.name}' stops resolving`,
       });
-      continue;
     }
-
     if (previous.kind !== relation.kind) {
       changes.push({
-        ...at(relation),
+        ...at(relation, by),
         kind: 'RELATION_KIND_CHANGED',
         // Cardinality decides whether an expansion is an object or an array, and
         // which side carries the key.
@@ -453,14 +890,20 @@ function diffRelations(before: Entity, after: Entity): SchemaChange[] {
       });
     }
     if (previous.target !== relation.target) {
+      // Following a rename, not being repointed at a different entity. The
+      // relation still resolves to the same records; only the name it is spelled
+      // with moved, and `ENTITY_RENAMED` already reported that at ROUTING.
+      const echo = isRenameEcho(ctx, previous.target, relation.target);
       changes.push({
-        ...at(relation),
+        ...at(relation, by),
         kind: 'RELATION_TARGET_CHANGED',
-        risk: 'BREAKING',
-        aspect: 'both',
+        risk: echo ? 'INFO' : 'BREAKING',
+        aspect: echo ? 'none' : 'both',
         before: previous.target,
         after: relation.target,
-        summary: `Relation ${after.name}.${relation.name} retargeted from ${previous.target} to ${relation.target}`,
+        summary: echo
+          ? `Relation ${after.name}.${relation.name} follows the rename of ${previous.target} to ${relation.target}`
+          : `Relation ${after.name}.${relation.name} retargeted from ${previous.target} to ${relation.target}`,
       });
     }
     if (
@@ -468,7 +911,7 @@ function diffRelations(before: Entity, after: Entity): SchemaChange[] {
       previous.foreignField !== relation.foreignField
     ) {
       changes.push({
-        ...at(relation),
+        ...at(relation, by),
         kind: 'RELATION_FIELDS_CHANGED',
         risk: 'BREAKING',
         aspect: 'both',
@@ -479,7 +922,7 @@ function diffRelations(before: Entity, after: Entity): SchemaChange[] {
     }
     if (previous.onDelete !== relation.onDelete) {
       changes.push({
-        ...at(relation),
+        ...at(relation, by),
         kind: 'RELATION_ON_DELETE_CHANGED',
         // Only observable through DELETE, and only in what happens to the other
         // side. No shape moves.
@@ -492,7 +935,7 @@ function diffRelations(before: Entity, after: Entity): SchemaChange[] {
     }
     if (previous.required !== relation.required) {
       changes.push({
-        ...at(relation),
+        ...at(relation, by),
         kind: 'RELATION_REQUIRED_CHANGED',
         risk: relation.required ? 'WARNING' : 'SAFE',
         aspect: 'write',
@@ -505,10 +948,7 @@ function diffRelations(before: Entity, after: Entity): SchemaChange[] {
     }
   }
 
-  for (const [id, relation] of beforeById) {
-    if (afterById.has(id)) {
-      continue;
-    }
+  for (const relation of relations.removedOnly) {
     changes.push({
       ...at(relation),
       kind: 'RELATION_REMOVED',
@@ -609,31 +1049,60 @@ function diffConfig(before: GenerationConfig, after: GenerationConfig): SchemaCh
 export function diffSchemas(
   active: InternalProjectSchema,
   draft: InternalProjectSchema,
+  options: DiffOptions = {},
 ): SchemaChange[] {
   const changes: SchemaChange[] = [...diffConfig(active.generationConfig, draft.generationConfig)];
 
-  const activeById = byId(active.entities ?? []);
-  const draftById = byId(draft.entities ?? []);
+  const match = options.match ?? 'id';
+  const entities = pair(
+    active.entities ?? [],
+    draft.entities ?? [],
+    (entity) => entity.id,
+    (entity) => entity.name,
+    match,
+  );
 
-  for (const [id, entity] of draftById) {
-    const previous = activeById.get(id);
-    if (!previous) {
-      changes.push({
-        entityId: id,
-        entityName: entity.name,
-        kind: 'ENTITY_ADDED',
-        risk: 'SAFE',
-        aspect: 'routing',
-        after: { name: entity.name },
-        summary: `Entity ${entity.name} added`,
-      });
+  // A pre-pass, because a relation's target echo can only be recognised once
+  // every rename in the whole document is known — the entity that was renamed
+  // may be declared after the entity that relates to it.
+  const renamedEntities = new Map<string, string>();
+  for (const { before, after } of entities.matched) {
+    if (before.name !== after.name) {
+      renamedEntities.set(before.name, after.name);
+    }
+  }
+  const ctx: DiffContext = { renamedEntities, match };
+
+  for (const entity of entities.addedOnly) {
+    // In 'id' mode an entity with no id is skipped rather than reported: it is
+    // very likely still there, just unidentified, and calling it an addition
+    // would be a lie about an un-backfilled schema. 'auto' has a name to fall
+    // back on, so nothing is skipped there.
+    if (match === 'id' && entity.id === undefined) {
       continue;
     }
+    changes.push({
+      ...(entityKeyOf(ctx, entity) === undefined ? {} : { entityId: entityKeyOf(ctx, entity)! }),
+      entityName: entity.name,
+      kind: 'ENTITY_ADDED',
+      risk: 'SAFE',
+      aspect: 'routing',
+      after: entityShape(entity),
+      summary: `Entity ${entity.name} added`,
+    });
+  }
+
+  for (const { before: previous, after: entity, by } of entities.matched) {
+    const id = entityKeyOf(ctx, entity);
+    const at = {
+      ...(id === undefined ? {} : { entityId: id }),
+      entityName: entity.name,
+      ...basis(by),
+    };
 
     if (previous.name !== entity.name) {
       changes.push({
-        entityId: id,
-        entityName: entity.name,
+        ...at,
         kind: 'ENTITY_RENAMED',
         // The hosted route is derived from the entity name
         // (`entitySlug` in `shared/routing.ts`), so a rename MOVES every endpoint
@@ -649,8 +1118,7 @@ export function diffSchemas(
 
     if ((previous.description ?? null) !== (entity.description ?? null)) {
       changes.push({
-        entityId: id,
-        entityName: entity.name,
+        ...at,
         kind: 'ENTITY_DESCRIPTION_CHANGED',
         risk: 'INFO',
         // Documentation text only. No request, response or route changes.
@@ -663,8 +1131,7 @@ export function diffSchemas(
 
     if (!sameValue(previous.identity, entity.identity)) {
       changes.push({
-        entityId: id,
-        entityName: entity.name,
+        ...at,
         kind: 'ENTITY_IDENTITY_CHANGED',
         // The identity field is what item URLs address and what relations point
         // at, so this reshapes routes and joins together.
@@ -676,21 +1143,22 @@ export function diffSchemas(
       });
     }
 
-    changes.push(...diffEntityFields(previous, entity));
-    changes.push(...diffRelations(previous, entity));
+    changes.push(...diffEntityFields(ctx, previous, entity));
+    changes.push(...diffRelations(ctx, previous, entity));
   }
 
-  for (const [id, entity] of activeById) {
-    if (draftById.has(id)) {
+  for (const entity of entities.removedOnly) {
+    if (match === 'id' && entity.id === undefined) {
       continue;
     }
+    const removedId = entityKeyOf(ctx, entity);
     changes.push({
-      entityId: id,
+      ...(removedId === undefined ? {} : { entityId: removedId }),
       entityName: entity.name,
       kind: 'ENTITY_REMOVED',
       risk: 'BREAKING',
       aspect: 'routing',
-      before: { name: entity.name },
+      before: entityShape(entity),
       summary: `Entity ${entity.name} removed — all of its endpoints go`,
     });
   }

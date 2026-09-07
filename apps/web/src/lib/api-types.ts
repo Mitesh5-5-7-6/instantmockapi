@@ -78,11 +78,49 @@ export interface ProjectSummary {
   slug: string | null;
   description: string | null;
   status: ProjectStatus;
+  /**
+   * The DEFINITION version — what the user is editing.
+   *
+   * Not what the hosted API serves. The two diverge the moment anything is
+   * edited, so a screen that shows this and calls it "live" is wrong; use
+   * `publishedVersion` for that.
+   */
   currentVersion: number;
+  /**
+   * The version the hosted API serves, or `null` when nothing is live yet.
+   *
+   * `null` is a real state — a project that has never generated — and is a
+   * different statement from `1`, which is why the two are not collapsed.
+   */
+  publishedVersion: number | null;
+  /** `currentVersion > publishedVersion`: edits are waiting to be generated. */
+  pendingRegeneration: boolean;
   inputType: 'json' | 'swagger' | 'builder' | 'docs';
   hosted: { url: string | null; expiresAt: string | null };
   createdAt: string;
   updatedAt: string;
+}
+
+/** Derived, never stored — see `versionStatus` in `packages/shared`. */
+export type VersionStatus =
+  'PUBLISHED' | 'SUPERSEDED' | 'READY' | 'DEGRADED' | 'GENERATING' | 'FAILED' | 'PENDING';
+
+export type VersionChangeType = 'INITIAL' | 'FEATURE' | 'BREAKING' | 'ROLLBACK' | 'REGENERATION';
+
+/** §3's change counts, for the history list's one-line summary. */
+export interface VersionChangeSummary {
+  entitiesAdded: number;
+  entitiesRemoved: number;
+  entitiesModified: number;
+  fieldsAdded: number;
+  fieldsRemoved: number;
+  fieldsModified: number;
+  relationsAdded: number;
+  relationsRemoved: number;
+  relationsModified: number;
+  endpointsAdded: number;
+  endpointsRemoved: number;
+  endpointsModified: number;
 }
 
 /**

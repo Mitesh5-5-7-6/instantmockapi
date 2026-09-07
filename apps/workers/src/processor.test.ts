@@ -227,6 +227,103 @@ describe('full pipeline', () => {
     expect(paths).toContain('openapi/openapi.json');
     const readme = await zip.file('README.md')?.async('string');
     expect(readme).toContain('IPS version: 1');
+
+    // The first-publish exception, asserted rather than assumed. Generation does
+    // not publish (Phase 2 §1) — except for a project with nothing live, because
+    // onboarding has to end on a working URL and there is no live runtime to
+    // disturb. Everything above (status, hosted URL, expiry) is a consequence of
+    // that exception firing, so without this line the test would pass just as
+    // happily if publishing had become unconditional again.
+    expect(updated?.publishedVersion).toBe(1);
+  });
+});
+
+describe('generation does not publish (Phase 2 §1)', () => {
+  /**
+   * The whole point of explicit publish, and the case the fresh-project tests
+   * above cannot cover: a project that is *already serving* something.
+   */
+  it('leaves a live project on its published version after a clean generation', async () => {
+    const { payload, project } = await stageJob(FULL_ARTIFACTS);
+
+    // The state a successful publish leaves behind. `hosted.url` is what makes
+    // this project "live"; see `hasLiveDeployment`.
+    const live = await Project.findById(project._id);
+    live!.publishedVersion = 1;
+    live!.status = 'active';
+    live!.hosted = {
+      url: 'https://api.instantmockapi.dev/p/prj_deadbeef00/shop',
+      expiresAt: new Date('2030-01-01T00:00:00.000Z'),
+    };
+    await live!.save();
+
+    // Generate into a NEW version, as every route does for a live project.
+    await Version.create({
+      projectId: project._id,
+      version: 2,
+      ipsSnapshot: live!.ips,
+      configSnapshot: live!.generationConfig,
+    });
+    for (const artifactType of FULL_ARTIFACTS) {
+      const reset = await createOrResetArtifactRecord(String(project._id), artifactType, 2);
+      if (!reset.ok) {
+        throw reset.error;
+      }
+    }
+
+    await processGenerationJob({ ...payload, version: 2 }, deps());
+
+    const updated = await Project.findById(project._id);
+    // v2 generated cleanly and is READY — and is not live.
+    expect(
+      await Artifact.countDocuments({ projectId: project._id, version: 2, status: 'completed' }),
+    ).toBe(FULL_ARTIFACTS.length);
+    expect(updated?.publishedVersion).toBe(1);
+    // The live deployment is untouched, down to the expiry: publishing is what
+    // restarts that clock, and generation must not.
+    expect(updated?.hosted.url).toBe('https://api.instantmockapi.dev/p/prj_deadbeef00/shop');
+    expect(updated?.hosted.expiresAt?.toISOString()).toBe('2030-01-01T00:00:00.000Z');
+    expect(updated?.status).toBe('active');
+  });
+
+  /**
+   * The regression guard for the trap in this design.
+   *
+   * `pinPublishedVersion` stamps `publishedVersion` speculatively on the first
+   * edit, so a project whose very first action was a partial regenerate has
+   * `publishedVersion = 1` pointing at a version with **no artifacts** — nothing
+   * has ever been live. Keying the exception on `publishedVersion != null` would
+   * withhold the first publish from exactly that user, leaving them with a READY
+   * version, no hosted URL, and no way to know why.
+   */
+  it('still publishes the first version when the pointer was only pinned, never served', async () => {
+    const { payload, project } = await stageJob(FULL_ARTIFACTS);
+
+    const pinned = await Project.findById(project._id);
+    pinned!.publishedVersion = 1;
+    // The tell: no hosted URL. `publishedVersion` is set, but nothing is live.
+    pinned!.hosted = { url: null, expiresAt: null };
+    await pinned!.save();
+
+    await processGenerationJob(payload, deps());
+
+    const updated = await Project.findById(project._id);
+    expect(updated?.publishedVersion).toBe(1);
+    expect(updated?.hosted.url).toBeTruthy();
+    expect(updated?.status).toBe('active');
+  });
+
+  it('leaves a project with nothing live as a draft when generation produces no runtime', async () => {
+    // A zod-only job on a fresh project used to end with `status: 'active'` and
+    // no hosted API at all — `status` is the runtime's live-or-not gate, so that
+    // was a claim nothing backed.
+    const { payload, project } = await stageJob(['zod']);
+    await processGenerationJob(payload, deps());
+
+    const updated = await Project.findById(project._id);
+    expect(updated?.status).toBe('draft');
+    expect(updated?.hosted.url).toBeFalsy();
+    expect(updated?.publishedVersion ?? null).toBeNull();
   });
 });
 

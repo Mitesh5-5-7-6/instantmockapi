@@ -36,6 +36,9 @@ import type {
   ProjectLogsEnvelope,
   ProjectLogsParams,
   ProjectMetricsView,
+  VersionChangeSummary,
+  VersionChangeType,
+  VersionStatus,
 } from './api-types';
 
 /**
@@ -570,6 +573,22 @@ export interface VersionView {
   version: number;
   note: string | null;
   createdAt: string;
+
+  /*
+   * Phase 2 metadata. `null` where a row written before Phase 2 simply has
+   * nothing recorded — so a client never has to distinguish "not recorded" from
+   * "not sent".
+   */
+  parentVersion: number | null;
+  changeType: VersionChangeType | null;
+  changeSummary: VersionChangeSummary | null;
+  publishedAt: string | null;
+  rollbackSourceVersion: number | null;
+  /**
+   * Derived server-side from the artifact rows and the published pointer, so it
+   * is optional on the wire rather than a field the client could compute.
+   */
+  status?: VersionStatus;
 }
 
 export function useVersions(projectId: string | null) {
@@ -590,6 +609,42 @@ export function useRestoreVersion(projectId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
       void queryClient.invalidateQueries({ queryKey: ['versions', projectId] });
+    },
+  });
+}
+
+/** What `POST /versions/:version/publish` answers with. */
+export interface PublishResult {
+  published: boolean;
+  /** `'already-published'` on the idempotent no-op. */
+  reason?: string;
+  version: number;
+  publishedVersion: number;
+  hosted: { url: string | null; expiresAt: string | null };
+  /** Optional artifacts that failed. The version is live and incomplete. */
+  degraded: string[];
+  /** True when mock data was not reseeded, so records may predate this schema. */
+  staleDataRisk: boolean;
+}
+
+/**
+ * Publish a version — the explicit action that moves the live pointer.
+ *
+ * Invalidates the project as well as the version list, because publishing
+ * changes `publishedVersion`, `status` and `hosted` on the project document, and
+ * every screen showing "live" reads those.
+ */
+export function usePublishVersion(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (version: number) =>
+      apiFetch<PublishResult>(`/v1/projects/${projectId}/versions/${version}/publish`, {
+        method: 'POST',
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+      void queryClient.invalidateQueries({ queryKey: ['versions', projectId] });
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
     },
   });
 }

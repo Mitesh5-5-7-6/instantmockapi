@@ -29,13 +29,20 @@ import {
   pinPublishedVersion,
   type IProject,
 } from '@instantmockapi/db';
-import { materializeRelations, validateIPS } from '@instantmockapi/ips';
+import {
+  ensureSchemaIds,
+  materializeRelations,
+  reconcileEntityRenames,
+  validateIPS,
+  type InternalProjectSchema,
+} from '@instantmockapi/ips';
 import { loadOwnedProject } from '../access.js';
 import { escapeRegExp, listEnvelope, parsePagination, parseSort } from '../pagination.js';
 import { toProjectDetail, toProjectSummary, toProjectSummaryWithCounts } from '../serializers.js';
 import { parseInputSource } from '../input-parsing.js';
 import { validateGenerationConfig } from '../generation-config.js';
 import { buildProjectMetrics } from '../project-metrics-service.js';
+import { recordVersion } from '../version-service.js';
 import {
   LOG_PAGE_DEFAULT,
   LOG_PAGE_MAX,
@@ -234,6 +241,16 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
 
       const ips = parseInputSource(projectId, body.name, body.inputSource.type, rawString, config);
       project.ips = { ...ips, projectId, version: 1 };
+      // Stable ids from birth, so the first edit is already diffable.
+      //
+      // Without this, a brand-new project's entities have no `ent_…` and the
+      // very first rename is *undetectable*: with no id on either side, "renamed
+      // Product to Item" and "deleted Product, added Item" are the same
+      // document. `POST /draft` backfills for projects that predate ids, but a
+      // client editing through `PATCH /projects/:id` never goes near it — and
+      // the delete-plus-add reading leaves every inbound relation dangling, so
+      // the rename was rejected outright.
+      ensureSchemaIds(project.ips);
       project.generationConfig = ips.generationConfig;
       project.currentVersion = 1;
       await project.save();
@@ -404,13 +421,27 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
         schemaChanged = true;
       }
       if (body.ips) {
+        // Backfill the STORED side before comparing, so a project that predates
+        // stable ids gets them and its next edit is diffable. Same lazy,
+        // idempotent shape as `POST /draft`, and it deliberately does not bump
+        // the version — minting an id is not a definition change.
+        //
+        // It cannot rescue *this* request when the client's document also has no
+        // ids: the rename is genuinely ambiguous then, and validation says so.
+        // New projects mint at creation, so that window only exists for old ones.
+        ensureSchemaIds(project.ips);
+
+        // Follow entity renames through `relation.target` and `meta.relation`,
+        // which name entities by string. Before validation, because validation
+        // is what rejects a target naming an entity that no longer exists.
+        const reconciled = reconcileEntityRenames(project.ips as InternalProjectSchema, body.ips);
         // Validate what the client actually sent (so error paths match its own
         // indices), then materialize — otherwise this save would strip the
         // identity/foreign-key fields back out of the stored model.
         project.ips = materializeRelations(
           unwrap(
             validateIPS(
-              { ...body.ips, projectId: String(project._id), ...addressing(project) },
+              { ...reconciled, projectId: String(project._id), ...addressing(project) },
               config.maxNestingDepth,
             ),
           ),
@@ -435,6 +466,20 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
       }
 
       await project.save();
+
+      // Record the snapshot AFTER the save, so a version number never appears in
+      // history before the project has committed to it. This edit path used to
+      // advance `currentVersion` and write no snapshot at all, which left an
+      // unexplained gap in the history list and a version §24 could not compare.
+      if (schemaChanged) {
+        await recordVersion({
+          project,
+          note: 'Definition edited',
+          changeType: 'FEATURE',
+          createdBy: request.authUser?.sub ?? null,
+        });
+      }
+
       return reply.send(toProjectDetail(project));
     },
   );
