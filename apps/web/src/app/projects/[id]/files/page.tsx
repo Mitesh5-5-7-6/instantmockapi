@@ -11,7 +11,16 @@
 
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Button, Card, CodeViewer, EmptyState, Icon, Modal, StatusChip } from '@instantmockapi/ui';
+import {
+  Button,
+  Card,
+  CodeViewer,
+  EmptyState,
+  FieldError,
+  Icon,
+  Modal,
+  StatusChip,
+} from '@instantmockapi/ui';
 import {
   downloadArtifact,
   downloadTextFile,
@@ -71,9 +80,7 @@ export default function FilesPage() {
                   ? ` · ${new Date(artifact.generatedAt).toLocaleString()}`
                   : ''}
               </span>
-              {artifact.errorMessage ? (
-                <span className="ui-error">{artifact.errorMessage}</span>
-              ) : null}
+              {artifact.errorMessage ? <FieldError>{artifact.errorMessage}</FieldError> : null}
               <div className="ui-row" style={{ gap: 'var(--space-2)' }}>
                 <Button
                   variant="secondary"

@@ -44,14 +44,19 @@ describe('the source tree', () => {
 
 describe('raw error blocks', () => {
   /**
-   * `ui-error` is red text. It is legitimate for a message that sits beside the
-   * control it describes, and it was being used for everything else too — API
+   * `FieldError` is red text beside a control. It is legitimate for a message
+   * about *that* control, and it was being used for everything else too — API
    * failures, query failures, whole-form rejections — each in its own ad-hoc
    * `<p>` at the bottom of whatever screen raised it.
    *
-   * The four allowed uses are all genuinely field-level or status data. Adding a
-   * fifth means either using `FormError`/`ErrorState`/a toast, or adding a line
-   * here with the reason.
+   * The marker used to be the class name `ui-error`, which the shadcn migration
+   * replaced with the `FieldError` component. An identifier is the better thing
+   * to key on: a class string can be renamed out from under a guard silently,
+   * where an import cannot.
+   *
+   * The allowed uses are all genuinely field-level or status data. Adding another
+   * means either using `FormError`/`ErrorState`/a toast, or adding a line here
+   * with the reason.
    */
   const ALLOWED = new Map([
     [
@@ -61,11 +66,24 @@ describe('raw error blocks', () => {
     ['components/builder/entity-card.tsx', "server messages beside the entity's own name input"],
     ['components/builder/field-row.tsx', 'server messages beside the field row they describe'],
     ['components/hosted-playground.tsx', 'invalid JSON, beside the textarea that holds it'],
+    /*
+     * These two were invisible to the earlier version of this guard: they used
+     * `ui-field-error`, and the guard matched `ui-error`, which is not a
+     * substring of it. Both are legitimate — a name collision and a missing
+     * relation target are properties of the one row they sit in — but they were
+     * only ever unlisted by accident, so they are recorded now.
+     */
+    ['components/builder/endpoint-card.tsx', 'a duplicate endpoint name, beside that name input'],
+    ['components/builder/relation-editor.tsx', 'name and target issues, beside their own selects'],
   ]);
 
   it('appear only where a message belongs beside its control', () => {
     const offenders = files
-      .filter((file) => file.text.includes('ui-error'))
+      // `<FieldError`, not the bare name: the guard is about *rendering* a raw
+      // error block, and matching the identifier loosely also hit every file
+      // that mentions `onFieldErrors` — six false offenders, all of them
+      // routing errors correctly.
+      .filter((file) => file.text.includes('<FieldError'))
       .map((file) => file.path)
       .filter((path) => !ALLOWED.has(path));
 
@@ -80,7 +98,7 @@ describe('raw error blocks', () => {
     for (const path of ALLOWED.keys()) {
       const file = files.find((candidate) => candidate.path === path);
       expect(file, `${path} is allowlisted but no longer exists`).toBeDefined();
-      expect(file!.text, `${path} no longer uses ui-error`).toContain('ui-error');
+      expect(file!.text, `${path} no longer renders a FieldError`).toContain('<FieldError');
     }
   });
 });

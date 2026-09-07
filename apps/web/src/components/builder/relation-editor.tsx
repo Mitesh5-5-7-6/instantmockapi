@@ -10,7 +10,7 @@
  * you picked.
  */
 
-import { Button, Icon, Input, Select } from '@instantmockapi/ui';
+import { Button, FieldError, Icon, Input, Select } from '@instantmockapi/ui';
 import {
   RELATION_KINDS,
   newRelation,
@@ -156,8 +156,8 @@ export function RelationEditor({
                   reads a key on {relation.target || 'the target'} — no field added here
                 </span>
               )}
-              {nameIssue ? <span className="ui-field-error">{nameIssue}</span> : null}
-              {targetIssue ? <span className="ui-field-error">{targetIssue}</span> : null}
+              {nameIssue ? <FieldError>{nameIssue}</FieldError> : null}
+              {targetIssue ? <FieldError>{targetIssue}</FieldError> : null}
             </div>
           </div>
         );

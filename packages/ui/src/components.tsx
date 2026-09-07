@@ -30,7 +30,7 @@ export {
   type ButtonSize,
 } from './ui/button.js';
 
-export { Input, Select, Textarea, Checkbox, Field } from './ui/input.js';
+export { Input, Select, Textarea, Checkbox, Field, FieldError } from './ui/input.js';
 export type { CheckboxProps, FieldProps } from './ui/input.js';
 
 /* ── Containers ── */

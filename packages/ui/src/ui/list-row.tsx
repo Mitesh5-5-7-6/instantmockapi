@@ -91,6 +91,14 @@ export interface ListRowProps {
   trailing?: ReactNode;
   /** Makes the whole row a button. */
   onClick?: () => void;
+  /**
+   * Let the title wrap instead of truncating on one line.
+   *
+   * The default is truncation, which is right for a name in a column that has
+   * to stay aligned with the rows above and below it. An activity line is a
+   * whole sentence, and clipping it at the row width loses the end of the news.
+   */
+  wrapTitle?: boolean;
   className?: string;
 }
 
@@ -98,14 +106,24 @@ export interface ListRowProps {
  * One row of a list: leading slot, a title/meta stack that absorbs the slack,
  * and trailing slots.
  */
-export function ListRow({ leading, title, meta, trailing, onClick, className }: ListRowProps) {
+export function ListRow({
+  leading,
+  title,
+  meta,
+  trailing,
+  onClick,
+  wrapTitle,
+  className,
+}: ListRowProps) {
   const body = (
     <>
       {leading}
       {/* The middle column must be allowed to shrink, or a long project name
           pushes the trailing columns out of the row entirely. */}
       <span className="min-w-0 flex-auto">
-        <span className="block truncate text-foreground">{title}</span>
+        <span className={cn('block text-foreground', wrapTitle ? 'whitespace-normal' : 'truncate')}>
+          {title}
+        </span>
         {meta ? <span className="block text-xs text-muted-foreground">{meta}</span> : null}
       </span>
       {trailing}

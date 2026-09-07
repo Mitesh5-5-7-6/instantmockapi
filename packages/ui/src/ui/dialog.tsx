@@ -48,7 +48,13 @@ export function DialogOverlay({
     <DialogPrimitive.Overlay
       className={cn(
         'fixed inset-0 z-50 bg-black/70',
-        'data-[state=open]:animate-in data-[state=closed]:animate-out',
+        // An entrance fade only, and a real keyframe rather than shadcn's
+        // `data-[state=open]:animate-in`: those classes come from the
+        // `tailwindcss-animate` plugin, which this project does not use, so
+        // copying them in produced two class names that matched nothing and
+        // silently did nothing. There is no exit animation because Radix
+        // unmounts the overlay on close unless `forceMount` coordinates it.
+        'motion-safe:animate-[ui-fade-in_150ms_ease-out]',
         className,
       )}
       {...rest}
@@ -135,7 +141,13 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
         }
       }}
     >
-      <DialogContent>
+      {/*
+        `aria-describedby={undefined}` is the documented way to tell Radix a
+        dialog genuinely has no description. Without it, every one of these
+        logs a dev warning asking for one — and the six call sites pass
+        `children` that are forms and lists, not a describable sentence.
+      */}
+      <DialogContent aria-describedby={undefined}>
         <DialogHeader>
           <div className="flex items-start justify-between gap-4">
             <DialogTitle>{title}</DialogTitle>

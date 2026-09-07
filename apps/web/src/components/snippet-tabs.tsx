@@ -10,7 +10,7 @@
  */
 
 import { useState } from 'react';
-import { CodeBlock } from '@instantmockapi/ui';
+import { CodeBlock, Tabs } from '@instantmockapi/ui';
 import {
   SNIPPET_LANGUAGES,
   buildSnippet,
@@ -47,20 +47,17 @@ export function SnippetTabs({
   const snippet = buildSnippet({ language, method: endpoint.method, url, body });
 
   return (
-    <div className="ui-stack" style={{ gap: 'var(--space-3)' }}>
-      <div className="ui-tabs" role="tablist">
-        {SNIPPET_LANGUAGES.map((entry) => (
-          <button
-            key={entry.id}
-            role="tab"
-            aria-selected={language === entry.id}
-            onClick={() => setLanguage(entry.id)}
-          >
-            {entry.label}
-          </button>
-        ))}
-      </div>
-      <p className="ui-meta ui-mono">
+    <div className="flex flex-col gap-3">
+      {/* `Tabs`, not a hand-rolled strip: this was one of the copies that had no
+          keyboard support, so Left/Right did nothing and each language was its
+          own tab stop. */}
+      <Tabs
+        items={SNIPPET_LANGUAGES}
+        active={language}
+        onChange={setLanguage}
+        label="Snippet language"
+      />
+      <p className="font-mono text-xs text-muted-foreground">
         {endpoint.method} {endpoint.path || '/'} — {endpoint.summary}
       </p>
       <CodeBlock code={snippet} />

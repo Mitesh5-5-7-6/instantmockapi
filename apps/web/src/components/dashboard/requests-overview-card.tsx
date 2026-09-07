@@ -8,7 +8,7 @@
  * does not justify building a listbox.
  */
 
-import { Card, Note, Select } from '@instantmockapi/ui';
+import { Card, Note, Select, Stat } from '@instantmockapi/ui';
 import { summariseRequests, toChartPoints } from '../../lib/dashboard-metrics';
 import type { DashboardView } from '../../lib/api-types';
 import type { DashboardDays } from '../../lib/hooks';
@@ -46,13 +46,16 @@ export function RequestsOverviewCard({
 
       <div className="ui-stats">
         {summary.map((item) => (
-          <div key={item.key} className="ui-stat">
-            <div className="ui-stat__value" style={{ fontSize: 'var(--text-lg)' }}>
-              {item.value}
-            </div>
-            <div className="ui-stat__label">{item.label}</div>
-            {item.hint ? <div className="ui-stat__label">{item.hint}</div> : null}
-          </div>
+          <Stat
+            key={item.key}
+            value={item.value}
+            label={item.label}
+            {...(item.hint ? { hint: item.hint } : {})}
+            // A step down from Stat's default figure size. These three sit
+            // inside a card that already has its own heading, so the display
+            // size the standalone tiles use would out-shout it.
+            className="[&>div:first-child]:text-lg"
+          />
         ))}
       </div>
 

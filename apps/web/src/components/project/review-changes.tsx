@@ -24,7 +24,15 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Card, Checkbox, FormError, MethodBadge, Note, type ApiMethod } from '@instantmockapi/ui';
+import {
+  Button,
+  Card,
+  Checkbox,
+  FormError,
+  MethodBadge,
+  Note,
+  type ApiMethod,
+} from '@instantmockapi/ui';
 import type {
   AffectedEndpoint,
   ChangeRisk,
@@ -175,9 +183,9 @@ export function ReviewChanges({
           regenerate.
         </p>
         <div className="ui-row">
-          <button type="button" className="ui-btn" onClick={onCancel}>
+          <Button type="button" variant="secondary" onClick={onCancel}>
             Close
-          </button>
+          </Button>
         </div>
       </Card>
     );
@@ -302,17 +310,17 @@ export function ReviewChanges({
           generated and promoted.
         </span>
         <span className="ui-row">
-          <button type="button" className="ui-btn" onClick={onCancel} disabled={busy}>
+          <Button type="button" variant="secondary" onClick={onCancel} disabled={busy}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="ui-btn ui-btn--primary"
+            variant="primary"
             disabled={busy || analysis.stale || selected.length === 0}
             onClick={() => onConfirm({ artifacts: selected, acknowledgeImpact: analysis.digest })}
           >
             {busy ? 'Committing…' : 'Commit and regenerate'}
-          </button>
+          </Button>
         </span>
       </footer>
     </Card>

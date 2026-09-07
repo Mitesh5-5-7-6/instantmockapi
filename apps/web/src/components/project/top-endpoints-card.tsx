@@ -9,7 +9,7 @@
  * long and say nothing.
  */
 
-import { EmptyState, MethodBadge, Note, type ApiMethod } from '@instantmockapi/ui';
+import { Card, EmptyState, MethodBadge, Note, type ApiMethod } from '@instantmockapi/ui';
 import { formatCompact } from '../../lib/area-chart';
 import { toEndpointBars, type EndpointRowView } from '../../lib/project-metrics';
 
@@ -24,7 +24,7 @@ export function TopEndpointsCard({
   const bars = toEndpointBars(rows);
 
   return (
-    <div className="ui-card ui-stack">
+    <Card className="ui-stack">
       <h2>Top endpoints</h2>
 
       {bars.length === 0 ? (
@@ -56,6 +56,6 @@ export function TopEndpointsCard({
           window spanning that date reports fewer endpoint requests than total
           requests. Silence here would read as a miscount. */}
       {note ? <Note variant="info">{note}</Note> : null}
-    </div>
+    </Card>
   );
 }

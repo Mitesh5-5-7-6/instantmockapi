@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -195,27 +195,78 @@ describe('surfaces', () => {
   });
 });
 
-describe('button variants', () => {
-  function rule(selector: string): string {
-    const start = CSS.indexOf(`${selector} {`);
-    expect(start, `${selector} is not defined`).toBeGreaterThan(-1);
-    return CSS.slice(start, CSS.indexOf('}', start));
+// ---------------------------------------------------------------------------
+// Component sources
+// ---------------------------------------------------------------------------
+
+/**
+ * These next checks read the components' *source*, not `styles.css`.
+ *
+ * The colour decisions used to be CSS rules and are now Tailwind class strings
+ * in `src/ui/*`, so a test that still grepped the stylesheet would pass on a
+ * file nothing renders any more — the worst kind of green. The assertions are
+ * the same ones; only where they look changed.
+ */
+function source(file: string): string {
+  return readFileSync(join(process.cwd(), 'src', 'ui', file), 'utf8');
+}
+/**
+ * The value of one `key: …` entry in a class table or a cva variant block.
+ *
+ * Reads to the *matching* close of whatever the value opens — a brace for a
+ * `{ dot, label }` record, a paren for a `cn(…)` call, a quote for a bare
+ * string. A naive "slice to the next comma" version ran past the end of every
+ * single-line entry and reported the neighbours' classes as its own, which is
+ * how a test like this quietly stops testing anything.
+ */
+function classesFor(text: string, key: string): string {
+  const at = new RegExp(String.raw`^\s*'?` + key + String.raw`'?:\s*`, 'm').exec(text);
+  expect(at, `no entry for ${key}`).not.toBeNull();
+  const start = at!.index + at![0].length;
+  const opener = text[start]!;
+
+  if (opener === "'" || opener === '"') {
+    const end = text.indexOf(opener, start + 1);
+    return text.slice(start + 1, end === -1 ? undefined : end);
   }
+
+  const closer = opener === '{' ? '}' : opener === '(' ? ')' : null;
+  if (closer === null) {
+    // A bare reference, e.g. `GET: METHOD_BASE`. Take the rest of the line.
+    return text.slice(start, text.indexOf('\n', start));
+  }
+
+  let depth = 0;
+  for (let i = start; i < text.length; i += 1) {
+    if (text[i] === opener) {
+      depth += 1;
+    } else if (text[i] === closer) {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+  throw new Error(`unbalanced value for ${key}`);
+}
+
+describe('button variants', () => {
+  const BUTTON = source('button.tsx');
 
   /**
    * shadcn's `outline` is `border bg-background hover:bg-accent` and its `ghost`
    * is `hover:bg-accent`, where `--accent` is a chroma-zero grey. Nothing but
    * the primary is filled.
    */
-  it.each(['.ui-btn--secondary', '.ui-btn--accent', '.ui-btn--ghost', '.ui-btn--danger'])(
+  it.each(['secondary', 'accent', 'ghost', 'danger'])(
     '%s is transparent until hovered',
-    (selector) => {
-      expect(rule(selector)).toContain('background: transparent');
+    (variant) => {
+      expect(classesFor(BUTTON, variant)).toContain('bg-transparent');
     },
   );
 
   it('fills only the primary', () => {
-    expect(rule('.ui-btn--primary')).toContain('background: var(--primary)');
+    expect(classesFor(BUTTON, 'primary')).toContain('bg-primary ');
   });
 
   /**
@@ -223,51 +274,67 @@ describe('button variants', () => {
    * accent under the cursor on every row of a list in turn, which is the
    * densest possible way to spend the green budget.
    */
-  it.each([
-    '.ui-btn--secondary:hover:not(:disabled)',
-    '.ui-btn--ghost:hover:not(:disabled)',
-    '.ui-btn--accent:hover:not(:disabled)',
-  ])('%s hovers to a grey surface', (selector) => {
-    expect(rule(selector)).toMatch(/background: var\(--muted\)/);
+  it.each(['secondary', 'accent', 'ghost'])('%s hovers to a grey surface', (variant) => {
+    expect(classesFor(BUTTON, variant)).toContain('hover:bg-muted');
+  });
+
+  /**
+   * The one variant allowed a coloured hover, and only as a 12% tint: a Delete
+   * button that turns solid red becomes the loudest thing on the row, which is
+   * the opposite of what a destructive action should be before it is chosen.
+   */
+  it('tints the danger hover rather than filling it', () => {
+    expect(classesFor(BUTTON, 'danger')).toMatch(/hover:bg-destructive\/\d+/);
   });
 });
 
 describe('per-row elements', () => {
+  const BADGE = source('badge.tsx');
+
   /**
    * GET is the most common method by a wide margin, so colouring it rendered an
    * eighteen-endpoint list as a column of green. Reads are the default action
    * and get the default appearance.
    */
-  it('leave GET uncoloured', () => {
-    const start = CSS.indexOf('.ui-method--GET {');
-    const rule = CSS.slice(start, CSS.indexOf('}', start));
-    expect(rule).not.toMatch(/--accent|--primary|status-success/);
-    expect(rule).toContain('background: transparent');
+  it('leaves GET uncoloured', () => {
+    const get = classesFor(BADGE, 'GET');
+    expect(get).not.toMatch(/accent|primary|warning|destructive|violet|info/);
+    expect(get).toContain('text-muted-foreground');
+  });
+
+  /** Only the verbs that CHANGE something take a colour. */
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE'])('colours %s', (method) => {
+    expect(classesFor(BADGE, method)).toMatch(/accent-mark|warning|violet|destructive/);
   });
 
   /**
    * A status chip's dot carries the colour and its label stays neutral — ten
    * cards then show ten small dots rather than ten green pills. Failure and
-   * expiry are the deliberate exceptions.
+   * expiry are the deliberate exceptions, asserted separately below.
    */
-  it.each(['.ui-chip--active', '.ui-chip--completed', '.ui-chip--generating'])(
+  it.each(['active', 'live', 'ready', 'completed', 'running', 'generating', 'queued', 'draft'])(
     '%s colours its dot but not its label',
-    (selector) => {
-      const start = CSS.indexOf(selector);
-      const rule = CSS.slice(start, CSS.indexOf('}', start));
-      expect(rule).toMatch(/--chip-color:/);
-      expect(rule, `${selector} still colours its label`).not.toMatch(/^\s*color:/m);
+    (status) => {
+      const entry = classesFor(BADGE, status);
+      expect(entry, `${status} has no dot colour`).toMatch(/dot: '/);
+      expect(entry, `${status} still colours its label`).not.toMatch(/label: '/);
     },
   );
 
-  it('keep a failure red throughout', () => {
-    const start = CSS.indexOf('.ui-chip--failed,');
-    const rule = CSS.slice(start, CSS.indexOf('}', start));
-    expect(rule).toMatch(/color: var\(--destructive\)/);
+  it.each(['failed', 'expired'])('keeps %s coloured throughout', (status) => {
+    expect(classesFor(BADGE, status)).toMatch(/label: 'text-(destructive|violet)'/);
+  });
+
+  /** The one place a chip is allowed to be green, and it is 7px of it. */
+  it('uses the vivid mark for the dot, never for the chip surface', () => {
+    expect(classesFor(BADGE, 'active')).toContain('bg-accent-mark');
+    expect(BADGE).not.toMatch(/bg-accent-mark px|px-2 py-0\.5[^']*bg-accent-mark/);
   });
 });
 
 describe('the tone system', () => {
+  const TONE = readFileSync(join(process.cwd(), 'src', 'ui', 'tone.ts'), 'utf8');
+
   /**
    * Three of these used to lie: `success` was byte-identical to `accent`, `cyan`
    * resolved to a light green and `violet` to a grey — so screens asking for six
@@ -294,30 +361,42 @@ describe('the tone system', () => {
     return h * 60;
   }
 
+  /**
+   * A tone's text colour names a Tailwind class; the class names a palette
+   * token; the token holds the hex. Resolving all three is what makes this test
+   * catch a lie rather than restate the table.
+   */
   function toneValue(name: string): string {
-    const start = CSS.indexOf(`.ui-tone--${name} {`);
-    expect(start, `.ui-tone--${name} is not defined`).toBeGreaterThan(-1);
-    const rule = CSS.slice(start, CSS.indexOf('}', start));
-    const ref = /--tone: var\(--([a-z-]+)\)/.exec(rule);
-    if (ref === null) {
-      throw new Error(`.ui-tone--${name} does not point at a token`);
+    // A bare `{` — not part of a quantifier, so it is literal, and escaping it
+    // in a template literal drops the backslash before the regex ever sees it.
+    const match = new RegExp(`${name}: { text: 'text-([a-z-]+)'`).exec(TONE);
+    if (match === null) {
+      throw new Error(`tone ${name} is not defined, or names no text colour`);
     }
-    return token(ref[1]!);
+    return token(match[1]!);
   }
 
   it.each(Object.keys(HUE_RANGE))('--%s is actually that hue', (name) => {
     const [low, high] = HUE_RANGE[name]!;
     const h = hue(toneValue(name));
     const inRange = low > high ? h >= low || h <= high : h >= low && h <= high;
-    expect(
-      inRange,
-      `.ui-tone--${name} resolves to hue ${h.toFixed(0)}, expected ${low}–${high}`,
-    ).toBe(true);
+    expect(inRange, `tone ${name} resolves to hue ${h.toFixed(0)}, expected ${low}–${high}`).toBe(
+      true,
+    );
   });
 
   it('does not resolve two differently-named tones to one value', () => {
     const values = ['cyan', 'warning', 'error', 'violet'].map(toneValue);
     expect(new Set(values).size).toBe(values.length);
+  });
+
+  /** Fill and label must stay the same hue, since they are written out separately. */
+  it('derives each tone fill from its own text colour', () => {
+    const entries = [...TONE.matchAll(/(\w+): \{ text: 'text-([a-z-]+)', fill: 'bg-([a-z-]+)\//g)];
+    expect(entries.length).toBeGreaterThan(5);
+    for (const [, name, text, fill] of entries) {
+      expect(fill, `tone ${name} fills with a different hue than it labels`).toBe(text);
+    }
   });
 });
 
@@ -340,11 +419,25 @@ describe('green text versus green marks', () => {
   });
 
   it('still uses the mark for borders and rings', () => {
-    // If this ever hits zero, the marks have been quietened away entirely and
-    // the accent has stopped doing its job.
-    const marks = (CSS.match(/(border[a-z-]*-color|outline|stroke): var\(--accent[^)]*\)/g) ?? [])
+    // A floor, not a ceiling — the budget test above is the ceiling. If this
+    // ever hits zero, the marks have been quietened away entirely and the accent
+    // has stopped doing its job.
+    //
+    // Counted across the stylesheet AND the components: after the shadcn
+    // migration nearly all of these are Tailwind classes, so the CSS-only
+    // version of this check had fallen to two and was about to fail for the
+    // wrong reason.
+    const inCss = (CSS.match(/(border[a-z-]*-color|outline|stroke): var\(--accent[^)]*\)/g) ?? [])
       .length;
-    expect(marks).toBeGreaterThan(4);
+    const uiDir = join(process.cwd(), 'src', 'ui');
+    const inComponents = readdirSync(uiDir).flatMap(
+      (file) =>
+        readFileSync(join(uiDir, file), 'utf8').match(
+          /(border|border-[lrtb]|ring|outline|stroke|fill)-accent-mark/g,
+        ) ?? [],
+    ).length;
+
+    expect(inCss + inComponents).toBeGreaterThan(4);
   });
 });
 
@@ -354,9 +447,19 @@ describe('the green budget', () => {
    * reaching for the accent by reflex. Raise it deliberately or not at all.
    */
   it('holds the number of green references down', () => {
-    const references = (CSS.match(/var\(--(accent|accent-mark|accent-text|primary)[^)]*\)/g) ?? [])
+    // Counted across the stylesheet AND the components, because the migration
+    // moved most colour decisions into Tailwind class strings — a budget that
+    // only watched `styles.css` could be evaded by writing the green in TSX.
+    const cssRefs = (CSS.match(/var(--(accent|accent-mark|accent-text|primary)[^)]*)/g) ?? [])
       .length;
-    expect(references).toBeLessThanOrEqual(70);
+    const uiDir = join(process.cwd(), 'src', 'ui');
+    const tsxRefs = readdirSync(uiDir).flatMap(
+      (file) =>
+        readFileSync(join(uiDir, file), 'utf8').match(
+          /(bg|text|border|border-[lrtb]|ring|fill|stroke)-(accent-mark|accent-text|accent-subtle|primary)/g,
+        ) ?? [],
+    ).length;
+    expect(cssRefs + tsxRefs).toBeLessThanOrEqual(110);
   });
 
   /**
