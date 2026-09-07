@@ -16,11 +16,19 @@ import {
   type PlanTier,
 } from '@instantmockapi/shared';
 import { canCreateJob } from '@instantmockapi/config';
-import { Job, Project, Version, wouldDisturbLiveRuntime, type IProject } from '@instantmockapi/db';
+import {
+  Job,
+  Project,
+  hasLiveDeployment,
+  wouldDisturbLiveRuntime,
+  type IProject,
+  type VersionChangeType,
+} from '@instantmockapi/db';
 import { createOrResetArtifactRecord } from '@instantmockapi/registry';
 import { enqueueGenerationJob, generateIdempotencyKey } from '@instantmockapi/queue';
 import type { GenerationConfig } from '@instantmockapi/ips';
 import { workersForArtifacts } from './generation-config.js';
+import { recordVersion } from './version-service.js';
 
 export interface CreatedJobRef {
   jobId: string;
@@ -36,6 +44,19 @@ export async function createGenerationJob(params: {
   plan: PlanTier;
   /** Recorded on the version snapshot (doc 03 §7): why this version exists. */
   note?: string;
+  /**
+   * Why this version exists, as a category (Phase 2 §3).
+   *
+   * Defaults from `type`: a partial job regenerates artifacts from an unchanged
+   * definition, which is `REGENERATION`; a full one follows an edit, which is
+   * `FEATURE`. Callers with better information — a rollback — pass it.
+   */
+  changeType?: VersionChangeType;
+  /** The acting user, for the version's audit line (§41). */
+  createdBy?: string | null;
+  /** The version this one was derived from (§7). */
+  parentVersion?: number | null;
+  rollbackSourceVersion?: number | null;
 }): Promise<CreatedJobRef> {
   const { project, type, requestedArtifacts, generationConfig, plan, note } = params;
   const projectId = String(project._id);
@@ -91,19 +112,25 @@ export async function createGenerationJob(params: {
   }
 
   // Immutable snapshot of what this version generates from (doc 07 §2).
-  // note is stamped on insert; partial regens/restores bump to a fresh version
-  // so this is a genuine insert and the note lands reliably.
-  await Version.findOneAndUpdate(
-    { projectId: project._id, version },
-    {
-      $setOnInsert: {
-        ipsSnapshot: project.ips,
-        configSnapshot: generationConfig,
-        note: note ?? null,
-      },
-    },
-    { upsert: true },
-  );
+  //
+  // Through `recordVersion` rather than its own upsert, so there is ONE writer
+  // of a `Version` row and every snapshot carries the same metadata whether it
+  // came from a generation, an edit or a restore. Still `$setOnInsert`: a
+  // generate after a draft commit finds the committed row already there and
+  // leaves it alone rather than overwriting it with a later state of the same
+  // definition.
+  await recordVersion({
+    project,
+    version,
+    note: note ?? null,
+    changeType: params.changeType ?? (type === 'partial' ? 'REGENERATION' : 'FEATURE'),
+    createdBy: params.createdBy ?? null,
+    ...(params.parentVersion === undefined ? {} : { parentVersion: params.parentVersion }),
+    ...(params.rollbackSourceVersion === undefined
+      ? {}
+      : { rollbackSourceVersion: params.rollbackSourceVersion }),
+    config: generationConfig,
+  });
 
   // Registry rows reset to pending for every requested artifact
   for (const artifactType of requestedArtifacts) {
@@ -142,7 +169,25 @@ export async function createGenerationJob(params: {
     String(job._id),
   );
 
-  project.status = 'generating';
+  /*
+   * OUTAGE FIX — the second live pointer.
+   *
+   * `apps/mock-runtime/src/hosting.ts` 404s unless `status === 'active'`, so
+   * setting `'generating'` unconditionally took the hosted URL down for the
+   * whole job duration — on **every** regenerate of a live project, with no
+   * edit involved. The `publishedVersion` split protects the version pointer
+   * and left this coarser one wide open: §27 forbids a generating version
+   * reaching the live API, and this was the inverse, a generating version
+   * taking the live one off the air.
+   *
+   * A live project therefore stays `'active'` while it generates. Nothing is
+   * lost: in-flight state has its own source of truth — the `Job` document and
+   * the SSE stream the progress board already reads — and `status` goes back to
+   * meaning exactly one thing, which is whether there is something to serve.
+   */
+  if (!hasLiveDeployment(project)) {
+    project.status = 'generating';
+  }
   project.generationConfig = generationConfig;
   await project.save();
 

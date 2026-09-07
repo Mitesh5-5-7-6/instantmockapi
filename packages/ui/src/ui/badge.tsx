@@ -36,7 +36,7 @@ import { cn } from '../lib/utils.js';
 export const badgeVariants = cva(
   cn(
     'inline-flex w-fit shrink-0 items-center gap-1 whitespace-nowrap',
-    'rounded-[var(--radius-sm)] border px-2 py-px',
+    'rounded-sm border px-2 py-px',
     'font-mono text-xs tracking-[0.04em]',
   ),
   {
@@ -124,7 +124,7 @@ export function StatusChip({ status, label, className }: StatusChipProps) {
     <span
       className={cn(
         'inline-flex w-fit shrink-0 items-center gap-1.5 whitespace-nowrap',
-        'rounded-[var(--radius-sm)] border bg-card px-2 py-0.5',
+        'rounded-sm border bg-card px-2 py-0.5',
         'text-xs/4 font-medium capitalize',
         style.border ?? 'border-border',
         style.label ?? 'text-muted-foreground',
@@ -163,7 +163,7 @@ export function MethodBadge({ method, className }: { method: ApiMethod; classNam
         // down the list instead of stepping in and out with the method's length,
         // and DELETE still fits without being clipped.
         'inline-flex min-w-[58px] shrink-0 items-center justify-center',
-        'rounded-[var(--radius-sm)] border px-2 py-0.5',
+        'rounded-sm border px-2 py-0.5',
         'font-mono text-xs font-semibold tracking-[0.04em]',
         METHOD_STYLES[method],
         className,

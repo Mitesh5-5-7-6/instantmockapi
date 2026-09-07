@@ -23,7 +23,7 @@ import type {
 import { cn } from '../lib/utils.js';
 
 const CONTROL_BASE = cn(
-  'w-full rounded-[var(--radius-sm)] border border-border bg-background',
+  'w-full rounded-sm border border-border bg-background',
   'px-3 py-2 text-sm text-foreground',
   'placeholder:text-subtle-foreground',
   'transition-[border-color,box-shadow] duration-150 ease-out',

@@ -49,11 +49,23 @@ export {
 } from './relations.js';
 
 export {
-  deepClone,
-  bumpIPSVersion,
-  createIPSSnapshot,
-  restoreIPSFromSnapshot,
-} from './versioning.js';
+  type RenameSource,
+  detectEntityRenames,
+  reconcileEntityRenames,
+  reconcileRenamesInSchema,
+} from './renames.js';
+
+/*
+ * `versioning.ts` was deleted rather than kept for a future caller.
+ *
+ * `createIPSSnapshot` / `restoreIPSFromSnapshot` / `bumpIPSVersion` had no
+ * callers anywhere outside this re-export, and `createIPSSnapshot` produced
+ * `{ entities }` only — a *different* shape from the full `InternalProjectSchema`
+ * that `generation-service.ts` actually writes to `Version.ipsSnapshot`. So the
+ * first person to reach for the obviously-named helper would have written a
+ * snapshot missing `projectId`, `version`, `publicId` and `slug`, and the bug
+ * would surface much later as an unreadable version. A trap, not an asset.
+ */
 
 /**
  * Stable internal identity for schema elements (Phase 1).
@@ -85,12 +97,72 @@ export {
   highestRisk,
   needsAttention,
   summariseChanges,
+  validationDirection,
   CHANGE_RISKS,
   type ChangeAspect,
   type ChangeKind,
   type ChangeRisk,
+  type DiffOptions,
+  type MatchBasis,
+  type MatchMode,
   type SchemaChange,
+  type ValidationDirection,
+  type ValidationKey,
 } from './changes.js';
+
+/**
+ * The three-value impact axis (Phase 2 §12): do existing callers break — yes,
+ * maybe, or no.
+ *
+ * A **projection** of a change, never stored beside `risk`. The comparison view
+ * renders this axis; the commit dialog renders `risk`; neither renders both in
+ * one row, because eight of the kinds legitimately disagree.
+ */
+export {
+  CHANGE_IMPACTS,
+  CHANGE_TYPES,
+  classifyChangeType,
+  classifyImpact,
+  summariseChangeTypes,
+  summariseImpact,
+  worstImpact,
+  type ChangeImpact,
+  type ChangeType,
+} from './classification.js';
+
+/**
+ * Comparing two version snapshots (Phase 2 §24), including snapshots written
+ * before stable ids existed — which need a name fallback, and need to say so.
+ */
+export {
+  compareSnapshots,
+  diffSnapshots,
+  type CompareOptions,
+  type MatchingReport,
+  type SchemaDiff,
+  type SchemaSnapshot,
+} from './compare.js';
+
+/**
+ * The change hierarchy (Phase 2 §37): entity → fields / relations / endpoints.
+ *
+ * Computed here rather than in the web app so the commit dialog and the
+ * comparison page render the same tree — `ARCHITECTURE.md`: clients render this
+ * chain, they do not recompute it.
+ */
+export {
+  groupChanges,
+  treeImpact,
+  type ChangeGroupCounts,
+  type ChangeTree,
+  type EndpointRef,
+  type EntityGroup,
+  type FieldGroup,
+  type GroupStatus,
+  type GroupedChange,
+  type ProjectGroup,
+  type RelationGroup,
+} from './grouping.js';
 
 // ---------------------------------------------------------------------------
 // Dependency graph and impact analysis (Phase 1)

@@ -308,11 +308,34 @@ describe('versions', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    // Restore stamps a NEW version whose content matches the v1 snapshot
-    expect(body.currentVersion).toBe(3);
-    expect(body.ips.version).toBe(3);
+
+    /*
+     * Restore SEEDS THE DRAFT (Phase 2 §22). It used to write the live
+     * definition and bump `currentVersion` to v3 — which meant the one action
+     * most likely to remove fields skipped the review every ordinary edit goes
+     * through.
+     *
+     * So the version does NOT move here. The draft carries the v1 config, the
+     * live definition is still v2's, and v3 appears only when the draft is
+     * committed after its diff has been seen.
+     */
+    expect(body.baseVersion).toBe(2);
+    expect(body.currentVersion).toBe(2);
+    expect(body.rollbackSourceVersion).toBe(1);
     expect(body.generationConfig.validators).toEqual(originalValidators);
     expect(body.generationConfig.validators).not.toEqual(['yup']);
+    // And the impact of applying it comes back with it, so the client can go
+    // straight to the review screen rather than fetching twice.
+    expect(body.analysis).toBeDefined();
+
+    // The live definition is untouched until the commit.
+    const live = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${projectId}`,
+      headers: authHeader(session.accessToken),
+    });
+    expect(live.json().currentVersion).toBe(2);
+    expect(live.json().generationConfig.validators).toEqual(['yup']);
 
     const unknown = await app.inject({
       method: 'POST',

@@ -62,10 +62,21 @@
   --font-mono: var(--font-code);
 
   /*
-   * Radius is deliberately NOT mapped, for the same collision: `--radius-sm:
-   * var(--radius-sm)` is self-referential. Components use
-   * `rounded-[var(--radius-md)]` instead — longer to read, and unambiguous about
-   * which variable it means.
+   * Radius is deliberately NOT mapped here, and does not need to be.
+   *
+   * Mapping it would be the same self-reference the font had:
+   * `--radius-md: var(--radius-md)` collides with Tailwind's own theme name.
+   * It is unnecessary because Tailwind emits `rounded-md` as
+   * `border-radius: var(--radius-md)` and declares its own default inside
+   * `@layer theme` — while `@instantmockapi/ui/styles.css` declares
+   * `--radius-md: 10px` on an **unlayered** `:root`, which wins over anything
+   * layered regardless of source order.
+   *
+   * So `rounded-sm` / `rounded-md` / `rounded-lg` already resolve to the design
+   * system's 6/10/14px rather than Tailwind's 4/6/8px. Verify with
+   * `--radius-md` in the built CSS before changing this: adding a mapping
+   * reintroduces the self-reference, and reverting components to
+   * `rounded-[var(--radius-md)]` is redundant.
    */
 }
 

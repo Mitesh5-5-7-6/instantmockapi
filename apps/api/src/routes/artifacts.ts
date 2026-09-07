@@ -7,7 +7,13 @@
  */
 
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
-import { ARTIFACT_TYPES, AppError, unwrap, type ArtifactType } from '@instantmockapi/shared';
+import {
+  ARTIFACT_TYPES,
+  AppError,
+  evaluateSyncState,
+  unwrap,
+  type ArtifactType,
+} from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
 import type { IArtifact, IProject } from '@instantmockapi/db';
 import {
@@ -17,6 +23,7 @@ import {
 } from '@instantmockapi/registry';
 import { decodeBundle, isBundleKey, type StorageClient } from '@instantmockapi/storage';
 import { loadOwnedProject, notFound } from '../access.js';
+import { deriveRequestedArtifacts } from '../generation-config.js';
 import { toArtifactView } from '../serializers.js';
 
 export interface ArtifactRouteOptions {
@@ -96,7 +103,34 @@ export const artifactRoutes: FastifyPluginAsync<ArtifactRouteOptions> = async (
           : unwrap(await getLatestArtifacts(String(project._id)));
       const version = query.version ?? project.currentVersion;
 
-      return reply.send({ data: artifacts.map(toArtifactView), meta: { version } });
+      /*
+       * §18: name the inconsistency selective regeneration can create.
+       *
+       * Deselecting an affected artifact is allowed, and the moment it happens
+       * the download on disk describes a schema the API no longer serves. This
+       * is the only place that mismatch is visible, so it is reported here
+       * rather than left for the user to work out from version numbers.
+       *
+       * Only on the unpinned view: asking for a specific version is asking what
+       * that version holds, and "out of sync" is not a property of a snapshot.
+       */
+      const sync =
+        query.version !== undefined
+          ? null
+          : evaluateSyncState({
+              publishedVersion: project.publishedVersion ?? null,
+              rows: artifacts.map((artifact) => ({
+                artifactType: artifact.artifactType,
+                version: artifact.version,
+                status: artifact.status,
+              })),
+              expected: deriveRequestedArtifacts(project.generationConfig),
+            });
+
+      return reply.send({
+        data: artifacts.map(toArtifactView),
+        meta: { version, publishedVersion: project.publishedVersion ?? null, sync },
+      });
     },
   );
 

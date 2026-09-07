@@ -170,10 +170,16 @@ describe('PATCH /v1/projects/:id with a schema', () => {
 
 describe('POST /v1/projects/:id/versions/:version/restore', () => {
   /**
-   * The worst of the three. `restore` writes no snapshot and no artifacts — so
-   * before the pin, restoring an old version advanced `currentVersion` past every
-   * artifact that existed and the hosted URL 404ed immediately. Recovering from a
-   * mistake was itself an outage.
+   * Once the worst of the three, and now the safest.
+   *
+   * `restore` used to write the live definition and advance `currentVersion`
+   * past every artifact that existed, so before the pin the hosted URL 404ed
+   * immediately — recovering from a mistake was itself an outage. The pin fixed
+   * that; Phase 2 §22 goes further and makes restore seed the DRAFT instead, so
+   * it no longer touches the definition at all.
+   *
+   * This test therefore asserts something stronger than it used to: not "the
+   * pin protected the runtime through the bump", but "there is no bump".
    */
   it('does not take the runtime down', async () => {
     const before = await reload();
@@ -194,8 +200,11 @@ describe('POST /v1/projects/:id/versions/:version/restore', () => {
     expect(res.statusCode).toBe(200);
 
     const after = await reload();
-    expect(after.currentVersion).toBe(2);
-    expect(publishedVersionOf(after)).toBe(1);
+    // Neither pointer moves. §16: a rollback must not change the published
+    // version — and this cannot, because it does not touch the definition
+    // either. The restored definition lives in the draft until it is reviewed.
+    expect(after.currentVersion).toBe(before.currentVersion);
+    expect(publishedVersionOf(after)).toBe(publishedVersionOf(before));
   });
 });
 

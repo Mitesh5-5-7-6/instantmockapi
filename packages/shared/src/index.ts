@@ -84,11 +84,28 @@ export { entitySlug, type RoutableEntity } from './routing.js';
  */
 export {
   RUNTIME_REQUIRED_ARTIFACTS,
+  VERSION_STATUSES,
+  evaluateAutoPublish,
   evaluatePromotion,
   evaluateRuntimeReadiness,
   isRuntimeRequiredArtifact,
+  versionStatus,
   type ArtifactOutcome,
   type PromotionDecision,
   type RuntimeReadiness,
   type RuntimeRequiredArtifact,
+  type VersionStatus,
 } from './promotion.js';
+
+/**
+ * Which generated artifacts are behind the version being served (Phase 2 §18).
+ *
+ * The counterpart to selective regeneration: deselecting an affected artifact is
+ * allowed, and the consequence is named rather than hidden.
+ */
+export {
+  evaluateSyncState,
+  type ArtifactSyncState,
+  type ArtifactVersionRow,
+  type SyncReport,
+} from './sync-state.js';

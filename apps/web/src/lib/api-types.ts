@@ -78,11 +78,49 @@ export interface ProjectSummary {
   slug: string | null;
   description: string | null;
   status: ProjectStatus;
+  /**
+   * The DEFINITION version — what the user is editing.
+   *
+   * Not what the hosted API serves. The two diverge the moment anything is
+   * edited, so a screen that shows this and calls it "live" is wrong; use
+   * `publishedVersion` for that.
+   */
   currentVersion: number;
+  /**
+   * The version the hosted API serves, or `null` when nothing is live yet.
+   *
+   * `null` is a real state — a project that has never generated — and is a
+   * different statement from `1`, which is why the two are not collapsed.
+   */
+  publishedVersion: number | null;
+  /** `currentVersion > publishedVersion`: edits are waiting to be generated. */
+  pendingRegeneration: boolean;
   inputType: 'json' | 'swagger' | 'builder' | 'docs';
   hosted: { url: string | null; expiresAt: string | null };
   createdAt: string;
   updatedAt: string;
+}
+
+/** Derived, never stored — see `versionStatus` in `packages/shared`. */
+export type VersionStatus =
+  'PUBLISHED' | 'SUPERSEDED' | 'READY' | 'DEGRADED' | 'GENERATING' | 'FAILED' | 'PENDING';
+
+export type VersionChangeType = 'INITIAL' | 'FEATURE' | 'BREAKING' | 'ROLLBACK' | 'REGENERATION';
+
+/** §3's change counts, for the history list's one-line summary. */
+export interface VersionChangeSummary {
+  entitiesAdded: number;
+  entitiesRemoved: number;
+  entitiesModified: number;
+  fieldsAdded: number;
+  fieldsRemoved: number;
+  fieldsModified: number;
+  relationsAdded: number;
+  relationsRemoved: number;
+  relationsModified: number;
+  endpointsAdded: number;
+  endpointsRemoved: number;
+  endpointsModified: number;
 }
 
 /**
@@ -336,6 +374,29 @@ export type ChangeRisk = 'SAFE' | 'INFO' | 'WARNING' | 'ROUTING' | 'BREAKING';
 /** Which part of an endpoint a dependency lands on. */
 export type ImpactFacet = 'request' | 'response' | 'query' | 'path';
 
+/** §11's four-way shape of a change, for the `+ − ~` glyph and the counts. */
+export type ChangeType = 'ADDED' | 'REMOVED' | 'MODIFIED' | 'RENAMED';
+
+/**
+ * §12's axis: do existing callers break — yes, maybe, or no.
+ *
+ * **Never rendered in the same row as `risk`.** They answer different questions
+ * and eight of the change kinds legitimately disagree (a changed default is
+ * `SAFE` and `POTENTIALLY_BREAKING`), so side by side they read as a
+ * contradiction. The comparison page shows this; the commit dialog shows `risk`.
+ */
+export type ChangeImpact = 'BREAKING' | 'POTENTIALLY_BREAKING' | 'NON_BREAKING';
+
+/** How the two sides of a change were paired up. */
+export type MatchBasis = 'id' | 'name';
+
+/** A value too large to send whole. */
+export interface TruncatedValue {
+  __truncated: true;
+  preview: string;
+  bytes: number;
+}
+
 export interface DraftChange {
   kind: string;
   risk: ChangeRisk;
@@ -346,7 +407,25 @@ export interface DraftChange {
   before: unknown;
   after: unknown;
   summary: string;
+
+  /*
+   * Phase 2, additive — and optional here because this shape predates them.
+   *
+   * Required on the comparison types below instead: an existing shape being
+   * extended has to tolerate an older server, while a brand-new endpoint always
+   * sends its own fields.
+   */
+  entityId?: string | null;
+  fieldId?: string | null;
+  relationId?: string | null;
+  relationName?: string | null;
+  changeType?: ChangeType;
+  impact?: ChangeImpact;
+  matchedBy?: MatchBasis;
 }
+
+/** Alias for new code: this shape is no longer draft-specific. */
+export type SchemaChangeView = DraftChange;
 
 /** One answer to "why is this API affected?". */
 export interface ImpactReason {
@@ -395,6 +474,141 @@ export interface DraftAnalysis {
   affected: AffectedEndpoint[];
   unaffected: UnaffectedEndpoint[];
   artifacts: string[];
+}
+
+/* ── Version comparison (Phase 2 §24, §36, §37) ────────────────────────────
+ *
+ * Restated rather than imported, because `apps/web` may not import server
+ * packages. These mirror `packages/ips/src/grouping.ts` one for one — the same
+ * discipline `ChangeRisk` already follows: the server computes, the client
+ * renders and restates only the types.
+ */
+
+export interface ChangeGroupCounts {
+  total: number;
+  added: number;
+  removed: number;
+  modified: number;
+  renamed: number;
+  breaking: number;
+  potentiallyBreaking: number;
+  nonBreaking: number;
+}
+
+/** What happened to a group as a whole, for its glyph. */
+export type GroupStatus = 'added' | 'removed' | 'renamed' | 'modified';
+
+export interface GroupedChangeView {
+  change: SchemaChangeView;
+  changeType: ChangeType;
+  impact: ChangeImpact;
+}
+
+export interface FieldGroupView {
+  /** Stable React key: the element id, else a name-derived fallback. */
+  key: string;
+  fieldId: string | null;
+  /** Dotted path as the `to` side spells it — `address.city`. */
+  path: string;
+  name: string;
+  previousName: string | null;
+  status: GroupStatus;
+  counts: ChangeGroupCounts;
+  impact: ChangeImpact;
+  matchedBy: MatchBasis;
+  changes: GroupedChangeView[];
+}
+
+export interface RelationGroupView {
+  key: string;
+  relationId: string | null;
+  name: string;
+  previousName: string | null;
+  status: GroupStatus;
+  counts: ChangeGroupCounts;
+  impact: ChangeImpact;
+  matchedBy: MatchBasis;
+  changes: GroupedChangeView[];
+}
+
+export interface EntityGroupView {
+  key: string;
+  entityId: string | null;
+  name: string;
+  previousName: string | null;
+  status: GroupStatus;
+  /** Uncapped: the entity's real totals, whatever survived truncation below. */
+  counts: ChangeGroupCounts;
+  impact: ChangeImpact;
+  matchedBy: MatchBasis;
+  /** §37's "APIs" section — endpoints this entity's changes reach. */
+  endpoints: { method: string; path: string }[];
+  /** Changes about the entity itself: rename, description, identity. */
+  own: GroupedChangeView[];
+  fields: FieldGroupView[];
+  relations: RelationGroupView[];
+  /** Non-zero when this group was capped. */
+  omittedChanges: number;
+}
+
+export interface ChangeTreeView {
+  entities: EntityGroupView[];
+  /** Changes belonging to no entity: methods, query features, seeding. */
+  project: {
+    changes: GroupedChangeView[];
+    counts: ChangeGroupCounts;
+    impact: ChangeImpact | null;
+  };
+  counts: ChangeGroupCounts;
+}
+
+/** How much of a comparison rested on names rather than on stable ids. */
+export interface MatchingReportView {
+  byId: number;
+  byName: number;
+  nameMatchedEntities: string[];
+  /**
+   * True when name matching was used anywhere.
+   *
+   * The consequence the page must state: within a name-matched scope a rename
+   * reads as one removal plus one addition, because with no stable id the two
+   * are indistinguishable.
+   */
+  renamesUndetectable: boolean;
+  /** Neither side carried a stable id — the whole comparison rests on names. */
+  legacyBothSides: boolean;
+}
+
+export interface VersionRefView {
+  version: number;
+  note: string | null;
+  createdAt: string | null;
+  /** `'project'` for a version authored but never generated. */
+  source: 'version' | 'project';
+}
+
+export interface VersionComparison {
+  from: VersionRefView;
+  to: VersionRefView;
+  /** `'backward'` describes a hypothetical — what restoring would do. */
+  direction: 'forward' | 'backward';
+  summary: {
+    total: number;
+    changeTypes: Record<ChangeType, number>;
+    impact: Record<ChangeImpact, number>;
+    risk: ChangeRisk | null;
+    affectedEntities: number;
+    affectedEndpoints: number;
+    affectedArtifacts: number;
+  };
+  matching: MatchingReportView;
+  tree: ChangeTreeView;
+  /** Non-null when the body was capped. The counts above are never capped. */
+  truncated: { omittedChanges: number; omittedEntities: number } | null;
+  affected: AffectedEndpoint[];
+  unaffected: UnaffectedEndpoint[];
+  artifacts: string[];
+  incomplete: boolean;
 }
 
 export interface ProjectDraft {

@@ -73,7 +73,7 @@ export function DialogContent({
       <DialogPrimitive.Content
         className={cn(
           'fixed top-1/2 left-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2',
-          'rounded-[var(--radius-md)] border border-border bg-popover p-6 shadow-2xl',
+          'rounded-md border border-border bg-popover p-6 shadow-2xl',
           // The viewport cap plus its own scroll: a dialog holding a long
           // validation list must not grow past the screen and strand its buttons
           // below the fold.
@@ -154,7 +154,7 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
             <DialogClose
               aria-label="Close"
               className={cn(
-                'flex size-7 shrink-0 items-center justify-center rounded-[var(--radius-sm)]',
+                'flex size-7 shrink-0 items-center justify-center rounded-sm',
                 'text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
                 'outline-none focus-visible:ring-2 focus-visible:ring-ring',
               )}

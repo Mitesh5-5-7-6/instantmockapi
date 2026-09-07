@@ -3,7 +3,10 @@ import {
   RUNTIME_REQUIRED_ARTIFACTS,
   evaluatePromotion,
   evaluateRuntimeReadiness,
+  evaluateAutoPublish,
   isRuntimeRequiredArtifact,
+  versionStatus,
+  VERSION_STATUSES,
   type ArtifactOutcome,
 } from './promotion.js';
 import type { ArtifactType } from './constants.js';
@@ -270,5 +273,189 @@ describe('evaluatePromotion', () => {
     it.each(cases)('%s → promote=%s', (_label, outcomes, expected) => {
       expect(evaluatePromotion({ candidate: 2, published: 1, outcomes }).promote).toBe(expected);
     });
+  });
+});
+
+describe('evaluateAutoPublish', () => {
+  /**
+   * Generation does not publish. The single exception is a project with nothing
+   * live, and everything subtle about this function is in how "nothing live" is
+   * determined and what it then does with the pinned pointer.
+   */
+  it('refuses to publish when a version is already being served', () => {
+    const decision = evaluateAutoPublish({
+      candidate: 2,
+      published: 1,
+      live: true,
+      outcomes: ALL_GOOD,
+    });
+    expect(decision.promote).toBe(false);
+    // The reason names the route, so the log line tells an operator what the
+    // user has to do next rather than reading like a refusal.
+    expect(decision.reason).toContain('publishing is explicit');
+  });
+
+  it('publishes the first version of a project with nothing live', () => {
+    const decision = evaluateAutoPublish({
+      candidate: 1,
+      published: null,
+      live: false,
+      outcomes: ALL_GOOD,
+    });
+    expect(decision.promote).toBe(true);
+  });
+
+  /**
+   * The trap, pinned.
+   *
+   * `pinPublishedVersion` stamps `publishedVersion` speculatively on the first
+   * edit, so a project whose first action was a partial regenerate has
+   * `publishedVersion = 1` pointing at a version with no artifacts — nothing has
+   * ever been live. Forwarding that pinned value into `evaluatePromotion` makes
+   * its "never move backwards" rule refuse to publish v1 as v1, and the user is
+   * left with a READY version, no hosted URL, and no explanation.
+   */
+  it('publishes v1 even when the pointer was pinned to v1 but never served', () => {
+    const decision = evaluateAutoPublish({
+      candidate: 1,
+      published: 1,
+      live: false,
+      outcomes: ALL_GOOD,
+    });
+    expect(decision.promote).toBe(true);
+
+    // And the ordinary policy really would have refused it, which is why the
+    // pinned value is discarded rather than forwarded.
+    expect(evaluatePromotion({ candidate: 1, published: 1, outcomes: ALL_GOOD }).promote).toBe(
+      false,
+    );
+  });
+
+  it('still refuses an unready candidate when nothing is live', () => {
+    // The exception is about the publish boundary, not about readiness. A
+    // version that cannot serve traffic must not be pointed at either way.
+    const decision = evaluateAutoPublish({
+      candidate: 1,
+      published: null,
+      live: false,
+      outcomes: [outcome('hosted_api', 'failed'), outcome('zod')],
+    });
+    expect(decision.promote).toBe(false);
+    expect(decision.readiness.blocking).toEqual(['hosted_api']);
+  });
+
+  it('reports why a live project is being left alone, ready or not', () => {
+    const notReady = evaluateAutoPublish({
+      candidate: 2,
+      published: 1,
+      live: true,
+      outcomes: [outcome('hosted_api', 'failed')],
+    });
+    expect(notReady.promote).toBe(false);
+    expect(notReady.reason).toContain('not runtime-ready');
+  });
+});
+
+describe('versionStatus', () => {
+  /**
+   * Derived, never stored — so these are the only tests that exist for it, and
+   * they have to cover the orderings rather than a stored column's transitions.
+   */
+  const status = (over: Partial<Parameters<typeof versionStatus>[0]> = {}) =>
+    versionStatus({ version: 3, publishedVersion: null, outcomes: ALL_GOOD, ...over });
+
+  it('reports the live version as PUBLISHED', () => {
+    expect(status({ publishedVersion: 3 })).toBe('PUBLISHED');
+  });
+
+  /**
+   * The ordering that matters most.
+   *
+   * A live version whose OpenAPI later failed a re-run is still the version
+   * being served. Letting the artifact rows outrank the pointer would report the
+   * running API as FAILED — alarming, and wrong.
+   */
+  it('keeps the live version PUBLISHED even when an artifact has since failed', () => {
+    expect(
+      status({
+        publishedVersion: 3,
+        outcomes: [outcome('hosted_api', 'failed'), outcome('openapi', 'failed')],
+      }),
+    ).toBe('PUBLISHED');
+  });
+
+  it('reports a version with no artifact rows as PENDING', () => {
+    // A schema edit advanced the definition and nothing has been asked of it.
+    expect(status({ outcomes: [] })).toBe('PENDING');
+  });
+
+  it('reports a version that was published and has no rows as SUPERSEDED', () => {
+    expect(status({ outcomes: [], wasPublished: true })).toBe('SUPERSEDED');
+  });
+
+  it('reports a version mid-generation as GENERATING', () => {
+    // Settled rows do not yet describe the outcome while others are in flight.
+    expect(status({ outcomes: [outcome('hosted_api'), outcome('openapi', 'generating')] })).toBe(
+      'GENERATING',
+    );
+    expect(status({ outcomes: [outcome('hosted_api', 'pending')] })).toBe('GENERATING');
+  });
+
+  it('reports a version whose runtime artifact failed as FAILED', () => {
+    expect(status({ outcomes: [outcome('hosted_api', 'failed'), outcome('openapi')] })).toBe(
+      'FAILED',
+    );
+  });
+
+  it('reports a clean, unpublished version as READY', () => {
+    expect(status()).toBe('READY');
+  });
+
+  /**
+   * DEGRADED splits §9's READY, and the split is what makes the difference
+   * visible *before* someone publishes: the API will serve, but a download is
+   * missing or stale.
+   */
+  it('reports a runtime-ready version with a failed optional artifact as DEGRADED', () => {
+    expect(status({ outcomes: [outcome('hosted_api'), outcome('openapi', 'failed')] })).toBe(
+      'DEGRADED',
+    );
+  });
+
+  it('reports unreseeded mock data as DEGRADED, not READY', () => {
+    // The records on disk are shaped for the previous schema. The endpoints
+    // answer; the bodies may be missing fields this version declares.
+    expect(status({ outcomes: [outcome('hosted_api'), outcome('mock_data', 'failed')] })).toBe(
+      'DEGRADED',
+    );
+  });
+
+  it('prefers SUPERSEDED over READY for a version that was once live', () => {
+    // READY would imply an action is available. Re-publishing an older version
+    // is a rollback, which §22 routes through a new version instead.
+    expect(status({ publishedVersion: 5, wasPublished: true })).toBe('SUPERSEDED');
+  });
+
+  it('returns a declared status for every input combination', () => {
+    const statuses: ArtifactOutcome['status'][] = ['pending', 'generating', 'completed', 'failed'];
+    for (const hosted of statuses) {
+      for (const openapi of statuses) {
+        for (const published of [null, 3, 5]) {
+          for (const wasPublished of [true, false]) {
+            expect(
+              VERSION_STATUSES,
+              `hosted=${hosted} openapi=${openapi} published=${published}`,
+            ).toContain(
+              versionStatus({
+                version: 3,
+                publishedVersion: published,
+                outcomes: [outcome('hosted_api', hosted), outcome('openapi', openapi)],
+                wasPublished,
+              }),
+            );
+          }
+        }
+      }
+    }
   });
 });

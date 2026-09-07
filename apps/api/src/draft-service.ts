@@ -39,12 +39,14 @@ import {
   highestRisk,
   materializeRelations,
   needsAttention,
+  reconcileEntityRenames,
   summariseChanges,
   validateIPS,
   type GenerationConfig,
   type ImpactReport,
   type InternalProjectSchema,
 } from '@instantmockapi/ips';
+import { toChangeView, toImpactView } from './change-serializers.js';
 import { validateGenerationConfig } from './generation-config.js';
 import { createGenerationJob, type CreatedJobRef } from './generation-service.js';
 
@@ -181,6 +183,76 @@ export async function openDraft(
   }
 }
 
+/**
+ * Seed the draft from a version snapshot — a rollback (Phase 2 §22, §16).
+ *
+ * ## Why this replaces what `restore` used to do
+ *
+ * `restore` wrote the snapshot straight onto `project.ips`, bumped
+ * `currentVersion`, and returned. No draft, no diff, no review — so the one
+ * action most likely to remove fields and break callers was the only one that
+ * skipped the confirmation every ordinary edit goes through.
+ *
+ * Seeding the draft instead means a rollback reuses the whole reviewed pipeline:
+ *
+ *     restore ─▶ draft ─▶ diff ─▶ impact ─▶ review ─▶ commit ─▶ generate ─▶ publish
+ *
+ * The breaking-change gate, the `acknowledgeImpact` digest, selective
+ * regeneration and the STALE_DRAFT check all apply for free. §22 asks for
+ * exactly this — *"do NOT create a special hidden rollback implementation that
+ * bypasses version generation"* — and §16 adds that rollback must not touch
+ * `publishedVersion`, which this cannot: nothing here goes near it.
+ *
+ * ## It replaces an open draft rather than refusing
+ *
+ * One draft per project, so a rollback has to take it over. Refusing while
+ * unsaved edits exist would leave the user unable to roll back without first
+ * discarding by hand, and silently merging the two is worse — the snapshot's
+ * definition is the whole point of the operation.
+ */
+export async function seedDraftFromSnapshot(
+  project: IProject,
+  snapshot: {
+    version: number;
+    ipsSnapshot: InternalProjectSchema;
+    configSnapshot: GenerationConfig;
+  },
+): Promise<DraftContext> {
+  await backfillProjectIds(project);
+
+  // Materialize on the way out so a snapshot taken before relations existed is
+  // restored in the current shape rather than the one it was captured in — the
+  // same reason the old `restore` did it.
+  const ips = materializeRelations({
+    ...snapshot.ipsSnapshot,
+    projectId: String(project._id),
+    ...addressing(project),
+    // The draft's schema version tracks the definition it forked FROM, never the
+    // version it was copied from: the diff is against the live definition, and a
+    // draft is not a version.
+    version: project.currentVersion,
+    generationConfig: snapshot.configSnapshot,
+  });
+  // Mint ids for anything the snapshot predates, so the diff can pair elements
+  // rather than reporting the whole schema as replaced.
+  ensureSchemaIds(ips);
+
+  const draft = await ProjectDraft.findOneAndUpdate(
+    { projectId: project._id },
+    {
+      $set: {
+        ips,
+        generationConfig: snapshot.configSnapshot,
+        baseVersion: project.currentVersion,
+        rollbackSourceVersion: snapshot.version,
+      },
+    },
+    { upsert: true, new: true },
+  );
+
+  return { project, draft, stale: false };
+}
+
 /** Load the open draft, or throw NOT_FOUND. */
 export async function loadDraft(project: IProject): Promise<DraftContext> {
   const draft = await ProjectDraft.findOne({ projectId: project._id });
@@ -213,10 +285,21 @@ export async function applyDraftEdit(
   }
 
   if (body.ips) {
+    // Follow entity renames through the references that name entities by string
+    // — `relation.target` and `meta.relation`. This runs BEFORE validation on
+    // purpose: `validateIPS` is what rejects a target naming an entity that no
+    // longer exists, so reconciling after it would never get the chance, and
+    // renaming an entity that anything relates to would stay unsavable.
+    //
+    // The previous draft state is the comparison side: the client sends the
+    // whole document with the new name, and `draft.ips` still holds the old one
+    // under the same stable id.
+    const reconciled = reconcileEntityRenames(draft.ips, body.ips);
+
     const validated = unwrap(
       validateIPS(
         {
-          ...body.ips,
+          ...reconciled,
           projectId: String(project._id),
           ...addressing(project),
           // The draft's schema version tracks the definition it was forked from,
@@ -384,14 +467,25 @@ export async function commitDraft(params: {
   project.markModified('ips');
   await project.save();
 
-  const artifacts = params.artifacts ?? analysis.impact.artifacts;
+  const rollbackSource = draft.rollbackSourceVersion ?? null;
+  const artifacts = forceMockDataOnRollback(
+    params.artifacts ?? analysis.impact.artifacts,
+    analysis,
+    rollbackSource,
+  );
+
   const job = await createGenerationJob({
     project,
     type: 'full',
     requestedArtifacts: artifacts,
     generationConfig: draft.generationConfig,
     plan,
-    note: note ?? commitNote(analysis),
+    note: note ?? commitNote(analysis, rollbackSource),
+    // A rollback is a version like any other, and says so in the history: §7
+    // wants the lineage recorded rather than reconstructed from the note text.
+    ...(rollbackSource === null
+      ? {}
+      : { changeType: 'ROLLBACK' as const, rollbackSourceVersion: rollbackSource }),
   });
 
   // 7. The draft has become the definition; nothing is left to resume.
@@ -406,12 +500,75 @@ export async function commitDraft(params: {
   };
 }
 
+/**
+ * Change kinds that alter the shape of a stored record.
+ *
+ * Not every change does. Turning a query feature off, or choosing different
+ * generators, leaves the records on disk exactly as valid as they were.
+ */
+const SHAPE_KINDS = new Set<string>([
+  'ENTITY_ADDED',
+  'ENTITY_REMOVED',
+  'ENTITY_RENAMED',
+  'ENTITY_IDENTITY_CHANGED',
+  'FIELD_ADDED',
+  'FIELD_REMOVED',
+  'FIELD_RENAMED',
+  'FIELD_TYPE_CHANGED',
+  'FIELD_DEFAULT_CHANGED',
+  'ENUM_VALUES_REMOVED',
+  'RELATION_ADDED',
+  'RELATION_REMOVED',
+  'RELATION_RENAMED',
+  'RELATION_KIND_CHANGED',
+  'RELATION_TARGET_CHANGED',
+  'RELATION_FIELDS_CHANGED',
+]);
+
+/** True when this commit changes what a stored record should look like. */
+export function affectsRecordShape(analysis: DraftAnalysis): boolean {
+  return analysis.impact.changes.some((change) => SHAPE_KINDS.has(change.kind));
+}
+
+/**
+ * Force `mock_data` into the regeneration set on a schema-affecting rollback.
+ *
+ * ## Why a rollback is the one case that cannot opt out
+ *
+ * `MockStore` is keyed `(projectId, entity)` with **no version**. The promotion
+ * policy already names the consequence as `staleDataRisk`: promote a schema
+ * whose seeding failed and the endpoints answer with records shaped for the
+ * *previous* schema.
+ *
+ * For an ordinary edit that is a possibility. For a rollback it is a certainty —
+ * the records on disk were seeded for the newer schema by definition, so rolling
+ * the definition back without reseeding leaves the live API returning fields the
+ * restored schema does not declare, and missing ones it does. And it is the one
+ * inconsistency a user cannot see or diagnose: the schema page, the docs and the
+ * types would all agree with each other and disagree with the data.
+ *
+ * §17 lets a user deselect artifacts, and they still can — docs, types,
+ * validators, the export bundle. This forces exactly one, for one situation.
+ */
+export function forceMockDataOnRollback(
+  artifacts: ArtifactType[],
+  analysis: DraftAnalysis,
+  rollbackSourceVersion: number | null,
+): ArtifactType[] {
+  if (rollbackSourceVersion === null || !affectsRecordShape(analysis)) {
+    return artifacts;
+  }
+  return artifacts.includes('mock_data') ? artifacts : [...artifacts, 'mock_data'];
+}
+
 /** A version note a human can read in the history list. */
-function commitNote(analysis: DraftAnalysis): string {
+function commitNote(analysis: DraftAnalysis, rollbackSourceVersion: number | null = null): string {
   const count = analysis.impact.changes.length;
   const risk = highestRisk(analysis.impact.changes);
   const noun = count === 1 ? 'change' : 'changes';
-  return `Draft commit: ${count} ${noun}${risk ? ` (${risk})` : ''}, ${analysis.impact.affected.length} endpoint(s) affected`;
+  const what =
+    rollbackSourceVersion === null ? 'Draft commit' : `Rollback to v${rollbackSourceVersion}`;
+  return `${what}: ${count} ${noun}${risk ? ` (${risk})` : ''}, ${analysis.impact.affected.length} endpoint(s) affected`;
 }
 
 /** Discard the draft. */
@@ -446,39 +603,17 @@ export function toDraftAnalysisResponse(analysis: DraftAnalysis): Record<string,
     requiresAcknowledgement: analysis.requiresAcknowledgement,
     // Echo this back as `acknowledgeImpact` on a risky commit.
     digest: analysis.digest,
-    // Flagged when a change could not be matched to a graph node, so a UI can
-    // avoid presenting the not-affected list as a guarantee it cannot make.
-    incomplete: impact.incomplete,
-    changes: impact.changes.map((change) => ({
-      kind: change.kind,
-      risk: change.risk,
-      aspect: change.aspect,
-      entity: change.entityName ?? null,
-      field: change.fieldName ?? change.relationName ?? null,
-      path: change.path ?? null,
-      before: change.before ?? null,
-      after: change.after ?? null,
-      summary: change.summary,
-    })),
-    affected: impact.affected.map((endpoint) => ({
-      method: endpoint.method,
-      path: endpoint.path,
-      entity: endpoint.entity ?? null,
-      risk: endpoint.risk,
-      reasons: endpoint.reasons.map((reason) => ({
-        source: reason.source,
-        reason: reason.reason,
-        facet: reason.facet,
-        change: reason.change.kind,
-        summary: reason.change.summary,
-      })),
-    })),
-    unaffected: impact.unaffected.map((endpoint) => ({
-      method: endpoint.method,
-      path: endpoint.path,
-      entity: endpoint.entity ?? null,
-    })),
-    artifacts: impact.artifacts,
+    // Through the shared serializer, so this payload and the comparison
+    // endpoint describe a change identically. Everything the old inline mapper
+    // produced is still here, spelled the same way; the additions (stable ids,
+    // `changeType`, `impact`, `matchedBy`) are new keys beside them, which is
+    // why `review-changes.tsx` needed no edit.
+    changes: impact.changes.map(toChangeView),
+    // Carries `affected`, `unaffected`, `artifacts` and `incomplete` — the last
+    // of which is flagged when a change could not be matched to a graph node, so
+    // a UI can avoid presenting the not-affected list as a guarantee it cannot
+    // make.
+    ...toImpactView(impact),
   };
 }
 

@@ -15,7 +15,13 @@ export {
   type AuthTokenKind,
 } from './models/authToken.js';
 export { Project, type IProject } from './models/project.js';
-export { Version, type IVersion } from './models/version.js';
+export {
+  Version,
+  VERSION_CHANGE_TYPES,
+  type IVersion,
+  type VersionChangeType,
+  type VersionChangeSummary,
+} from './models/version.js';
 /**
  * The editable copy of a project's definition (Phase 1). One per project,
  * enforced by a unique index. Commit advances the definition; it does NOT
@@ -55,6 +61,12 @@ export {
   hasPendingRegeneration,
   type VersionedProject,
 } from './published-version.js';
+
+/**
+ * Publishing (Phase 2 §1–§3): the four fields the pointer move writes, and the
+ * only honest way to ask whether anything is live.
+ */
+export { hasLiveDeployment, publishFields, type PublishFields } from './publish.js';
 
 /**
  * Version runtime state (Phase 1). Reads the artifact registry for ONE version,

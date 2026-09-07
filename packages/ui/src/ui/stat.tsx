@@ -54,7 +54,7 @@ export function Stat({ value, label, icon, tone = 'accent', delta, hint, classNa
   return (
     <div
       className={cn(
-        'flex-[1_1_140px] rounded-[var(--radius-md)] border border-border bg-card',
+        'flex-[1_1_140px] rounded-md border border-border bg-card',
         isTile ? 'p-4' : 'p-3',
         className,
       )}
