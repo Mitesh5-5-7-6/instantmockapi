@@ -237,7 +237,7 @@ export default function LogsPage() {
                 {/* The empty state does the work: nobody&rsquo;s first visit has
                     traffic, so it shows the call that would fill this table. */}
                 <p className="ui-meta">Call your API and requests appear here within seconds.</p>
-                <pre className="overflow-auto rounded-[var(--radius-md)] border border-border bg-background p-4 text-left font-mono text-xs">
+                <pre className="overflow-auto rounded-md border border-border bg-background p-4 text-left font-mono text-xs">
                   <code>
                     {buildSnippet({
                       language: 'curl',

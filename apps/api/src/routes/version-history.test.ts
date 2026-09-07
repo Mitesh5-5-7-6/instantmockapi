@@ -125,15 +125,40 @@ describe('every version advance records a snapshot', () => {
     );
   });
 
-  it('records where a restored definition came from', async () => {
+  it('records where a restored definition came from, once it is committed', async () => {
+    // Restore seeds the DRAFT (§22), so it burns no version and records nothing
+    // — the provenance is stamped on the version the commit creates. That is
+    // what makes a rollback auditable *and* reviewable: the same pipeline as
+    // any other edit, with `changeType` naming which pipeline it was.
+    // History FIRST, so v1 is snapshotted from the definition as it is now.
+    // The §42 backfill can only ever record the live definition — it must not
+    // fabricate the intermediate state of a version that was never generated
+    // (§47) — so backfilling *after* an edit would file the edited definition
+    // under the older number, and restoring it would then be a no-op.
+    await history();
     await editSchema();
+
     const restored = await post(`/v1/projects/${projectId}/versions/1/restore`);
-    expect(restored.statusCode).toBe(200);
+    expect(restored.statusCode, restored.body).toBe(200);
+    expect(restored.json().rollbackSourceVersion).toBe(1);
+
+    // Nothing recorded yet.
+    const before = await history();
+    expect(before.map((row) => row.version)).toEqual([2, 1]);
+
+    const digest = (
+      (await get(`/v1/projects/${projectId}/draft/impact`)).json() as { digest: string }
+    ).digest;
+    const commit = await post(`/v1/projects/${projectId}/draft/commit`, {
+      acknowledgeImpact: digest,
+    });
+    expect(commit.statusCode, commit.body).toBe(202);
 
     const rows = await history();
     const newest = rows[0]!;
     // Without this, "v3" and "v3, which is v1's definition" are
     // indistinguishable in the audit trail (§7).
+    expect(newest.version).toBe(3);
     expect(newest.changeType).toBe('ROLLBACK');
     expect(newest.rollbackSourceVersion).toBe(1);
   });

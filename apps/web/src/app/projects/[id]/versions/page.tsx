@@ -25,6 +25,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import {
   Badge,
@@ -44,6 +45,7 @@ import {
   TableHeader,
   TableRow,
   TableRowHeader,
+  buttonVariants,
   tableNumeric,
 } from '@instantmockapi/ui';
 import {
@@ -69,6 +71,29 @@ const CHIP_STATUS: Record<string, string> = {
   failed: 'failed',
   neutral: 'draft',
 };
+
+/**
+ * Which pair a row's Compare opens.
+ *
+ * Against the live version, because "what would change if I published this" is
+ * the question the button is being asked from a version list. The live row has
+ * nothing to compare itself to, so it falls back to the newest — and if there
+ * is no live version at all, to v1.
+ */
+function compareHref(
+  projectId: string,
+  version: number,
+  publishedVersion: number | null,
+  newest: number | null,
+): string {
+  const other =
+    publishedVersion !== null && publishedVersion !== version
+      ? publishedVersion
+      : newest !== null && newest !== version
+        ? newest
+        : 1;
+  return `/projects/${projectId}/versions/compare?from=${other}&to=${version}`;
+}
 
 function VersionMeta({ version }: { version: VersionView }) {
   const changeType = describeChangeType(version);
@@ -120,6 +145,7 @@ export default function VersionsPage() {
     [versions.data],
   );
 
+  const newest = rows.length === 0 ? null : Math.max(...rows.map((row) => row.version));
   const live = rows.find((row) => row.isLive) ?? null;
   const history = rows.filter((row) => !row.isLive);
 
@@ -191,7 +217,7 @@ export default function VersionsPage() {
         </div>
 
         {versions.isPending ? (
-          <div className="h-24 animate-pulse rounded-[var(--radius-md)] bg-muted" />
+          <div className="h-24 animate-pulse rounded-md bg-muted" />
         ) : rows.length === 0 ? (
           <EmptyState title="No versions yet">
             Your first generated project version will appear here.
@@ -224,24 +250,39 @@ export default function VersionsPage() {
                       {version ? <VersionMeta version={version} /> : null}
                     </TableCell>
                     <TableCell className={tableNumeric}>
-                      {row.canPublish ? (
-                        <Button
-                          size="sm"
-                          variant="primary"
-                          disabled={publish.isPending}
-                          onClick={() => confirmPublish(row)}
+                      <span className="inline-flex items-center justify-end gap-2">
+                        {/*
+                          Compare against the live version by default — "what
+                          would change if I published this" is the question a
+                          row's Compare is being asked. For the live row itself
+                          there is nothing to compare it to, so it compares
+                          against the newest instead.
+                        */}
+                        <Link
+                          className={buttonVariants({ variant: 'ghost', size: 'sm' })}
+                          href={compareHref(id, row.version, publishedVersion, newest)}
                         >
-                          Publish
-                        </Button>
-                      ) : row.canRetry ? (
-                        <Button size="sm" variant="secondary" disabled>
-                          Retry
-                        </Button>
-                      ) : (
-                        <span className="text-xs text-subtle-foreground">
-                          {row.publishBlockedReason ?? ''}
-                        </span>
-                      )}
+                          Compare
+                        </Link>
+                        {row.canPublish ? (
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            disabled={publish.isPending}
+                            onClick={() => confirmPublish(row)}
+                          >
+                            Publish
+                          </Button>
+                        ) : row.canRetry ? (
+                          <Button size="sm" variant="secondary" disabled>
+                            Retry
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-subtle-foreground">
+                            {row.publishBlockedReason ?? ''}
+                          </span>
+                        )}
+                      </span>
                     </TableCell>
                   </TableRow>
                 );

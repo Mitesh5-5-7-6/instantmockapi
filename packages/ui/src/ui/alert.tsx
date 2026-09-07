@@ -20,7 +20,7 @@ import { cn } from '../lib/utils.js';
 export type NoteVariant = 'info' | 'warning';
 
 const NOTE_BASE = cn(
-  'flex gap-2 rounded-[var(--radius-sm)] border border-border p-3',
+  'flex gap-2 rounded-sm border border-border p-3',
   'bg-popover text-sm text-muted-foreground',
   'border-l-[3px]',
 );
@@ -93,7 +93,7 @@ export function AlertDescription({
  * reason for the absence — and reuses this container.
  */
 export const EMPTY_STATE = cn(
-  'rounded-[var(--radius-md)] border border-dashed border-border p-12',
+  'rounded-md border border-dashed border-border p-12',
   'text-center text-muted-foreground',
 );
 

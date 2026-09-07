@@ -23,9 +23,9 @@ export type { Tone };
 /* ── IconTile ── */
 
 const TILE_SIZES = {
-  sm: 'size-7 rounded-[var(--radius-sm)]',
-  md: 'size-9 rounded-[var(--radius-md)]',
-  lg: 'size-12 rounded-[var(--radius-lg)]',
+  sm: 'size-7 rounded-sm',
+  md: 'size-9 rounded-md',
+  lg: 'size-12 rounded-lg',
 } as const;
 
 const TILE_GLYPHS: Record<keyof typeof TILE_SIZES, IconSize> = { sm: 16, md: 18, lg: 24 };
@@ -127,7 +127,7 @@ export function Kbd({ children, className }: { children: ReactNode; className?: 
     <kbd
       className={cn(
         'inline-flex min-w-[18px] items-center justify-center gap-px',
-        'rounded-[var(--radius-sm)] border border-border bg-popover px-1 py-px',
+        'rounded-sm border border-border bg-popover px-1 py-px',
         'font-mono text-xs/[1.4] text-muted-foreground',
         className,
       )}

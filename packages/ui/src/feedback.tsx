@@ -94,7 +94,7 @@ export function Toast({ variant, title, detail, action, onDismiss }: ToastProps)
     <div
       className={cn(
         'grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3',
-        'rounded-[var(--radius-md)] border border-border border-l-[3px] px-4 py-3',
+        'rounded-md border border-border border-l-[3px] px-4 py-3',
         'bg-popover shadow-[0_8px_24px_rgb(0_0_0/35%)]',
         // Someone who asked for less motion still needs the toast, just not the
         // slide.
@@ -138,7 +138,7 @@ export function Toast({ variant, title, detail, action, onDismiss }: ToastProps)
         type="button"
         className={cn(
           'flex size-[22px] shrink-0 cursor-pointer items-center justify-center',
-          'rounded-[var(--radius-sm)] border-0 bg-transparent p-0',
+          'rounded-sm border-0 bg-transparent p-0',
           'text-muted-foreground transition-colors hover:bg-card hover:text-foreground',
           'outline-none focus-visible:ring-2 focus-visible:ring-ring',
         )}
@@ -236,7 +236,7 @@ export function FormError({ title, detail, children }: FormErrorProps) {
   return (
     <div
       className={cn(
-        'flex items-start gap-2 rounded-[var(--radius-sm)] p-3 text-sm',
+        'flex items-start gap-2 rounded-sm p-3 text-sm',
         'border border-destructive/35 border-l-[3px] border-l-destructive',
         // A 6% wash rather than a fill — enough to mark the panel as a failure
         // without fighting the text inside it.

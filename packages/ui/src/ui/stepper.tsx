@@ -26,7 +26,7 @@ export interface StepperProps {
 
 const STEP = cn(
   'flex items-center gap-2 px-3 py-2',
-  'rounded-[var(--radius-md)] border border-border bg-card',
+  'rounded-md border border-border bg-card',
   'text-left font-[inherit] text-sm text-muted-foreground',
   'transition-colors',
 );

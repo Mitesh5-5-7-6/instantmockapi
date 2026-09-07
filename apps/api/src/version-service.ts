@@ -30,8 +30,9 @@
  */
 
 import { Artifact, Version, type IProject, type VersionChangeType } from '@instantmockapi/db';
-import type { GenerationConfig, InternalProjectSchema } from '@instantmockapi/ips';
+import type { GenerationConfig, InternalProjectSchema, SchemaSnapshot } from '@instantmockapi/ips';
 import {
+  AppError,
   logger,
   versionStatus,
   type ArtifactOutcome,
@@ -105,6 +106,71 @@ export async function recordVersion(params: RecordVersionParams): Promise<boolea
   );
 
   return previous === null;
+}
+
+/** Where a comparison side's definition came from. */
+export interface VersionRef {
+  version: number;
+  note: string | null;
+  createdAt: Date | null;
+  /**
+   * `'version'` — a stored snapshot. `'project'` — the live definition, for a
+   * version that has been authored but never generated, so a UI can label it
+   * *"v7 (not yet generated)"* rather than implying it is a historical record.
+   */
+  source: 'version' | 'project';
+}
+
+/**
+ * One side of a comparison, resolved.
+ *
+ * ## Why a fallback exists at all
+ *
+ * `currentVersion` can be ahead of the newest snapshot: a schema PATCH advances
+ * the definition and — before Phase 2 — wrote no `Version` row. Stage 1 closed
+ * that going forward, but a project edited before then still has the gap, and
+ * `currentVersion` is the one version a user most obviously wants to compare.
+ *
+ * ## Why it refuses everything else, loudly
+ *
+ * A version number with no row and no claim to being current is a hole in the
+ * history, and the honest response says *why* rather than "not found". It must
+ * never silently substitute the nearest version — a diff of the wrong pair
+ * looks exactly like a diff of the right one.
+ *
+ * And it must never fabricate a snapshot: the intermediate IPS of a version
+ * that was never generated is gone, and inventing one would be writing history
+ * that did not happen (§47).
+ */
+export async function resolveSnapshot(
+  project: IProject,
+  version: number,
+): Promise<{ snapshot: SchemaSnapshot; ref: VersionRef }> {
+  const row = await Version.findOne({ projectId: project._id, version });
+  if (row) {
+    return {
+      snapshot: { version, ips: row.ipsSnapshot, config: row.configSnapshot },
+      ref: { version, note: row.note ?? null, createdAt: row.createdAt, source: 'version' },
+    };
+  }
+
+  if (version === project.currentVersion) {
+    return {
+      snapshot: {
+        version,
+        ips: project.ips as InternalProjectSchema,
+        config: project.generationConfig,
+      },
+      ref: { version, note: null, createdAt: null, source: 'project' },
+    };
+  }
+
+  throw new AppError({
+    code: 'NOT_FOUND',
+    message:
+      `v${version} was never snapshotted. Versions are recorded when a project is generated; ` +
+      `v${version} was created by an edit or a restore that has not been generated.`,
+  });
 }
 
 /**

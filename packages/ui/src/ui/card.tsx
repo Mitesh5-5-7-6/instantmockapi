@@ -26,7 +26,7 @@ export function Card({ children, interactive, className }: CardProps) {
   return (
     <div
       className={cn(
-        'rounded-[var(--radius-md)] border border-border bg-card p-6',
+        'rounded-md border border-border bg-card p-6',
         // Grey, never green. Every card in a grid hovers in turn, so a coloured
         // hover put the accent under the cursor once per card.
         interactive && 'transition-colors hover:border-border-strong hover:bg-muted',

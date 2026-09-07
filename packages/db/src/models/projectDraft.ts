@@ -47,6 +47,18 @@ export interface IProjectDraft extends Document {
    * that no longer exists.
    */
   baseVersion: number;
+  /**
+   * The version this draft's definition was copied from, when it came from one.
+   *
+   * Set by `POST /versions/:version/restore`, which seeds the draft from a
+   * snapshot instead of writing the live definition. The commit reads it to
+   * stamp `changeType: 'ROLLBACK'` and `rollbackSourceVersion` on the version it
+   * creates — §7's audit trail, without which "v6" and "v6, which is v2's
+   * definition" are indistinguishable afterwards.
+   *
+   * Absent for an ordinary edit, which is the overwhelmingly common case.
+   */
+  rollbackSourceVersion?: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -68,6 +80,10 @@ const projectDraftSchema = new Schema<IProjectDraft>(
     generationConfig: {
       type: Schema.Types.Mixed,
       required: true,
+    },
+    rollbackSourceVersion: {
+      type: Number,
+      default: null,
     },
     baseVersion: {
       type: Number,

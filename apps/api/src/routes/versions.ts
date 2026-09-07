@@ -15,17 +15,28 @@ import {
   Project,
   User,
   Version,
-  pinPublishedVersion,
   publishFields,
   publishedVersionOf,
   versionArtifactOutcomes,
 } from '@instantmockapi/db';
 import { AppError, evaluatePromotion } from '@instantmockapi/shared';
-import { materializeRelations } from '@instantmockapi/ips';
+import {
+  compareSnapshots,
+  groupChanges,
+  summariseChangeTypes,
+  summariseImpact,
+} from '@instantmockapi/ips';
 import { loadOwnedProject, notFound } from '../access.js';
+import {
+  analyseDraft,
+  seedDraftFromSnapshot,
+  toDraftAnalysisResponse,
+  toDraftResponse,
+} from '../draft-service.js';
 import { listEnvelope, parsePagination } from '../pagination.js';
-import { toProjectDetail, toVersionView } from '../serializers.js';
-import { backfillInitialVersion, recordVersion, versionStatuses } from '../version-service.js';
+import { toChangeTreeView, toImpactView, toMatchingView } from '../change-serializers.js';
+import { toVersionView } from '../serializers.js';
+import { backfillInitialVersion, resolveSnapshot, versionStatuses } from '../version-service.js';
 
 export interface VersionRouteOptions {
   config: EnvConfig;
@@ -87,6 +98,82 @@ export const versionRoutes: FastifyPluginAsync<VersionRouteOptions> = async (app
     },
   );
 
+  /**
+   * Compare any two versions (Phase 2 §24, §36, §37).
+   *
+   * **Registered before `/versions/:version`.** Fastify prefers a static
+   * segment over a parameter so the order is belt-and-braces, but a `:version`
+   * route declared `type: 'integer'` would turn `/versions/compre` into a
+   * confusing 400 rather than a 404.
+   *
+   * ## Version numbers, not ids
+   *
+   * §28's own example is `?from=v3&to=v4`, the pickers hold
+   * `VersionView.version`, `Version` is uniquely keyed `{projectId, version}`,
+   * and `restore`/`publish` already address by number. Accepting a bare integer
+   * keeps one addressing scheme across the whole phase — the API should not be
+   * parsing display formatting.
+   *
+   * ## What does NOT cross the wire
+   *
+   * No `ipsSnapshot`, no `configSnapshot`. §28's rule, and §15's side-by-side
+   * panel does not need them: `change.before`/`after` already carry the
+   * per-field values, and a field group collects that field's type, requiredness
+   * and validation changes together — so the panel is a render of one group.
+   * "Side-by-side needs both schemas" is the obvious wrong conclusion.
+   */
+  app.get(
+    '/projects/:id/versions/compare',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['from', 'to'],
+          properties: {
+            from: { type: 'integer', minimum: 1 },
+            to: { type: 'integer', minimum: 1 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { from, to } = request.query as { from: number; to: number };
+      const project = await loadOwnedProject(id, request.authUser?.sub ?? '');
+
+      await backfillInitialVersion(project, publishedVersionOf(project));
+
+      const [left, right] = await Promise.all([
+        resolveSnapshot(project, from),
+        resolveSnapshot(project, to),
+      ]);
+
+      const { diff, impact } = compareSnapshots(left.snapshot, right.snapshot);
+      const tree = groupChanges(diff.changes, impact);
+      const view = toChangeTreeView(tree, config.maxDiffChanges);
+
+      return reply.send({
+        from: left.ref,
+        to: right.ref,
+        direction: diff.direction,
+        summary: {
+          total: tree.counts.total,
+          changeTypes: summariseChangeTypes(diff.changes),
+          impact: summariseImpact(diff.changes),
+          risk: impact.risk,
+          affectedEntities: tree.entities.length,
+          affectedEndpoints: impact.affected.length,
+          affectedArtifacts: impact.artifacts.length,
+        },
+        matching: toMatchingView(diff.matching),
+        tree: view.tree,
+        truncated: view.truncated,
+        ...toImpactView(impact),
+      });
+    },
+  );
+
   app.post(
     '/projects/:id/versions/:version/restore',
     {
@@ -116,42 +203,36 @@ export const versionRoutes: FastifyPluginAsync<VersionRouteOptions> = async (app
         throw notFound('Version');
       }
 
-      // Restore copies the snapshot's IPS + config forward onto the working
-      // definition and advances currentVersion so the NEXT generation stamps a
-      // fresh version from this restored model (doc 03 §7, doc 07 §5) — history
-      // is append-only and never rewound. No artifacts are written here; they
-      // materialize when the user generates (the artifact grid still shows the
-      // last-generated set until then, at their older versions).
-      // Freeze what the runtime is serving BEFORE the definition moves. At this
-      // instant `currentVersion` IS the served version, and `publishedVersionOf`
-      // falls back to it — so without this pin the fallback would follow the bump
-      // and 404 the live URL, which is the bug this whole split removes.
-      pinPublishedVersion(project);
-      project.currentVersion += 1;
-      project.generationConfig = snapshot.configSnapshot;
-      // Materialize on the way out so a snapshot taken before relations existed
-      // is restored in the current shape rather than the one it was captured in.
-      project.ips = materializeRelations({
-        ...snapshot.ipsSnapshot,
-        projectId: String(project._id),
-        version: project.currentVersion,
-        generationConfig: snapshot.configSnapshot,
+      /*
+       * Restore SEEDS THE DRAFT. It does not write the live definition.
+       *
+       * This used to copy the snapshot straight onto `project.ips` and bump
+       * `currentVersion` — so the one action most likely to remove fields and
+       * break callers was the only one that skipped the review every ordinary
+       * edit goes through. Now a rollback runs the same pipeline:
+       *
+       *     restore ─▶ draft ─▶ diff ─▶ impact ─▶ review ─▶ commit ─▶ generate ─▶ publish
+       *
+       * §22 asks for exactly that, and §16 requires a rollback not to touch
+       * `publishedVersion` — which this cannot, because nothing here goes near
+       * it. The live API keeps serving whatever it was serving, and the version
+       * that eventually carries this definition is stamped `ROLLBACK` with its
+       * source when the draft is committed.
+       *
+       * The response is the draft plus its impact, so the client can go straight
+       * to the review screen instead of fetching twice.
+       */
+      const ctx = await seedDraftFromSnapshot(project, {
+        version,
+        ipsSnapshot: snapshot.ipsSnapshot,
+        configSnapshot: snapshot.configSnapshot,
       });
-      await project.save();
 
-      // The version this restore created now gets a snapshot of its own, so the
-      // history has no gap and §24 can compare it. `rollbackSourceVersion`
-      // records where the definition came from — §7's audit trail, without which
-      // "v6" and "v6, which is v2's definition" are indistinguishable.
-      await recordVersion({
-        project,
-        note: `Restored from v${version}`,
-        changeType: 'ROLLBACK',
+      return reply.send({
+        ...toDraftResponse(ctx),
         rollbackSourceVersion: version,
-        createdBy: request.authUser?.sub ?? null,
+        analysis: toDraftAnalysisResponse(analyseDraft(ctx)),
       });
-
-      return reply.send(toProjectDetail(project));
     },
   );
 

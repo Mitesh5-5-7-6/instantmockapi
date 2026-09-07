@@ -38,6 +38,7 @@ import type {
   ProjectMetricsView,
   VersionChangeSummary,
   VersionChangeType,
+  VersionComparison,
   VersionStatus,
 } from './api-types';
 
@@ -610,6 +611,27 @@ export function useRestoreVersion(projectId: string) {
       void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
       void queryClient.invalidateQueries({ queryKey: ['versions', projectId] });
     },
+  });
+}
+
+/**
+ * Compare two versions.
+ *
+ * `staleTime: Infinity` because both snapshots are immutable, so the answer is
+ * too — flipping between pairs is then instant rather than a refetch. The one
+ * exception is a side resolved from the live definition (`source: 'project'`),
+ * which can move; that is rare enough that a manual refetch is the right
+ * trade rather than making every comparison re-fetch.
+ */
+export function useVersionComparison(projectId: string, from: number | null, to: number | null) {
+  return useQuery({
+    queryKey: ['version-compare', projectId, from, to],
+    queryFn: () =>
+      apiFetch<VersionComparison>(
+        `/v1/projects/${projectId}/versions/compare?from=${from}&to=${to}`,
+      ),
+    enabled: from !== null && to !== null,
+    staleTime: Infinity,
   });
 }
 

@@ -120,6 +120,19 @@ export interface EnvConfig {
   /** Max pagination limit */
   readonly maxPaginationLimit: number;
 
+  /**
+   * Ceiling on how many changes one version comparison serialises.
+   *
+   * The worst case is ordinary rather than adversarial: v1 of one design
+   * compared against v9 after a re-parse shares nothing, and `validateIPS`
+   * caps neither entity nor field count — so every element on both sides
+   * becomes a change and the response is megabytes nobody can read.
+   *
+   * Only the BODY is capped. The counts in the summary are always computed over
+   * the full set, so the header stays true when the list below it is elided.
+   */
+  readonly maxDiffChanges: number;
+
   /** Log level */
   readonly logLevel: string;
 
@@ -222,6 +235,7 @@ export function loadEnvConfig(): EnvConfig {
     maxMockRecords: envInt('MAX_MOCK_RECORDS', 1000),
     maxRequestBodySize: envInt('MAX_REQUEST_BODY_SIZE', 1_048_576), // 1MB
     maxPaginationLimit: envInt('MAX_PAGINATION_LIMIT', 100),
+    maxDiffChanges: envInt('MAX_DIFF_CHANGES', 2000),
     logLevel: envStr('LOG_LEVEL', 'info'),
     storageDriver: envStr('STORAGE_DRIVER', 'mongo'),
     storageMongoBucket: envStr('STORAGE_MONGO_BUCKET', 'artifacts'),

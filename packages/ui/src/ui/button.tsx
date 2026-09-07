@@ -31,7 +31,7 @@ import { cn } from '../lib/utils.js';
 export const buttonVariants = cva(
   cn(
     'inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap',
-    'rounded-[var(--radius-md)] border border-transparent',
+    'rounded-md border border-transparent',
     'text-sm font-medium',
     'transition-[background-color,border-color,color] duration-150 ease-out',
     'cursor-pointer',

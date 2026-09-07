@@ -33,7 +33,7 @@ export function CodeBlock({
   return (
     <div
       className={cn(
-        'relative overflow-auto rounded-[var(--radius-md)] border border-border',
+        'relative overflow-auto rounded-md border border-border',
         // The page's own black, not the card grey: code should read as a well in
         // the surface it sits on.
         'bg-background',
