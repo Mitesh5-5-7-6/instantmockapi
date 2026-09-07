@@ -8,7 +8,7 @@
  */
 
 import { useState } from 'react';
-import { Button, Card, CodeBlock, Input, Select, Textarea } from '@instantmockapi/ui';
+import { Button, Card, CodeBlock, FieldError, Input, Select, Textarea } from '@instantmockapi/ui';
 import { NetworkError } from '../lib/api-client';
 import { normalizeError } from '../lib/errors';
 import { notifyFailure } from '../lib/toast';
@@ -202,11 +202,7 @@ export function HostedPlayground({
         />
       ) : null}
       {/* Genuinely field-level: it describes the textarea directly above it. */}
-      {bodyInvalid ? (
-        <span className="ui-error" role="alert">
-          Request body is not valid JSON.
-        </span>
-      ) : null}
+      {bodyInvalid ? <FieldError>Request body is not valid JSON.</FieldError> : null}
       {result ? (
         <div className="ui-stack" style={{ gap: 'var(--space-2)' }}>
           <span

@@ -20,6 +20,13 @@ import {
   MethodBadge,
   Note,
   Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  tableNumeric,
   type ApiMethod,
 } from '@instantmockapi/ui';
 import { useProject, useProjectLogs } from '../../../../lib/hooks';
@@ -230,7 +237,7 @@ export default function LogsPage() {
                 {/* The empty state does the work: nobody&rsquo;s first visit has
                     traffic, so it shows the call that would fill this table. */}
                 <p className="ui-meta">Call your API and requests appear here within seconds.</p>
-                <pre className="ui-codeblock">
+                <pre className="overflow-auto rounded-[var(--radius-md)] border border-border bg-background p-4 text-left font-mono text-xs">
                   <code>
                     {buildSnippet({
                       language: 'curl',
@@ -247,71 +254,76 @@ export default function LogsPage() {
         ) : null}
 
         {rows.length > 0 ? (
-          <div className="log-table-wrap">
-            <table className="log-table">
-              <thead>
-                <tr>
-                  <th scope="col">Time</th>
-                  <th scope="col">Method</th>
-                  <th scope="col">Path</th>
-                  <th scope="col">Status</th>
-                  <th scope="col" className="log-table__num">
-                    Duration
-                  </th>
-                  <th scope="col">
-                    <span className="ui-visually-hidden">Expand</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => {
-                  const open = expanded === row.id;
-                  return (
-                    <Fragment key={row.id}>
-                      <tr>
-                        <td className="ui-mono">{new Date(row.at).toLocaleTimeString()}</td>
-                        <td>
-                          <MethodBadge method={row.method as ApiMethod} />
-                        </td>
-                        <td className="log-table__path">
-                          <code title={row.path}>{row.path}</code>
-                        </td>
-                        <td>
-                          <span className={`log-status log-status--${statusTone(row.status)}`}>
-                            {row.status}
-                          </span>
-                        </td>
-                        {/* A dash, never `0ms`: rows predating the duration field
-                            carry no value, and zero would claim an impossibly
-                            fast response. */}
-                        <td className="log-table__num ui-mono">
-                          {row.durationMs === null ? '—' : `${row.durationMs}ms`}
-                        </td>
-                        <td>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            aria-expanded={open}
-                            aria-label={open ? 'Hide details' : 'Show details'}
-                            onClick={() => setExpanded(open ? null : row.id)}
-                          >
-                            <Icon name={open ? 'chevron-down' : 'chevron-right'} size={16} />
-                          </Button>
-                        </td>
-                      </tr>
-                      {open ? (
-                        <tr>
-                          <td colSpan={6}>
-                            <LogDetail row={row} />
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          // `Table` brings its own `overflow-x-auto` container, so the
+          // hand-rolled `.log-table-wrap` is no longer needed.
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Time</TableHead>
+                <TableHead>Method</TableHead>
+                <TableHead>Path</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className={tableNumeric}>Duration</TableHead>
+                <TableHead>
+                  <span className="ui-visually-hidden">Expand</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row) => {
+                const open = expanded === row.id;
+                return (
+                  <Fragment key={row.id}>
+                    <TableRow>
+                      <TableCell className="font-mono text-xs">
+                        {new Date(row.at).toLocaleTimeString()}
+                      </TableCell>
+                      <TableCell>
+                        <MethodBadge method={row.method as ApiMethod} />
+                      </TableCell>
+                      {/* The path is the column that can be arbitrarily long, so
+                          it is the one that truncates — the full value is in the
+                          expanded detail below. */}
+                      <TableCell className="max-w-80">
+                        <code className="block truncate font-mono text-xs" title={row.path}>
+                          {row.path}
+                        </code>
+                      </TableCell>
+                      <TableCell>
+                        <span className={`log-status log-status--${statusTone(row.status)}`}>
+                          {row.status}
+                        </span>
+                      </TableCell>
+                      {/* A dash, never `0ms`: rows predating the duration field
+                          carry no value, and zero would claim an impossibly
+                          fast response. */}
+                      <TableCell className={`${tableNumeric} font-mono`}>
+                        {row.durationMs === null ? '—' : `${row.durationMs}ms`}
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-expanded={open}
+                          aria-label={open ? 'Hide details' : 'Show details'}
+                          onClick={() => setExpanded(open ? null : row.id)}
+                        >
+                          <Icon name={open ? 'chevron-down' : 'chevron-right'} size={16} />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                    {open ? (
+                      <TableRow>
+                        <TableCell colSpan={6}>
+                          <LogDetail row={row} />
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
+            </TableBody>
+          </Table>
         ) : null}
 
         {meta && meta.total > 0 ? (

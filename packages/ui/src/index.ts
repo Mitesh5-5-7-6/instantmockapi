@@ -24,6 +24,7 @@ export {
   type CheckboxProps,
   Field,
   type FieldProps,
+  FieldError,
   /* containers */
   Card,
   CardHeader,

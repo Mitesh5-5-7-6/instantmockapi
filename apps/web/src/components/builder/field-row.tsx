@@ -8,7 +8,7 @@
  * rules panel, and — for object/array types — a nested editor for its children.
  */
 
-import { Button, Checkbox, Icon, Input, Select } from '@instantmockapi/ui';
+import { Button, Checkbox, FieldError, Icon, Input, Select } from '@instantmockapi/ui';
 import {
   FIELD_TYPES,
   MAX_DEPTH,
@@ -289,9 +289,7 @@ export function FieldRow({
         nothing about which of their fields the server rejected.
       */}
       {fieldErrors.map((issue) => (
-        <span key={issue} className="ui-error" role="alert">
-          {issue}
-        </span>
+        <FieldError key={issue}>{issue}</FieldError>
       ))}
 
       {isObject ? (

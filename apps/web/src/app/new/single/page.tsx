@@ -28,6 +28,7 @@ import {
   Input,
   Note,
   Stepper,
+  Tabs,
   Textarea,
 } from '@instantmockapi/ui';
 import { useCreateProject } from '../../../lib/hooks';
@@ -55,6 +56,12 @@ const TEMPLATE_KEY = 'instantmockapi.template';
 const STEPS = ['Create Single API', 'Define Endpoints', 'Configure & Generate'];
 
 type InputTab = 'endpoints' | 'json' | 'swagger';
+
+const INPUT_TABS = [
+  { id: 'endpoints', label: 'Endpoints' },
+  { id: 'json', label: 'Paste JSON' },
+  { id: 'swagger', label: 'Swagger / OpenAPI' },
+] as const satisfies readonly { id: InputTab; label: string }[];
 
 const SAMPLE_JSON = JSON.stringify(
   {
@@ -279,24 +286,9 @@ export default function NewSingleApiPage() {
         <div className="ui-stack" style={{ gap: 'var(--space-4)' }}>
           <Card className="ui-stack">
             <h2>Define Endpoints</h2>
-            <div className="ui-tabs" role="tablist">
-              {(
-                [
-                  ['endpoints', 'Endpoints'],
-                  ['json', 'Paste JSON'],
-                  ['swagger', 'Swagger / OpenAPI'],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  role="tab"
-                  aria-selected={tab === value}
-                  onClick={() => setTab(value)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            {/* `Tabs` rather than a hand-rolled strip: this was one of the copies
+                with no arrow-key support, so each input mode was its own tab stop. */}
+            <Tabs items={INPUT_TABS} active={tab} onChange={setTab} label="Endpoint input mode" />
 
             {tab === 'json' ? (
               <Field label="Sample JSON payload">

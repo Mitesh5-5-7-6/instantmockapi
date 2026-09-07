@@ -29,7 +29,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Button, Card, EmptyState, ErrorState, Icon, Note } from '@instantmockapi/ui';
+import {
+  Button,
+  buttonVariants,
+  Card,
+  EmptyState,
+  ErrorState,
+  Icon,
+  Note,
+} from '@instantmockapi/ui';
 import { EntityCard } from '../../../../components/builder/entity-card';
 import { ReviewChanges } from '../../../../components/project/review-changes';
 import { newEntity, type BuilderEntity } from '../../../../lib/builder';
@@ -259,7 +267,10 @@ export default function EditProjectPage() {
               commit and regenerate
             </span>
           </div>
-          <Link className="ui-btn" href={`/projects/${id}/schema`}>
+          <Link
+            className={buttonVariants({ variant: 'secondary' })}
+            href={`/projects/${id}/schema`}
+          >
             Back to schema
           </Link>
         </div>
@@ -276,14 +287,15 @@ export default function EditProjectPage() {
           The project moved to v{draft.data.currentVersion} while this draft was open (it was
           started from v{draft.data.baseVersion}). You can keep editing, but committing will be
           refused until the draft is re-forked — which discards these edits.{' '}
-          <button
+          <Button
             type="button"
-            className="ui-btn ui-btn--sm"
+            variant="secondary"
+            size="sm"
             disabled={reforkDraft.isPending}
             onClick={() => void reforkDraft.run(undefined)}
           >
             {reforkDraft.isPending ? 'Re-forking…' : 'Re-fork from v' + draft.data.currentVersion}
-          </button>
+          </Button>
         </Note>
       )}
 
@@ -348,22 +360,22 @@ export default function EditProjectPage() {
           {problems.length > 0 ? ` · ${problems.length} problem(s)` : ''}
         </span>
         <span className="ui-row">
-          <button
+          <Button
             type="button"
-            className="ui-btn"
+            variant="secondary"
             disabled={discardDraft.isPending}
             onClick={() => void discard()}
           >
             Discard draft
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="ui-btn"
+            variant="secondary"
             disabled={!dirty || saveDraft.isPending || problems.length > 0}
             onClick={() => void save()}
           >
             {saveDraft.isPending ? 'Saving…' : 'Save draft'}
-          </button>
+          </Button>
           <Button
             disabled={saveDraft.isPending || issues.length > 0 || problems.length > 0}
             onClick={() => void review()}

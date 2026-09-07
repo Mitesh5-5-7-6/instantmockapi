@@ -8,7 +8,7 @@
  * "entity name" would hide that renaming it changes the route.
  */
 
-import { Button, Card, Field, Icon, Input, MethodBadge } from '@instantmockapi/ui';
+import { Button, Card, Field, FieldError, Icon, Input, MethodBadge } from '@instantmockapi/ui';
 import { newField } from '../../lib/builder';
 import { endpointPath, type EndpointIssue, type SingleEndpoint } from '../../lib/single-api';
 import { FieldRow } from './field-row';
@@ -74,7 +74,7 @@ export function EndpointCard({
         <span className="ui-mono ui-meta">
           {basePath ? `/${basePath}` : ''}/{path || '{endpoint}'}
         </span>
-        {nameIssue ? <span className="ui-field-error">{nameIssue}</span> : null}
+        {nameIssue ? <FieldError>{nameIssue}</FieldError> : null}
       </div>
 
       <div className="ui-stack" style={{ gap: 'var(--space-3)' }}>

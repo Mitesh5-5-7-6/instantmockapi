@@ -13,6 +13,7 @@
 
 import {
   Button,
+  Card,
   CountdownBadge,
   EmptyState,
   Icon,
@@ -63,7 +64,7 @@ export function HostedApiCard({
 
   if (!url) {
     return (
-      <div className="ui-card">
+      <Card>
         <EmptyState title="Not hosted yet">
           Generate this project to bring its mock API up.{' '}
           {methods.length === 0 ? 'Select at least one HTTP method first.' : ''}
@@ -73,12 +74,12 @@ export function HostedApiCard({
             </Button>
           </div>
         </EmptyState>
-      </div>
+      </Card>
     );
   }
 
   return (
-    <div className="ui-card hosted-card">
+    <Card className="hosted-card">
       <div className="ui-row ui-row--between hosted-card__head">
         <h2>Hosted API</h2>
         <CountdownBadge expiresAt={detail.hosted.expiresAt} />
@@ -118,6 +119,6 @@ export function HostedApiCard({
           </dd>
         </div>
       </dl>
-    </div>
+    </Card>
   );
 }

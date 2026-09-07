@@ -95,6 +95,28 @@ export function Checkbox({ checked, onChange, label, disabled, className }: Chec
   );
 }
 
+/**
+ * One validation message, beside the control it is about.
+ *
+ * A component rather than a class name, and that is the point. This replaced six
+ * loose `<span className="ui-error">` / `"ui-field-error"` spans that had drifted
+ * into *two* sizes for the same job, and the convention guard in
+ * `apps/web/src/lib/error-conventions.test.ts` can now key on an identifier the
+ * type system tracks instead of on a string that a rename would silently orphan.
+ *
+ * `role="alert"` because these appear in response to something the user just
+ * typed or submitted, so the message has to be announced rather than merely
+ * present. Use `Field`'s `error` prop when the control is already inside a
+ * `Field`; this is for the rows and cards that lay out their own labels.
+ */
+export function FieldError({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <span className={cn('text-xs text-destructive', className)} role="alert">
+      {children}
+    </span>
+  );
+}
+
 export interface FieldProps {
   label: string;
   children: ReactNode;

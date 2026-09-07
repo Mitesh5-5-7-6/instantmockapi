@@ -18,7 +18,7 @@
  * existing behaviour untouched.
  */
 
-import { Button, Card, Field, Input, Select } from '@instantmockapi/ui';
+import { Button, Card, Field, FieldError, Input, Select } from '@instantmockapi/ui';
 import { newField, type BuilderEntity } from '../../lib/builder';
 import type { RelationIssue } from '../../lib/relations';
 import { FieldRow } from './field-row';
@@ -125,9 +125,7 @@ export function EntityCard({
       {entityErrors.length > 1 ? (
         <div className="ui-stack" style={{ gap: 2 }}>
           {entityErrors.slice(1).map((issue) => (
-            <span key={issue} className="ui-error" role="alert">
-              {issue}
-            </span>
+            <FieldError key={issue}>{issue}</FieldError>
           ))}
         </div>
       ) : null}

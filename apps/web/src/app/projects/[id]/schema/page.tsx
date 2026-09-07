@@ -19,9 +19,12 @@
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
+  buttonVariants,
   Card,
   EmptyState,
   Icon,
+  MethodBadge,
+  type ApiMethod,
   Note,
   SchemaTree,
   type SchemaTreeEntity,
@@ -78,7 +81,7 @@ export default function SchemaPage() {
           <p className="ui-meta">
             Parse an input source or use the editor to define this project&rsquo;s data model.
           </p>
-          <Link className="ui-btn ui-btn--primary" href={`/projects/${id}/edit`}>
+          <Link className={buttonVariants()} href={`/projects/${id}/edit`}>
             <Icon name="layers" size={16} /> Edit data model
           </Link>
         </EmptyState>
@@ -111,7 +114,7 @@ export default function SchemaPage() {
             Editing opens a draft. Nothing reaches your live API until you review what the change
             affects and commit it — so you can change your mind at any point before then.
           </p>
-          <Link className="ui-btn ui-btn--primary" href={`/projects/${id}/edit`}>
+          <Link className={buttonVariants()} href={`/projects/${id}/edit`}>
             <Icon name="layers" size={16} /> Edit data model
           </Link>
         </Card>
@@ -132,11 +135,9 @@ export default function SchemaPage() {
           <h3>Hosted API accepts</h3>
           <div className="ui-row" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
             {methods.length > 0 ? (
-              methods.map((method) => (
-                <span key={method} className={`ui-method ui-method--${method}`}>
-                  {method}
-                </span>
-              ))
+              // `as ApiMethod`, as the other two MethodBadge call sites do:
+              // `generationConfig.methods` is stored as `string[]`.
+              methods.map((method) => <MethodBadge key={method} method={method as ApiMethod} />)
             ) : (
               <span className="ui-meta">No methods selected.</span>
             )}

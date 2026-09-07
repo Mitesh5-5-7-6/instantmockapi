@@ -18,12 +18,20 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
   Button,
+  buttonVariants,
   Card,
   EmptyState,
   MethodBadge,
   Note,
   Select,
   Stat,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  tableNumeric,
   type ApiMethod,
 } from '@instantmockapi/ui';
 import { useGenerate, useProject, useProjectMetrics, type MetricsDays } from '../../../lib/hooks';
@@ -177,44 +185,45 @@ export default function ProjectOverviewPage() {
                 <p className="ui-meta">
                   Endpoints come from your entities and the HTTP methods you select.
                 </p>
-                <Link className="ui-btn" href={`/projects/${id}/edit`}>
+                <Link
+                  className={buttonVariants({ variant: 'secondary' })}
+                  href={`/projects/${id}/edit`}
+                >
                   Edit data model
                 </Link>
               </EmptyState>
             ) : (
-              <table className="endpoint-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Method</th>
-                    <th scope="col">Endpoint</th>
-                    <th scope="col" className="endpoint-table__num">
-                      Requests
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Method</TableHead>
+                    <TableHead>Endpoint</TableHead>
+                    <TableHead className={tableNumeric}>Requests</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {allEndpoints.slice(0, ENDPOINT_PREVIEW).map((endpoint) => {
                     const count = countByKey.get(`${endpoint.method}|${endpoint.path || '/'}`);
                     return (
-                      <tr key={`${endpoint.method}|${endpoint.path}`}>
-                        <td>
+                      <TableRow key={`${endpoint.method}|${endpoint.path}`}>
+                        <TableCell>
                           <MethodBadge method={endpoint.method as ApiMethod} />
-                        </td>
-                        <td>
-                          <code>{endpoint.path || '/'}</code>
-                        </td>
+                        </TableCell>
+                        <TableCell>
+                          <code className="font-mono text-xs">{endpoint.path || '/'}</code>
+                        </TableCell>
                         {/* A dash, not 0: with no metrics loaded the count is
                             unknown, and an endpoint with genuinely no traffic in
                             the window reads the same way — either is honest, and
                             neither is "zero requests, definitively". */}
-                        <td className="endpoint-table__num">
+                        <TableCell className={tableNumeric}>
                           {count === undefined ? '—' : formatCompact(count)}
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     );
                   })}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             )}
 
             {allEndpoints.length > ENDPOINT_PREVIEW ? (

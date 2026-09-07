@@ -29,7 +29,7 @@ export function SidebarPlanCard() {
   const usage = toPlanUsage(projects.data?.meta.total ?? 0, me.data.limits.maxProjects);
 
   return (
-    <Card className="ui-stack">
+    <Card className="ui-stack ui-sidebar__collapsible">
       <div className="ui-row ui-row--between">
         <strong style={{ textTransform: 'capitalize' }}>{me.data.plan} plan</strong>
       </div>
