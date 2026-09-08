@@ -154,7 +154,34 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     });
   }
 
-  app.get('/healthz', async () => ({ status: 'ok' }));
+  /**
+   * Liveness, plus **which build is answering**.
+   *
+   * `status: 'ok'` alone made a recurring question unanswerable: a request that
+   * fails because the deployed code predates the fix is indistinguishable from
+   * one that fails because the request is wrong. Both times it came up — a
+   * route that existed locally and 404'd in the browser, and an enum value that
+   * validated locally and 400'd against the deployment — the answer took a
+   * round trip to find out, and neither could be settled from the client at all.
+   *
+   * `RENDER_GIT_COMMIT` and `RENDER_GIT_BRANCH` are set by the platform, so
+   * this needs no build step and no generated file. Absent locally, where the
+   * question does not arise.
+   *
+   * A commit SHA of a private repository discloses nothing usable — it is not a
+   * credential and cannot be exchanged for source. The alternative, keeping it
+   * behind auth, would put it out of reach of exactly the debugging session that
+   * needs it.
+   */
+  const startedAt = new Date().toISOString();
+  app.get('/healthz', async () => ({
+    status: 'ok',
+    commit: process.env['RENDER_GIT_COMMIT'] ?? null,
+    branch: process.env['RENDER_GIT_BRANCH'] ?? null,
+    // Distinguishes "deployed but not restarted" from "never deployed", which
+    // the SHA alone cannot.
+    startedAt,
+  }));
 
   await app.register(authRoutes, { prefix: '/v1', config, mailer: options.mailer });
   await app.register(projectRoutes, { prefix: '/v1', config });
