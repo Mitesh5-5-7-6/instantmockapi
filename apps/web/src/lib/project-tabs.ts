@@ -30,6 +30,7 @@ export const PROJECT_TABS: readonly ProjectTab[] = [
   { segment: 'apis', label: 'APIs', icon: 'target' },
   { segment: 'schema', label: 'Schema', icon: 'layers' },
   { segment: 'versions', label: 'Versions', icon: 'clock' },
+  { segment: 'auth', label: 'Auth', icon: 'lock' },
   { segment: 'mock-data', label: 'Mock Data', icon: 'database' },
   { segment: 'logs', label: 'Logs', icon: 'activity' },
   { segment: 'files', label: 'Files', icon: 'file-code' },

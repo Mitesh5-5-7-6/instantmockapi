@@ -217,12 +217,21 @@ export function protectedEntities(ips: InternalProjectSchema): Entity[] {
 export function stampEntityAuth(
   ips: InternalProjectSchema,
   nextMode: AuthMode,
+  /**
+   * The configuration being **left**, when it does not live on `ips`.
+   *
+   * Defaults to the document's own, which is right whenever the mode is being
+   * changed in place. The draft-PATCH path is the case that needs it: the client
+   * sends a whole document already carrying the *new* mode and possibly new
+   * cookie or lifetime settings, while the mode being left is on the stored
+   * draft. Reading the outgoing mode off the incoming document there would find
+   * the new one and stamp nothing.
+   */
+  previous: AuthConfig = projectAuth(ips),
 ): InternalProjectSchema {
-  const outgoing = projectAuth(ips);
-
   for (const entity of ips.entities ?? []) {
     if (nextMode === 'COMBINATION') {
-      entity.authentication = entityAuth(outgoing, entity);
+      entity.authentication = entityAuth(previous, entity);
     } else {
       // Outside combination mode the field cannot be consulted, and leaving a
       // stale value behind is how it later contradicts the mode that is
@@ -231,6 +240,10 @@ export function stampEntityAuth(
     }
   }
 
-  ips.authentication = { ...outgoing, mode: nextMode };
+  // Built from the document's OWN configuration, not from `previous`: the
+  // entity stamps preserve what was true, but every other setting is whatever
+  // the caller asked for. Taking the whole block from `previous` would silently
+  // revert a cookie-mode or lifetime change made in the same edit.
+  ips.authentication = { ...projectAuth(ips), mode: nextMode };
   return ips;
 }

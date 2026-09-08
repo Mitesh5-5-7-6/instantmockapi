@@ -9,12 +9,23 @@
 import { entitySlug, HTTP_METHODS, hostedUrl, type HttpMethod } from '@instantmockapi/shared';
 import {
   FILTER_OPERATORS,
+  authEnabled,
+  entityAuth,
   entityQueryFields,
+  projectAuth,
   queryFeatures,
   type Entity,
   type InternalProjectSchema,
   type QueryFeatures,
 } from '@instantmockapi/ips';
+import {
+  authPaths,
+  authSchemas,
+  authTag,
+  entityAuthNote,
+  protectedSecurity,
+  securitySchemes,
+} from './openapi-auth.js';
 import { entitySchema, type OpenAPISchemaNode } from './schema-mapper.js';
 import { exampleList, firstExample, type EntityExamples } from './examples.js';
 
@@ -209,15 +220,47 @@ export function generateOpenAPI(
 
   const tags: OpenAPISchemaNode[] = [];
 
+  /*
+   * Authentication (Phase 3 §19), resolved once here.
+   *
+   * `entityAuth` is the only reader of the mode, exactly as in the hosting
+   * generator — so the documented `security` and the runtime's gate come from
+   * one function and cannot disagree about which entities are protected.
+   */
+  const auth = projectAuth(ips);
+  const authOn = authEnabled(auth);
+  const secured = authOn ? protectedSecurity(auth) : [];
+
   for (const entity of ips.entities) {
     const schema = entitySchema(entity);
+    const entityProtected = authOn && entityAuth(auth, entity) === 'PROTECTED';
+    /*
+     * §19 asks that PUBLIC/PROTECTED be *clearly shown* per entity, so the note
+     * joins the tag description a human reads in Swagger UI. Appended to the
+     * author's own description rather than replacing it, and a tag is emitted
+     * for an undescribed entity too once auth is on — otherwise the entities
+     * without descriptions would be the ones whose protection is invisible.
+     */
+    const authNote = authOn ? entityAuthNote(entityProtected) : '';
+    const description = [entity.description, authNote].filter((part) => part).join(' ');
+
     if (entity.description) {
       schema['description'] = entity.description;
+    }
+    if (description !== '') {
       // A described entity also becomes a described tag, which is what Swagger
       // UI renders above its operation group.
-      tags.push({ name: entity.name, description: entity.description });
+      tags.push({ name: entity.name, description });
     }
     schemas[entity.name] = schema;
+
+    // Spread onto every operation of this entity. Per-operation rather than
+    // document-level, so an operation that declared nothing cannot silently
+    // inherit protection it does not have — see `openapi-auth.ts`.
+    const security: OpenAPISchemaNode = entityProtected ? { security: secured } : {};
+    const unauthorized = entityProtected
+      ? { '401': errorResponse('Missing or invalid access token') }
+      : {};
 
     const path = `/${entitySlug(entity)}`;
     const itemPath = `${path}/{recordId}`;
@@ -231,8 +274,10 @@ export function generateOpenAPI(
         operationId: `list${entity.name}`,
         summary: `List ${entity.name} records`,
         tags: [entity.name],
+        ...security,
         parameters: listParameters(entity, features),
         responses: {
+          ...unauthorized,
           '200': {
             description: `Paginated ${entity.name} records`,
             content: jsonContent({ type: 'array', items: ref(entity) }, listExample),
@@ -244,12 +289,14 @@ export function generateOpenAPI(
         operationId: `get${entity.name}`,
         summary: `Fetch a single ${entity.name}`,
         tags: [entity.name],
+        ...security,
         // Only include= is meaningful on one record, and only when relations
         // are switched on.
         ...(features.include && includable.length > 0
           ? { parameters: [includeParameter(includable)] }
           : {}),
         responses: {
+          ...unauthorized,
           '200': { description: `The ${entity.name}`, content: jsonContent(ref(entity), example) },
           '404': errorResponse('Record not found'),
         },
@@ -261,8 +308,10 @@ export function generateOpenAPI(
         operationId: `create${entity.name}`,
         summary: `Create a ${entity.name}`,
         tags: [entity.name],
+        ...security,
         requestBody: { required: true, content: jsonContent(ref(entity), example) },
         responses: {
+          ...unauthorized,
           '201': { description: 'Created', content: jsonContent(ref(entity), example) },
           '422': errorResponse('Validation failed against the generated rules'),
         },
@@ -274,8 +323,10 @@ export function generateOpenAPI(
         operationId: `replace${entity.name}`,
         summary: `Replace a ${entity.name}`,
         tags: [entity.name],
+        ...security,
         requestBody: { required: true, content: jsonContent(ref(entity), example) },
         responses: {
+          ...unauthorized,
           '200': { description: 'Replaced', content: jsonContent(ref(entity), example) },
           '404': errorResponse('Record not found'),
           '422': errorResponse('Validation failed against the generated rules'),
@@ -288,8 +339,10 @@ export function generateOpenAPI(
         operationId: `update${entity.name}`,
         summary: `Update a ${entity.name}`,
         tags: [entity.name],
+        ...security,
         requestBody: { required: true, content: jsonContent(ref(entity), example) },
         responses: {
+          ...unauthorized,
           '200': { description: 'Updated', content: jsonContent(ref(entity), example) },
           '404': errorResponse('Record not found'),
           '422': errorResponse('Validation failed against the generated rules'),
@@ -302,7 +355,9 @@ export function generateOpenAPI(
         operationId: `delete${entity.name}`,
         summary: `Delete a ${entity.name}`,
         tags: [entity.name],
+        ...security,
         responses: {
+          ...unauthorized,
           '204': { description: 'Deleted' },
           '404': errorResponse('Record not found'),
         },
@@ -320,6 +375,18 @@ export function generateOpenAPI(
     }
   }
 
+  /*
+   * The Auth API's own paths, added after the entities so they appear last in
+   * the document — and so a reserved-name collision is impossible by the time
+   * we get here: `validateIPS` rejects an entity named `Me` while
+   * authentication is on, which is what stops this overwriting an entity path.
+   */
+  if (authOn) {
+    Object.assign(paths, authPaths(auth));
+    Object.assign(schemas, authSchemas(auth));
+    tags.unshift(authTag(auth));
+  }
+
   const spec: OpenAPISchemaNode = {
     openapi: '3.1.0',
     info: {
@@ -332,7 +399,12 @@ export function generateOpenAPI(
     // empty array.
     ...(tags.length > 0 ? { tags } : {}),
     paths,
-    components: { schemas: schemas },
+    components: {
+      schemas: schemas,
+      // Only when there is an Auth API. A project with authentication off keeps
+      // the exact spec it had before Phase 3 (§26).
+      ...(authOn ? { securitySchemes: securitySchemes(auth) } : {}),
+    },
   };
 
   return { 'openapi.json': JSON.stringify(spec, null, 2) };

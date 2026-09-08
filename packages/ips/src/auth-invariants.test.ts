@@ -262,6 +262,19 @@ const ALLOWED: Record<string, string> = {
   'packages/ips/src/validator.ts':
     "validates the raw value's shape before it is ever resolved — a shape check, not a protection decision",
   'packages/ips/src/types.ts': 'declares the field',
+  /*
+   * The client's mirror of this module.
+   *
+   * `apps/web` may not import `@instantmockapi/ips` (`web-must-not-import-server`),
+   * so the resolution rule is restated there — and that file is the *only* place
+   * in the web app permitted to read the field, exactly as `auth.ts` is here.
+   * Every other web file calls `entityAuthOf`.
+   *
+   * What keeps the copy honest is `apps/web/src/lib/auth-config.test.ts`, which
+   * pins the same 4×3 matrix `invariant 1` pins above. A divergence fails there.
+   */
+  'apps/web/src/lib/auth-config.ts':
+    'owns the client-side resolution; pins the same matrix in its own test since it cannot import this module',
 };
 
 /**

@@ -105,6 +105,22 @@ export interface EnvConfig {
   /** Mock API rate limit (requests per minute per project) */
   readonly mockRateLimitPerMinute: number;
 
+  /**
+   * Credential attempts per minute, per caller IP per project (Phase 3 §23).
+   *
+   * Much tighter than `mockRateLimitPerMinute`, and keyed differently, because
+   * the two limits defend against different things. The project-wide limit stops
+   * a hosted URL becoming an unbounded traffic sink; this stops password
+   * guessing — and under the project-wide limit alone an attacker would get 200
+   * attempts a minute while starving every legitimate caller of the same
+   * allowance.
+   *
+   * Shared across `/signUp`, `/signIn` and `/refresh` rather than one bucket
+   * each: they are all credential operations, and three separate buckets would
+   * simply triple the budget.
+   */
+  readonly mockAuthRateLimitPerMinute: number;
+
   /** IPS maximum nesting depth (doc 04 §F3) */
   readonly maxNestingDepth: number;
 
@@ -230,6 +246,7 @@ export function loadEnvConfig(): EnvConfig {
     googleClientSecret: envStr('GOOGLE_CLIENT_SECRET', ''),
     rateLimitPerMinute: envInt('RATE_LIMIT_PER_MINUTE', 100),
     mockRateLimitPerMinute: envInt('MOCK_RATE_LIMIT_PER_MINUTE', 200),
+    mockAuthRateLimitPerMinute: envInt('MOCK_AUTH_RATE_LIMIT_PER_MINUTE', 10),
     maxNestingDepth: envInt('MAX_NESTING_DEPTH', 10),
     defaultMockRecords: envInt('DEFAULT_MOCK_RECORDS', 25),
     maxMockRecords: envInt('MAX_MOCK_RECORDS', 1000),

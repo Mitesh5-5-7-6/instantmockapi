@@ -6,13 +6,17 @@
 
 import { entitySlug, HTTP_METHODS, type HttpMethod } from '@instantmockapi/shared';
 import {
+  authEnabled,
+  entityAuth,
   entityQueryFields,
+  projectAuth,
   queryFeatures,
   type Entity,
   type InternalProjectSchema,
   type QueryFeatures,
 } from '@instantmockapi/ips';
 import { firstExample, type EntityExamples } from './examples.js';
+import { authFolder, authVariables, bearerHeader } from './postman-auth.js';
 import { serverUrl, type DocsOptions } from './openapi.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -101,24 +105,41 @@ export function generatePostmanCollection(
   const methods = HTTP_METHODS.filter((m): m is HttpMethod => chosen.has(m));
   const features = queryFeatures(ips.generationConfig);
 
+  // Resolved once, from the same helper the runtime and the OpenAPI generator
+  // read — so the `Authorization` headers this emits and the endpoints that
+  // actually demand one are the same set.
+  const auth = projectAuth(ips);
+  const authOn = authEnabled(auth);
+
   const folders: PostmanNode[] = [];
   for (const entity of ips.entities) {
     const entityPath = entitySlug(entity);
     const example = firstExample(examples, entity.name);
     const requests: PostmanNode[] = [];
 
+    /*
+     * §20: protected requests carry `Bearer {{accessToken}}`.
+     *
+     * Per request rather than as collection-level auth, because a COMBINATION
+     * project has both kinds — collection-level auth would send a token to the
+     * public entities too. Harmless at runtime, but it would misrepresent which
+     * endpoints need credentials to anyone reading the collection to find out.
+     */
+    const authHeader =
+      authOn && entityAuth(auth, entity) === 'PROTECTED' ? bearerHeader() : [];
+
     if (methods.includes('GET')) {
       requests.push({
         name: `List ${entity.name}`,
         request: {
           method: 'GET',
-          header: [],
+          header: [...authHeader],
           url: urlWithQuery([entityPath], listQuery(entity, features)),
         },
       });
       requests.push({
         name: `Get ${entity.name} by id`,
-        request: { method: 'GET', header: [], url: url([entityPath, ':recordId']) },
+        request: { method: 'GET', header: [...authHeader], url: url([entityPath, ':recordId']) },
       });
     }
     if (methods.includes('POST')) {
@@ -126,7 +147,7 @@ export function generatePostmanCollection(
         name: `Create ${entity.name}`,
         request: {
           method: 'POST',
-          header: JSON_HEADER,
+          header: [...JSON_HEADER, ...authHeader],
           body: jsonBody(example),
           url: url([entityPath]),
         },
@@ -137,7 +158,7 @@ export function generatePostmanCollection(
         name: `Replace ${entity.name}`,
         request: {
           method: 'PUT',
-          header: JSON_HEADER,
+          header: [...JSON_HEADER, ...authHeader],
           body: jsonBody(example),
           url: url([entityPath, ':recordId']),
         },
@@ -148,7 +169,7 @@ export function generatePostmanCollection(
         name: `Update ${entity.name}`,
         request: {
           method: 'PATCH',
-          header: JSON_HEADER,
+          header: [...JSON_HEADER, ...authHeader],
           body: jsonBody(example),
           url: url([entityPath, ':recordId']),
         },
@@ -157,7 +178,7 @@ export function generatePostmanCollection(
     if (methods.includes('DELETE')) {
       requests.push({
         name: `Delete ${entity.name}`,
-        request: { method: 'DELETE', header: [], url: url([entityPath, ':recordId']) },
+        request: { method: 'DELETE', header: [...authHeader], url: url([entityPath, ':recordId']) },
       });
     }
 
@@ -176,8 +197,14 @@ export function generatePostmanCollection(
     variable: [
       { key: 'baseUrl', value: serverUrl(ips, options) },
       { key: 'recordId', value: '' },
+      // Every credential variable is empty (§20). This collection ships in the
+      // export bundle and may be committed, so a captured token baked in would
+      // be a leaked credential with a seven-day life.
+      ...(authOn ? authVariables(auth) : []),
     ],
-    item: folders,
+    // Authentication first: it is the folder a user has to run before anything
+    // in a protected project works.
+    item: authOn ? [authFolder(auth), ...folders] : folders,
   };
 
   return { 'postman_collection.json': JSON.stringify(collection, null, 2) };
