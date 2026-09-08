@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { PROJECT_TABS, activeProjectTab, projectTabHref, usesWideContent } from './project-tabs';
+import {
+  PROJECT_TABS,
+  projectTabsFor,
+  activeProjectTab,
+  projectTabHref,
+  usesWideContent,
+} from './project-tabs';
 
 const ID = '6a8e85c01cd07f3a6413b60a';
 
@@ -153,5 +159,67 @@ describe('usesWideContent', () => {
     expect(usesWideContent('/projects')).toBe(false);
     expect(usesWideContent('/settings')).toBe(false);
     expect(usesWideContent('/demo-api')).toBe(false);
+  });
+});
+
+describe('tabs per project kind', () => {
+  /**
+   * An Auth API project has no entities, so the tabs that enumerate them would
+   * each render an empty state explaining that this kind of project has none —
+   * a worse answer than not offering the question.
+   */
+  it('hides the entity tabs for an Auth API project', () => {
+    const segments = projectTabsFor('auth').map((tab) => tab.segment);
+    expect(segments).not.toContain('apis');
+    expect(segments).not.toContain('schema');
+    expect(segments).not.toContain('mock-data');
+  });
+
+  it('keeps everything that still has something to show', () => {
+    const segments = projectTabsFor('auth').map((tab) => tab.segment);
+    for (const kept of ['', 'auth', 'versions', 'logs', 'files', 'activity', 'settings']) {
+      expect(segments, kept).toContain(kept);
+    }
+  });
+
+  /**
+   * On a project that *is* authentication, a tab called `Auth` says nothing —
+   * everything there is auth. It takes the name the wizard gave it: what the
+   * user manages is which endpoints exist and what sign-up collects.
+   */
+  it('relabels the auth tab for an Auth API project', () => {
+    const auth = projectTabsFor('auth').find((tab) => tab.segment === 'auth');
+    expect(auth?.label).toBe('Endpoints');
+    // And keeps the honest name where it is one aspect among several.
+    expect(projectTabsFor('project').find((tab) => tab.segment === 'auth')?.label).toBe('Auth');
+  });
+
+  it('gives every other kind the full set', () => {
+    for (const kind of ['project', 'single', undefined] as const) {
+      expect(projectTabsFor(kind), String(kind)).toEqual([...PROJECT_TABS]);
+    }
+  });
+
+  /**
+   * Derived from the one list, so a tab added to `PROJECT_TABS` appears for
+   * every kind unless it is deliberately hidden — and the filesystem guard
+   * above still covers its route.
+   */
+  it('never invents a tab that is not in the master list', () => {
+    for (const kind of ['project', 'single', 'auth'] as const) {
+      for (const tab of projectTabsFor(kind)) {
+        expect(
+          PROJECT_TABS.some((known) => known.segment === tab.segment),
+          `${kind}/${tab.segment}`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('keeps segments unique per kind, so no two tabs claim one route', () => {
+    for (const kind of ['project', 'single', 'auth'] as const) {
+      const segments = projectTabsFor(kind).map((tab) => tab.segment);
+      expect(new Set(segments).size, kind).toBe(segments.length);
+    }
   });
 });

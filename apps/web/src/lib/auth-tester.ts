@@ -116,6 +116,43 @@ export function maskToken(token: string | null): string {
   return token === null || token === '' ? '—' : '••••••••';
 }
 
+/**
+ * What the panel renders for a credential.
+ *
+ * Masked by default with an explicit reveal, rather than either extreme:
+ *
+ * - Always masked was the first version, and it made the panel less useful than
+ *   the curl command it replaces — a developer needs to paste the token
+ *   somewhere, and `copy` alone does not let them check they copied the right
+ *   one.
+ * - Always shown puts a live credential in every screenshot and screen share of
+ *   this page. Not a platform secret, but still a working key to the user's
+ *   hosted API for as long as it lives.
+ *
+ * So the value is one click away and never there by accident. `copyableToken`
+ * is the other half: copying does not require revealing, which is the common
+ * case — paste into curl without the token ever being on screen.
+ */
+export function tokenDisplay(token: string | null, revealed: boolean): string {
+  if (token === null || token === '') {
+    return '—';
+  }
+  return revealed ? token : maskToken(token);
+}
+
+/**
+ * The value a copy action should put on the clipboard, or null when there is
+ * nothing to copy.
+ *
+ * Separate from `tokenDisplay` on purpose: the clipboard gets the real token
+ * whether or not the screen is showing it, and a component that copied whatever
+ * was rendered would put `••••••••` on the clipboard while masked — which is
+ * the bug this shape prevents rather than a hypothetical.
+ */
+export function copyableToken(token: string | null): string | null {
+  return token === null || token === '' ? null : token;
+}
+
 export interface ProbeResult {
   status: number;
   /** The entity path called, so the panel can name it. */
