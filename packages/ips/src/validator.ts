@@ -141,6 +141,25 @@ export function validateIPS(ips: unknown, maxDepth = 10): Result<InternalProject
   }
 
   /*
+   * An Auth API project must actually have an Auth API.
+   *
+   * The kind waives the at-least-one-entity rule below, so without this check a
+   * project with neither entities nor authentication would validate — and
+   * generate an API with no endpoints whatever, which nothing downstream would
+   * flag. The hosted URL would answer an empty index and the author would have
+   * no idea why.
+   */
+  if (schema.kind === 'auth') {
+    const mode = (schema.authentication as { mode?: unknown } | undefined)?.mode;
+    if (mode === undefined || mode === 'NONE') {
+      ctx.errors.push({
+        path: 'authentication',
+        issue: 'an Auth API project needs authentication enabled — it has no other endpoints',
+      });
+    }
+  }
+
+  /*
    * 3c. Entity names the Auth API occupies (Phase 3 §4).
    *
    * The five auth endpoints live at the root of the hosted API — `/signUp`,
@@ -175,7 +194,20 @@ export function validateIPS(ips: unknown, maxDepth = 10): Result<InternalProject
     ctx.errors.push({ path: 'entities', issue: 'entities must be an array' });
   } else {
     const entities = schema.entities;
-    if (entities.length === 0) {
+    /*
+     * An Auth API project has no entities, and that is the point of the kind
+     * (Phase 3).
+     *
+     * Its whole surface is sign-up, sign-in, refresh, `/me` and logout — a
+     * front end being built against a login flow does not need a product
+     * catalogue to exercise it. The alternative was requiring a throwaway
+     * entity to satisfy this rule, which would put a fake resource in the
+     * generated OpenAPI, the Postman collection and the hosted index.
+     *
+     * Waived for this kind alone. Every other project still needs something to
+     * serve, or it generates an API with no endpoints and no explanation.
+     */
+    if (entities.length === 0 && schema.kind !== 'auth') {
       ctx.errors.push({ path: 'entities', issue: 'projects must have at least one entity' });
     }
 

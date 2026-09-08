@@ -456,3 +456,125 @@ describe('creating a project with the wizard’s authentication answer', () => {
     expect(created.statusCode).toBe(422);
   });
 });
+
+/**
+ * The Auth API project kind (Phase 3 §4).
+ *
+ * A third kind alongside `project` and `single`: no entities, and its whole
+ * surface is the five login endpoints. The reason it is a kind rather than a
+ * checkbox is that the alternative — a project with one throwaway entity to
+ * satisfy `validateIPS` — puts a resource nobody wanted into the generated
+ * OpenAPI, the Postman collection and the hosted index.
+ */
+describe('the Auth API project kind', () => {
+  const authOnly = (over: Record<string, unknown> = {}) => ({
+    entities: [],
+    generationConfig: {
+      validators: [],
+      types: ['typescript'],
+      methods: ['GET', 'POST'],
+      mockRecords: 0,
+      features: { search: false, filter: false, sort: false, include: false },
+    },
+    authentication: authConfig('ALL_PUBLIC'),
+    ...over,
+  });
+
+  const createAuthProject = (raw: Record<string, unknown>) =>
+    app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(token),
+      payload: {
+        name: 'Accounts',
+        kind: 'auth',
+        inputSource: { type: 'builder', raw: JSON.stringify(raw) },
+      },
+    });
+
+  it('creates with no entities at all', async () => {
+    const created = await createAuthProject(authOnly());
+    expect(created.statusCode, created.body).toBe(201);
+
+    const project = await Project.findById(created.json().id as string);
+    const ips = project!.ips as InternalProjectSchema;
+    expect(ips.entities).toEqual([]);
+    expect(ips.authentication?.mode).toBe('ALL_PUBLIC');
+    expect(project!.kind).toBe('auth');
+  });
+
+  /**
+   * The waiver is scoped to this kind alone. Every other project still needs
+   * something to serve, or it generates an API with no endpoints and no
+   * explanation.
+   */
+  it('still refuses an entity-less project of any other kind', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(token),
+      payload: {
+        name: 'Empty',
+        kind: 'project',
+        inputSource: { type: 'builder', raw: JSON.stringify(authOnly()) },
+      },
+    });
+    expect(created.statusCode).toBe(422);
+  });
+
+  /**
+   * An Auth API project with no Auth API is nothing at all. Without this check
+   * the kind's waiver would let it validate and generate an empty index, and
+   * the author would have no idea why.
+   */
+  it('refuses an auth project with authentication disabled', async () => {
+    const created = await createAuthProject(authOnly({ authentication: undefined }));
+    expect(created.statusCode).toBe(422);
+
+    const explicitNone = await createAuthProject(
+      authOnly({ authentication: { ...authConfig('ALL_PUBLIC'), mode: 'NONE' } }),
+    );
+    expect(explicitNone.statusCode).toBe(422);
+  });
+
+  it('gets the aut_ public id prefix', async () => {
+    const created = await createAuthProject(authOnly());
+    expect(created.statusCode).toBe(201);
+
+    // Minted lazily, so generate first — the same path any project takes.
+    await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${created.json().id as string}/generate`,
+      headers: authHeader(token),
+      payload: {},
+    });
+
+    const project = await Project.findById(created.json().id as string);
+    expect(project!.publicId).toMatch(/^aut_[0-9a-f]{7,16}$/);
+  });
+
+  it('can add an entity later without becoming invalid', async () => {
+    // A project that grew past pure auth is a reasonable thing to have, and the
+    // waiver is a floor rather than a ceiling.
+    const created = await createAuthProject(authOnly());
+    const projectId = created.json().id as string;
+
+    const draft = await post(`/v1/projects/${projectId}/draft`);
+    expect(draft.statusCode, draft.body).toBe(201);
+
+    const ips = draft.json().ips as InternalProjectSchema;
+    ips.entities = [
+      {
+        name: 'Order',
+        identity: { field: 'id', style: 'uuid' },
+        fields: [{ name: 'label', type: 'string', required: false, default: null, children: [] }],
+        relations: [],
+      },
+    ] as unknown as InternalProjectSchema['entities'];
+
+    const saved = await patch(`/v1/projects/${projectId}/draft`, {
+      ips: ips as unknown as Record<string, unknown>,
+    });
+    expect(saved.statusCode, saved.body).toBe(200);
+  });
+});

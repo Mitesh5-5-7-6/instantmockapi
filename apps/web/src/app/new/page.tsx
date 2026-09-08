@@ -3,11 +3,12 @@
 /**
  * Choose which kind of API to create.
  *
- * The two flows differ in more than styling: a Project models several entities
- * and the relationships between them, and a Single API is one focused surface.
- * That choice sets `kind`, which decides the hosted URL prefix (`prj_` / `sng_`)
- * and cannot be changed afterwards — so it is asked once, up front, rather than
- * inferred from what the author happens to build.
+ * The three flows differ in more than styling: a Project models several
+ * entities and the relationships between them, a Single API is one focused
+ * surface, and an Auth API is the sign-up/sign-in flow on its own with no
+ * entities at all. That choice sets `kind`, which decides the hosted URL prefix
+ * (`prj_` / `sng_` / `aut_`) and cannot be changed afterwards — so it is asked
+ * once, up front, rather than inferred from what the author happens to build.
  */
 
 import Link from 'next/link';
@@ -34,6 +35,19 @@ const CHOICES = [
       'Paste JSON, import a Swagger spec, or build a schema by hand',
       'Validators, types and mock data for one resource',
       'The fastest path to a hosted endpoint',
+    ],
+  },
+  {
+    href: '/new/auth',
+    flow: 'auth' as const,
+    title: 'Auth API',
+    tagline: 'Sign-up and sign-in, nothing else',
+    // Written for someone deciding between the three, so it says what this one
+    // is *for* rather than listing its endpoints — the wizard shows those.
+    points: [
+      'A working login flow to build a front end against',
+      'Real accounts, real tokens, real 401s',
+      'No data model to design first',
     ],
   },
 ];

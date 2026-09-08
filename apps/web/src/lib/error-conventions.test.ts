@@ -86,6 +86,10 @@ describe('raw error blocks', () => {
       'app/projects/[id]/auth/page.tsx',
       'token-lifetime and signup-field messages, each beside the input it belongs to',
     ],
+    // Same messages, same reason: a reserved or duplicated signup-field name,
+    // beside the name input that produced it. The whole-form case here is a
+    // `FormError` at the Generate button.
+    ['app/new/auth/page.tsx', 'signup-field name messages, beside their own inputs'],
   ]);
 
   it('appear only where a message belongs beside its control', () => {

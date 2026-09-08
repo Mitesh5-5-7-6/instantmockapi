@@ -4,7 +4,7 @@
  * Verifies that the manually constructed model matches the IPS specification (doc 04 §F2, doc 09 §2).
  */
 
-import { type Result, ok, err } from '@instantmockapi/shared';
+import { type ProjectKind, type Result, ok, err } from '@instantmockapi/shared';
 import {
   validateIPS,
   type AuthConfig,
@@ -32,10 +32,20 @@ export function parseBuilderPayload(
    * would then show a change nobody made.
    */
   authentication?: AuthConfig,
+  /**
+   * What the project generates (Phase 3 §4).
+   *
+   * Needed **before** validation, not merely on the finished document:
+   * `validateIPS` runs below, and its at-least-one-entity rule is waived for
+   * `auth` alone. Stamping the kind on afterwards would let an entity-less Auth
+   * API project fail the very check the kind exempts it from.
+   */
+  kind?: ProjectKind,
 ): Result<InternalProjectSchema, Error> {
   const ips: InternalProjectSchema = {
     projectId,
     version: 1,
+    ...(kind === undefined ? {} : { kind }),
     entities,
     generationConfig,
     ...(authentication !== undefined && authentication.mode !== 'NONE' ? { authentication } : {}),

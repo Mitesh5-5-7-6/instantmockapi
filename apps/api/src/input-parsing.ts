@@ -4,7 +4,13 @@
  * it is accepted (doc 13 §3).
  */
 
-import { AppError, HTTP_METHODS, type InputSourceType, type Result } from '@instantmockapi/shared';
+import {
+  AppError,
+  HTTP_METHODS,
+  type InputSourceType,
+  type ProjectKind,
+  type Result,
+} from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
 import {
   ALL_QUERY_FEATURES,
@@ -34,6 +40,7 @@ function parseBuilderRaw(
   name: string,
   rawString: string,
   env: EnvConfig,
+  kind: ProjectKind | undefined,
 ): Result<InternalProjectSchema, AppError | Error> {
   let raw: unknown;
   try {
@@ -63,6 +70,7 @@ function parseBuilderRaw(
     // a pre-Phase-3 project has. `validateIPS` inside the adapter is what
     // rejects a malformed one, so nothing needs sanitising here.
     builder.authentication,
+    kind,
   );
 }
 
@@ -76,6 +84,17 @@ export function parseInputSource(
   type: InputSourceType,
   rawString: string,
   env: EnvConfig,
+  /**
+   * What the project generates (Phase 3 §4).
+   *
+   * Optional so every existing caller keeps working, but supplying it is what
+   * makes `ips.kind` meaningful: the field has been declared on
+   * `InternalProjectSchema` since kinds existed and nothing ever wrote it —
+   * which is why `hosting.ts` reads `project.kind` instead. The `auth` kind is
+   * the first thing that genuinely needs it *inside* validation, because its
+   * entity-less model is valid only for that kind.
+   */
+  kind?: ProjectKind,
 ): InternalProjectSchema {
   let result: Result<InternalProjectSchema, AppError | Error>;
   switch (type) {
@@ -86,7 +105,7 @@ export function parseInputSource(
       result = parseSwaggerSpec(projectId, name, rawString, env.maxNestingDepth);
       break;
     case 'builder':
-      result = parseBuilderRaw(projectId, name, rawString, env);
+      result = parseBuilderRaw(projectId, name, rawString, env, kind);
       break;
     case 'docs':
       throw new AppError({
@@ -106,7 +125,12 @@ export function parseInputSource(
       : new AppError({ code: 'PARSE_ERROR', message: result.error.message });
   }
 
-  const validated = validateIPS(result.value, env.maxNestingDepth);
+  // Stamped for every input type, not just the builder, so `ips.kind` means the
+  // same thing however a project was created — and so this second validation
+  // sees the same document the adapter's did.
+  const parsed = kind === undefined ? result.value : { ...result.value, kind };
+
+  const validated = validateIPS(parsed, env.maxNestingDepth);
   if (validated.ok === false) {
     throw validated.error;
   }

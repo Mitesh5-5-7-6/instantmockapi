@@ -15,12 +15,25 @@
  */
 
 /** Public-id prefix per project kind. */
-export const PUBLIC_ID_PREFIX = { project: 'prj', single: 'sng' } as const;
+export const PUBLIC_ID_PREFIX = { project: 'prj', single: 'sng', auth: 'aut' } as const;
 
-/** What a project generates: a relational project, or a single focused API. */
+/**
+ * What a project generates.
+ *
+ * - `project` — several entities with relationships between them.
+ * - `single` — one focused resource.
+ * - `auth` — the Auth API on its own: sign-up, sign-in, refresh, me, logout and
+ *   nothing else (Phase 3). It has **no entities**, which is why `validateIPS`
+ *   waives its "at least one entity" rule for this kind alone.
+ *
+ * An auth-only project is a real thing to want: a front end being built against
+ * a login flow does not need a product catalogue to exercise it, and adding a
+ * throwaway entity just to satisfy a validator would put a fake resource in the
+ * generated docs.
+ */
 export type ProjectKind = keyof typeof PUBLIC_ID_PREFIX;
 
-export const PROJECT_KINDS = ['project', 'single'] as const;
+export const PROJECT_KINDS = ['project', 'single', 'auth'] as const;
 
 /** 24-hex Mongo ObjectId — the legacy, still-supported id form. */
 export const OBJECT_ID_PATTERN = /^[0-9a-f]{24}$/i;
@@ -32,7 +45,7 @@ export const OBJECT_ID_PATTERN = /^[0-9a-f]{24}$/i;
  * ids are longer by default: 16^7 is only 268M values, which reaches a 50%
  * birthday-collision chance at ~19k projects — correct but a hot retry loop.
  */
-export const PUBLIC_ID_PATTERN = /^(prj|sng)_[0-9a-f]{7,16}$/;
+export const PUBLIC_ID_PATTERN = /^(prj|sng|aut)_[0-9a-f]{7,16}$/;
 
 /** Vanity path segment: kebab-case, 1–60 characters. */
 export const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

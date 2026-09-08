@@ -186,8 +186,43 @@ function sendIndex(reply: FastifyReply, ctx: HostedContext, env: EnvConfig): Fas
         // "what can I send?" rather than describing a capability that 400s.
         ...describeQuery(entity, ctx.features),
       })),
+      /*
+       * The Auth API, when the project has one (Phase 3 §4).
+       *
+       * Present for every kind, not just `auth` projects: the index is the
+       * document a caller reads to find the routes, and until now it advertised
+       * only entities. On an Auth API project it would otherwise answer an
+       * empty `entities: []` and nothing else — a live URL that looks broken.
+       *
+       * Each entry says whether it needs a token, because that is the one thing
+       * a caller has to know before trying it.
+       */
+      ...(ctx.auth === null ? {} : { auth: describeAuthApi(base, ctx.auth) }),
     },
   });
+}
+
+/** The auth endpoints a project generates, for the discovery document. */
+function describeAuthApi(
+  base: string,
+  auth: HostedAuthConfig,
+): { method: string; path: string; url: string; requiresToken: boolean }[] {
+  const entry = (method: string, name: string, requiresToken: boolean) => ({
+    method,
+    path: `/${name}`,
+    url: `${base}/${name}`,
+    requiresToken,
+  });
+
+  return [
+    // Omitted when the project does not generate them, so the document never
+    // advertises a route that 404s.
+    ...(auth.signup ? [entry('POST', 'signUp', false)] : []),
+    ...(auth.signin ? [entry('POST', 'signIn', false)] : []),
+    ...(auth.refresh ? [entry('POST', 'refresh', false)] : []),
+    entry('GET', 'me', true),
+    entry('POST', 'logout', false),
+  ];
 }
 
 /**

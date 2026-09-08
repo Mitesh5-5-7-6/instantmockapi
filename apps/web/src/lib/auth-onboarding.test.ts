@@ -1,15 +1,19 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  AUTH_ENDPOINT_OPTIONS,
   PROJECT_CHOICES,
+  REQUIRED_AUTH_ENDPOINTS,
   SIMPLE_CHOICES,
+  authProjectConfig,
+  describeAuthProject,
   configForChoice,
   describeChoice,
   emptySelectionWarning,
   previewEndpoints,
   stampChoices,
 } from './auth-onboarding';
-import { authConfigOf, entityAuthRows } from './auth-config';
+import { authConfigOf, authProblems, entityAuthRows } from './auth-config';
 import type { IpsAuthShape } from './api-types';
 
 /**
@@ -261,5 +265,136 @@ describe('emptySelectionWarning', () => {
   it('is silent for the other answers, which are not ambiguous', () => {
     expect(emptySelectionWarning('NONE', 0)).toBeNull();
     expect(emptySelectionWarning('ALL_PROTECTED', 0)).toBeNull();
+  });
+});
+
+describe('the Auth API project kind', () => {
+  /**
+   * Sign-in is not offered as a choice.
+   *
+   * A project that requires a token with no way to obtain one is a locked door
+   * with no key — which the client's `authProblems` and the server's validator
+   * both refuse. A checkbox for it would be a checkbox for an invalid
+   * configuration.
+   */
+  it('offers only the genuinely optional endpoints', () => {
+    expect(AUTH_ENDPOINT_OPTIONS.map((option) => option.key)).toEqual(['signup', 'refreshToken']);
+  });
+
+  it('names the route each option produces', () => {
+    for (const option of AUTH_ENDPOINT_OPTIONS) {
+      expect(option.route, option.key).toMatch(/^(GET|POST) \//);
+    }
+  });
+
+  it('lists sign-in, /me and logout as always generated', () => {
+    const routes = REQUIRED_AUTH_ENDPOINTS.map((entry) => entry.route);
+    expect(routes).toEqual(['POST /signIn', 'GET /me', 'POST /logout']);
+  });
+
+  /**
+   * `ALL_PUBLIC`, not a fifth mode. The reading is exact: the Auth API exists,
+   * and no *entity* requires a token because there are no entities. Inventing
+   * `AUTH_ONLY` would have to be handled in `entityAuth`, the diff, the
+   * classification table, both generators and the runtime — to express what
+   * this already says.
+   */
+  it('stores ALL_PUBLIC with sign-in always on', () => {
+    const config = authProjectConfig({
+      signup: true,
+      refreshToken: true,
+      cookieAuth: false,
+      userFields: [],
+    });
+    expect(config.mode).toBe('ALL_PUBLIC');
+    expect(config.signin).toBe(true);
+  });
+
+  it('honours the endpoint choices', () => {
+    const config = authProjectConfig({
+      signup: false,
+      refreshToken: false,
+      cookieAuth: true,
+      userFields: [],
+    });
+    expect(config.signup).toBe(false);
+    expect(config.refreshToken).toBe(false);
+    expect(config.cookieAuth).toBe(true);
+    // Still valid — sign-in survives whatever else is turned off.
+    expect(config.signin).toBe(true);
+  });
+
+  it('carries the extra sign-up fields through', () => {
+    const config = authProjectConfig({
+      signup: true,
+      refreshToken: true,
+      cookieAuth: false,
+      userFields: [{ name: 'displayName', type: 'string', required: true }],
+    });
+    expect(config.userFields).toEqual([{ name: 'displayName', type: 'string', required: true }]);
+  });
+
+  /**
+   * The configuration must pass the same validation the Auth tab applies, or
+   * the wizard would create a project the tab immediately reports as broken.
+   */
+  it('produces a configuration with no problems', () => {
+    const config = authProjectConfig({
+      signup: false,
+      refreshToken: false,
+      cookieAuth: false,
+      userFields: [{ name: 'displayName', type: 'string', required: true }],
+    });
+    expect(authProblems({ entities: [], authentication: config })).toEqual([]);
+  });
+
+  it('reports a reserved extra field as a problem', () => {
+    const config = authProjectConfig({
+      signup: true,
+      refreshToken: true,
+      cookieAuth: false,
+      userFields: [{ name: 'passwordHash', type: 'string', required: false }],
+    });
+    expect(authProblems({ entities: [], authentication: config }).length).toBeGreaterThan(0);
+  });
+
+  describe('describeAuthProject', () => {
+    const config = (over: Partial<Parameters<typeof authProjectConfig>[0]> = {}) =>
+      authProjectConfig({
+        signup: true,
+        refreshToken: true,
+        cookieAuth: false,
+        userFields: [],
+        ...over,
+      });
+
+    /** Counts endpoints rather than naming the mode — `ALL_PUBLIC` would be
+        actively confusing on a project whose whole purpose is authentication. */
+    it('counts the endpoints and never names the mode', () => {
+      expect(describeAuthProject(config())).toBe('5 endpoints');
+      expect(describeAuthProject(config())).not.toContain('PUBLIC');
+    });
+
+    it('drops the count when endpoints are turned off', () => {
+      expect(describeAuthProject(config({ signup: false, refreshToken: false }))).toBe(
+        '3 endpoints',
+      );
+    });
+
+    it('mentions the extra fields, with the right plural', () => {
+      expect(
+        describeAuthProject(
+          config({ userFields: [{ name: 'displayName', type: 'string', required: true }] }),
+        ),
+      ).toContain('1 extra field on sign-up');
+    });
+
+    it('ignores an unnamed field row the user has not filled in', () => {
+      expect(
+        describeAuthProject(
+          config({ userFields: [{ name: '', type: 'string', required: false }] }),
+        ),
+      ).toBe('5 endpoints');
+    });
   });
 });

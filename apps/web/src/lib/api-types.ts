@@ -73,7 +73,13 @@ export interface GenerationConfig {
 export interface ProjectSummary {
   id: string;
   name: string;
-  kind: 'project' | 'single';
+  /**
+   * What the project generates.
+   *
+   * `auth` is the Auth API on its own — no entities, just the five login
+   * endpoints (Phase 3). Its hosted ids carry the `aut_` prefix.
+   */
+  kind: 'project' | 'single' | 'auth';
   publicId: string | null;
   slug: string | null;
   description: string | null;
