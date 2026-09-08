@@ -228,9 +228,11 @@ export const versionRoutes: FastifyPluginAsync<VersionRouteOptions> = async (app
         configSnapshot: snapshot.configSnapshot,
       });
 
+      // `rollbackSourceVersion` comes from `toDraftResponse`, which carries it
+      // on every draft read — restating it here would be a second source for
+      // the same fact and a place for the two to drift.
       return reply.send({
         ...toDraftResponse(ctx),
-        rollbackSourceVersion: version,
         analysis: toDraftAnalysisResponse(analyseDraft(ctx)),
       });
     },

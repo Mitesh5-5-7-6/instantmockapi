@@ -27,7 +27,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   Button,
@@ -96,7 +96,21 @@ export default function EditProjectPage() {
    */
   const commitDraft = useAction(useCommitDraft(id), { toast: false });
 
-  const [stage, setStage] = useState<Stage>('edit');
+  /**
+   * `?stage=review` opens straight on the review panel.
+   *
+   * A rollback needs it: `POST /versions/:v/restore` seeds the draft with an
+   * older definition and there is nothing for the user to *edit* — the whole
+   * point is to review what reverting would change and commit it. Landing on
+   * the builder instead would show them a form full of the old schema with no
+   * indication of what had happened.
+   *
+   * Read once, as the initial value, rather than kept in sync: the two stages
+   * are views of one draft and pressing Back should leave the review panel, not
+   * put the user in a URL-vs-state argument with the editor.
+   */
+  const search = useSearchParams();
+  const [stage, setStage] = useState<Stage>(search.get('stage') === 'review' ? 'review' : 'edit');
   const [entities, setEntities] = useState<BuilderEntity[] | null>(null);
   /**
    * The draft the form was loaded from.

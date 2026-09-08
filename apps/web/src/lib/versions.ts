@@ -29,6 +29,16 @@ export interface VersionRowView {
   /** True for the version the hosted API is serving. */
   isLive: boolean;
   /**
+   * §22: whether rolling back to this version would do anything.
+   *
+   * Keyed on the *definition* version, not the live one. A draft is forked from
+   * the current definition, so restoring that version produces a draft
+   * identical to it — a review screen reading "No changes" and a button that
+   * appeared to do nothing. Restoring the version that is merely *live* while
+   * the definition has moved on is a real rollback, and stays offered.
+   */
+  canRollBack: boolean;
+  /**
    * Why publishing is unavailable, when it is worth saying.
    *
    * `null` when the row can publish, or when the reason is obvious from the
@@ -88,6 +98,7 @@ const BLOCKED_BECAUSE: Partial<Record<VersionStatus, string>> = {
 export function toVersionRow(
   version: VersionView,
   publishedVersion: number | null,
+  currentVersion: number | null = null,
 ): VersionRowView {
   const isLive = publishedVersion !== null && version.version === publishedVersion;
   const status = version.status ?? null;
@@ -106,6 +117,10 @@ export function toVersionRow(
     canPublish,
     canRetry: effective === 'FAILED',
     isLive,
+    // Unknown `currentVersion` falls back to the live pointer rather than
+    // offering a no-op rollback — the project detail may still be loading, and
+    // a button that does nothing is worse than one that appears a moment late.
+    canRollBack: version.version !== (currentVersion ?? publishedVersion),
     publishBlockedReason:
       canPublish || isLive || effective === null ? null : (BLOCKED_BECAUSE[effective] ?? null),
   };

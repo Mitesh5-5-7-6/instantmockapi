@@ -35,6 +35,7 @@ import {
 } from '@instantmockapi/ui';
 import type {
   AffectedEndpoint,
+  ArtifactLockReason,
   ChangeRisk,
   DraftAnalysis,
   ImpactReason,
@@ -53,6 +54,21 @@ import type {
  * API-managed and never appears in an impact report at all.
  */
 const REQUIRED_ARTIFACTS = new Set(['hosted_api']);
+
+/**
+ * Why a *situationally* locked artifact cannot be deselected.
+ *
+ * Separate from `REQUIRED_ARTIFACTS`, which is a permanent property of the
+ * artifact. These depend on what this particular commit is, so the server
+ * reports them per analysis (`lockedArtifacts`) and this maps its code to the
+ * sentence. The reason is always stated: "(required)" with no explanation is
+ * how a locked control reads as a bug.
+ */
+const LOCK_REASONS: Record<ArtifactLockReason, string> = {
+  ROLLBACK_RESEED:
+    'Rolling the schema back leaves the stored records shaped for the newer one, so they are reseeded with it. ' +
+    'Skipping this would leave the live API returning fields the restored schema does not declare.',
+};
 
 const ARTIFACT_LABELS: Record<string, string> = {
   hosted_api: 'Hosted API',
@@ -154,9 +170,18 @@ export function ReviewChanges({
 }: ReviewChangesProps) {
   const [skipped, setSkipped] = useState<ReadonlySet<string>>(new Set());
 
+  /** Locked for this commit specifically, with the server's reason attached. */
+  const locks = useMemo(
+    () => new Map(analysis.lockedArtifacts.map((lock) => [lock.artifactType, lock.reason])),
+    [analysis.lockedArtifacts],
+  );
+
   const optional = useMemo(
-    () => analysis.artifacts.filter((artifact) => !REQUIRED_ARTIFACTS.has(artifact)),
-    [analysis.artifacts],
+    () =>
+      analysis.artifacts.filter(
+        (artifact) => !REQUIRED_ARTIFACTS.has(artifact) && !locks.has(artifact),
+      ),
+    [analysis.artifacts, locks],
   );
 
   const toggle = (artifact: string): void => {
@@ -171,7 +196,13 @@ export function ReviewChanges({
     });
   };
 
-  const selected = analysis.artifacts.filter((artifact) => !skipped.has(artifact));
+  // A locked artifact is always sent. The checkbox is disabled so `toggle`
+  // cannot reach it, but the request must be right regardless of what the UI
+  // happens to allow — the server would force it back in anyway, and the two
+  // disagreeing is how a "skipped" artifact silently regenerates.
+  const selected = analysis.artifacts.filter(
+    (artifact) => locks.has(artifact) || !skipped.has(artifact),
+  );
   const attention = analysis.summary.WARNING + analysis.summary.ROUTING + analysis.summary.BREAKING;
 
   if (analysis.changes.length === 0) {
@@ -194,7 +225,11 @@ export function ReviewChanges({
   return (
     <Card className="ui-stack review">
       <header className="ui-stack ui-stack--tight">
-        <h2>Review changes</h2>
+        <h2>
+          {analysis.rollbackSourceVersion === null
+            ? 'Review changes'
+            : `Review rollback to v${analysis.rollbackSourceVersion}`}
+        </h2>
         <p className="ui-meta">
           {analysis.changes.length} {analysis.changes.length === 1 ? 'change' : 'changes'} ·{' '}
           {analysis.affected.length} {analysis.affected.length === 1 ? 'API' : 'APIs'} affected
@@ -202,6 +237,21 @@ export function ReviewChanges({
         </p>
         {analysis.risk !== null && <RiskChip risk={analysis.risk} />}
       </header>
+
+      {/*
+        §22: a rollback is an ordinary commit that happens to restore an older
+        definition, and saying so is the point. A user who pressed "Roll back"
+        expecting an instant revert needs to know they are looking at a draft —
+        and that the direction of the diff below is *forward to the older
+        schema*, which is why removing a field they added reads as a removal.
+      */}
+      {analysis.rollbackSourceVersion !== null && (
+        <Note>
+          This draft holds v{analysis.rollbackSourceVersion}&rsquo;s definition. The changes below
+          are what reverting would do to v{analysis.currentVersion} — nothing is reverted until you
+          commit, and the live API keeps serving until you publish the version that results.
+        </Note>
+      )}
 
       {/* Staleness is fatal to a commit, so it is stated before anything else. */}
       {analysis.stale && (
@@ -278,14 +328,22 @@ export function ReviewChanges({
         <ul className="review-artifacts">
           {analysis.artifacts.map((artifact) => {
             const required = REQUIRED_ARTIFACTS.has(artifact);
+            const lock = locks.get(artifact);
+            const name = ARTIFACT_LABELS[artifact] ?? artifact;
             return (
               <li key={artifact}>
                 <Checkbox
-                  checked={required || !skipped.has(artifact)}
-                  disabled={required || busy}
+                  checked={required || lock !== undefined || !skipped.has(artifact)}
+                  disabled={required || lock !== undefined || busy}
                   onChange={() => toggle(artifact)}
-                  label={`${ARTIFACT_LABELS[artifact] ?? artifact}${required ? ' (required)' : ''}`}
+                  label={`${name}${required || lock !== undefined ? ' (required)' : ''}`}
                 />
+                {lock === undefined ? null : (
+                  // The reason, next to the control it explains. A locked
+                  // checkbox with the label "(required)" and nothing else is
+                  // indistinguishable from a broken one.
+                  <span className="ui-meta">{LOCK_REASONS[lock]}</span>
+                )}
               </li>
             );
           })}

@@ -21,8 +21,9 @@ import {
 import type {
   ApiUser,
   ArtifactContent,
-  DashboardView,
+  ArtifactListMeta,
   ArtifactView,
+  DashboardView,
   DraftAnalysis,
   DraftCommitResult,
   AuthAcknowledgement,
@@ -36,6 +37,7 @@ import type {
   ProjectLogsEnvelope,
   ProjectLogsParams,
   ProjectMetricsView,
+  RestoredDraft,
   VersionChangeSummary,
   VersionChangeType,
   VersionComparison,
@@ -469,7 +471,7 @@ export function useArtifacts(projectId: string | null, version?: number) {
   return useQuery({
     queryKey: ['artifacts', projectId, version ?? 'current'],
     queryFn: () =>
-      apiFetch<{ data: ArtifactView[]; meta: { version: number } }>(
+      apiFetch<{ data: ArtifactView[]; meta: ArtifactListMeta }>(
         `/v1/projects/${projectId}/artifacts${qs}`,
       ),
     enabled: projectId !== null,
@@ -600,16 +602,39 @@ export function useVersions(projectId: string | null) {
   });
 }
 
+/**
+ * Roll back to a version — by seeding the draft, not by writing the definition.
+ *
+ * §22: a rollback is the edit most likely to remove fields and break callers,
+ * so it goes through the same review every ordinary edit does. The mutation
+ * therefore resolves to a **draft**, and the caller's next move is the review
+ * screen, not a success toast on a page that already changed.
+ *
+ * ## Why both caches are seeded rather than invalidated
+ *
+ * The response carries the draft *and* its analysis, so there is nothing left
+ * to fetch. Invalidating `draft` would refetch through `POST /draft` and get
+ * back the draft just seeded; invalidating `impact` would recompute a diff the
+ * server already sent. The review screen would spend both round trips on a
+ * skeleton.
+ *
+ * `versions` is deliberately not invalidated: a restore creates no version and
+ * touches no existing one. The commit is what advances history.
+ */
 export function useRestoreVersion(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (version: number) =>
-      apiFetch<ProjectDetail>(`/v1/projects/${projectId}/versions/${version}/restore`, {
+      apiFetch<RestoredDraft>(`/v1/projects/${projectId}/versions/${version}/restore`, {
         method: 'POST',
       }),
-    onSuccess: () => {
+    onSuccess: (restored) => {
+      const { analysis, ...draft } = restored;
+      queryClient.setQueryData(draftKey(projectId), draft);
+      queryClient.setQueryData(impactKey(projectId), analysis);
+      // The project itself gains an open draft, which its detail payload
+      // reports, so that one is genuinely stale.
       void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
-      void queryClient.invalidateQueries({ queryKey: ['versions', projectId] });
     },
   });
 }
