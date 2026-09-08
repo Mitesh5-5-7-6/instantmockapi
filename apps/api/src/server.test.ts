@@ -212,7 +212,42 @@ describe('error envelope', () => {
   it('healthz is open and healthy', async () => {
     const res = await app.inject({ method: 'GET', url: '/healthz' });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ status: 'ok' });
+    expect(res.json().status).toBe('ok');
+  });
+
+  /**
+   * The build stamp, which is what makes "is my fix deployed?" answerable from
+   * a client. Twice now a failure has been indistinguishable between "the
+   * request is wrong" and "the deployed code predates the fix", and neither
+   * could be settled without shell access to the host.
+   *
+   * Null locally: `RENDER_GIT_COMMIT` is set by the platform, so there is no
+   * build step and no generated file to keep in step.
+   */
+  it('healthz reports which build is answering', async () => {
+    const res = await app.inject({ method: 'GET', url: '/healthz' });
+    const body = res.json() as Record<string, unknown>;
+
+    expect(Object.keys(body).sort()).toEqual(['branch', 'commit', 'startedAt', 'status']);
+    expect(body['commit']).toBeNull();
+    expect(body['branch']).toBeNull();
+    // Distinguishes "deployed but not restarted" from "never deployed", which
+    // a commit SHA alone cannot.
+    expect(typeof body['startedAt']).toBe('string');
+  });
+
+  /**
+   * Open, deliberately.
+   *
+   * Putting the stamp behind authentication would put it out of reach of
+   * exactly the debugging session that needs it. A commit SHA of a private
+   * repository is not a credential and cannot be exchanged for source.
+   */
+  it('needs no token to report the build', async () => {
+    const res = await app.inject({ method: 'GET', url: '/healthz' });
+    expect(res.statusCode).toBe(200);
+    // And nothing sensitive rides along.
+    expect(res.body).not.toMatch(/secret|password|token|mongodb:|redis:/i);
   });
 });
 
