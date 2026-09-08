@@ -7,7 +7,15 @@ import { Schema, model, Document, Types } from 'mongoose';
  * from — the runtime has already parsed the grammar by the time a row is written,
  * so this is recorded rather than re-derived.
  */
-export type ApiLogShape = 'index' | 'collection' | 'record';
+/**
+ * `auth` covers the five Auth API endpoints (Phase 3 §4).
+ *
+ * Its own shape rather than folded into `collection`: an auth request carries no
+ * entity, so grouping it with entity traffic would put every signIn attempt in a
+ * bucket whose `entity` is null and make the endpoint breakdown lie about its
+ * own coverage.
+ */
+export type ApiLogShape = 'index' | 'collection' | 'record' | 'auth';
 
 /** Longest `userAgent` stored. Unbounded, it is a free field for a caller to bloat every row with. */
 export const USER_AGENT_MAX_LENGTH = 256;

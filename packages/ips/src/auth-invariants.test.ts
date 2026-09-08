@@ -312,6 +312,25 @@ const files = ROOTS.flatMap((name) => {
  */
 const RAW_READ = /\.authentication\b/;
 
+/**
+ * Strip comments before scanning.
+ *
+ * Without this the guard punishes documenting itself: a comment reading
+ * *"never read `entity.authentication` directly"* is the most useful sentence a
+ * file near this rule can contain, and it would fail the check that sentence
+ * exists to explain. The first version of this test did exactly that to two
+ * files, which is how the flaw was found.
+ *
+ * Deliberately naive — a `//` inside a string literal is stripped too. That
+ * costs nothing here: the pattern being hunted is a property access, and there
+ * is no reason for one to appear inside a string. Erring toward stripping means
+ * the guard can only ever miss an offender, never invent one, and a missed
+ * offender is caught by the behavioural tests above.
+ */
+function withoutComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+}
+
 describe('invariant 2: the resolver is the only reader', () => {
   it('is scanning the repository at all', () => {
     // A guard that silently matches nothing is worse than no guard.
@@ -333,7 +352,7 @@ describe('invariant 2: the resolver is the only reader', () => {
   it('reads entity.authentication nowhere but the resolver', () => {
     const offenders = files
       .filter((file) => ALLOWED[file.path] === undefined)
-      .filter((file) => RAW_READ.test(file.text))
+      .filter((file) => RAW_READ.test(withoutComments(file.text)))
       .map((file) => file.path);
 
     expect(

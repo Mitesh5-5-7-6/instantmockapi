@@ -18,7 +18,10 @@ export {
 } from './types.js';
 
 export {
+  AUTH_ENDPOINT_NAMES,
   AUTH_MODES,
+  RESERVED_ENTITY_NAMES,
+  type AuthEndpointName,
   DEFAULT_ACCESS_TOKEN_TTL,
   DEFAULT_REFRESH_TOKEN_TTL,
   NO_AUTH,

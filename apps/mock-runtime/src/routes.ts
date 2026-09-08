@@ -18,10 +18,17 @@ import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import { ApiLog, USER_AGENT_MAX_LENGTH, type ApiLogShape } from '@instantmockapi/db';
 import type { StorageClient } from '@instantmockapi/storage';
 import { enabledQueryFeatures, type EntityQueryFields } from '@instantmockapi/ips';
-import type { HostedEntityConfig } from '@instantmockapi/generator-hosting';
+import type { HostedAuthConfig, HostedEntityConfig } from '@instantmockapi/generator-hosting';
 import type { CacheService } from './cache.js';
 import { notFound, resolveHostedProject, type HostedContext } from './hosting.js';
-import { parseHostedPath, refPath, type HostedRefInput, type HostedTarget } from './path.js';
+import { authenticateRequest, logout, me, refresh, signIn, signUp } from './auth/endpoints.js';
+import {
+  parseHostedPath,
+  refPath,
+  type AuthEndpoint,
+  type HostedRefInput,
+  type HostedTarget,
+} from './path.js';
 import {
   NO_QUERY_FIELDS,
   expandIncludes,
@@ -198,6 +205,69 @@ function userAgentOf(request: FastifyRequest): string | null {
     return null;
   }
   return value.slice(0, USER_AGENT_MAX_LENGTH);
+}
+
+/**
+ * Route one Auth API request (Phase 3 §4).
+ *
+ * A disabled endpoint 404s rather than 405ing: §4 lets a project turn signup off
+ * (an invite-only API), and the honest answer for a route that was never
+ * generated is that it does not exist. 405 would advertise it.
+ */
+async function dispatchAuth(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  projectId: string,
+  auth: HostedAuthConfig,
+  endpoint: AuthEndpoint,
+  env: EnvConfig,
+): Promise<FastifyReply> {
+  const deps = { projectId, auth };
+  // Cookies go out `Secure` everywhere but development, where there is no TLS
+  // and a Secure cookie would simply never be stored.
+  const secureCookies = env.nodeEnv !== 'development';
+  const method = request.method.toUpperCase();
+
+  // `VALIDATION_ERROR` with a 405, matching `methodNotAllowed` above: the error
+  // vocabulary has no METHOD_NOT_ALLOWED code, and inventing one here would put
+  // a code in responses that `normalizeError` has no copy for.
+  const expect = (allowed: 'GET' | 'POST'): void => {
+    if (method !== allowed) {
+      void reply.header('allow', allowed);
+      throw new AppError({
+        code: 'VALIDATION_ERROR',
+        statusCode: 405,
+        message: `/${endpoint} accepts ${allowed} only`,
+      });
+    }
+  };
+
+  switch (endpoint) {
+    case 'signup':
+      if (!auth.signup) {
+        throw notFound();
+      }
+      expect('POST');
+      return signUp(deps, request, reply, secureCookies);
+    case 'signin':
+      if (!auth.signin) {
+        throw notFound();
+      }
+      expect('POST');
+      return signIn(deps, request, reply, secureCookies);
+    case 'refresh':
+      if (!auth.refresh) {
+        throw notFound();
+      }
+      expect('POST');
+      return refresh(deps, request, reply, secureCookies);
+    case 'me':
+      expect('GET');
+      return me(deps, request, reply);
+    case 'logout':
+      expect('POST');
+      return logout(deps, request, reply, secureCookies);
+  }
 }
 
 export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): void {
@@ -470,6 +540,23 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
       return sendIndex(reply, ctx, env);
     }
 
+    /*
+     * The Auth API (Phase 3 §4).
+     *
+     * Before the entity lookup, and 404 when the project has no Auth API: a
+     * project with authentication off must answer `/signUp` exactly as it did
+     * before Phase 3, which is "no such route". `validateIPS` reserves these
+     * five names only while authentication is enabled, so an entity legitimately
+     * called `Me` still resolves below on a project that never turned auth on.
+     */
+    if (target.kind === 'auth') {
+      request.hosted.shape = 'auth';
+      if (ctx.auth === null) {
+        throw notFound();
+      }
+      return dispatchAuth(request, reply, ctx.projectId, ctx.auth, target.endpoint, env);
+    }
+
     const entity = ctx.entities.get(target.entity.toLowerCase());
     if (!entity) {
       throw notFound('Entity not found');
@@ -485,6 +572,35 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
     if (!entity.methods.includes(method)) {
       void reply.header('allow', entity.methods.join(', '));
       throw methodNotAllowed(entity);
+    }
+
+    /*
+     * The protection gate (Phase 3 §13, §14).
+     *
+     * After the 405 and before any handler, which is the only correct place:
+     *
+     * - Before the handler, or a protected DELETE would delete the record and
+     *   *then* 401 — the response would be honest and the data would be gone.
+     * - After the 405, so an unselected method on a protected entity still
+     *   answers 405 rather than 401. Otherwise the auth requirement would mask
+     *   which methods exist, and a developer debugging their own project could
+     *   not tell "you need a token" from "this method is off".
+     *
+     * `requiresAuth` is the **resolved** answer the hosting generator wrote, not
+     * the IPS override of a similar name. The runtime is never handed the mode,
+     * so it cannot re-derive protection and get `ALL_PROTECTED` wrong.
+     */
+    if (entity.requiresAuth === true) {
+      if (ctx.auth === null) {
+        // A protected entity with no Auth API cannot be called by anyone. That
+        // is a broken generation rather than a request problem, and answering
+        // 401 would send the caller looking for a /signIn that does not exist.
+        throw new AppError({
+          code: 'INTERNAL_ERROR',
+          message: 'This entity requires authentication but the project has no Auth API',
+        });
+      }
+      await authenticateRequest({ projectId: ctx.projectId, auth: ctx.auth }, request);
     }
 
     if (target.kind === 'collection') {

@@ -4,6 +4,7 @@
 export {
   generateHostingConfig,
   type HostingConfig,
+  type HostedAuthConfig,
   type HostedEntityConfig,
   type HostedFieldRule,
   type HostedIdentityRule,

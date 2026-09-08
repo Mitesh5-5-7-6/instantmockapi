@@ -14,7 +14,7 @@ import type {
   Relation,
   RelationKind,
 } from './types.js';
-import { AUTH_MODES } from './auth.js';
+import { AUTH_MODES, RESERVED_ENTITY_NAMES } from './auth.js';
 import {
   completeRelation,
   entityIdentity,
@@ -138,6 +138,36 @@ export function validateIPS(ips: unknown, maxDepth = 10): Result<InternalProject
   // this is the counterpart that stops junk being *written* in the first place.
   if (schema.authentication !== undefined && schema.authentication !== null) {
     validateAuth(schema.authentication, ctx);
+  }
+
+  /*
+   * 3c. Entity names the Auth API occupies (Phase 3 §4).
+   *
+   * The five auth endpoints live at the root of the hosted API — `/signUp`,
+   * `/signIn`, `/refresh`, `/me`, `/logout` — because that is the shape §4
+   * specifies and it reaches the generated OpenAPI and Postman collection. They
+   * therefore share a namespace with entity paths, and `entitySlug` lowercases,
+   * so an entity called `Me` would claim `/me`.
+   *
+   * Reserved **only when authentication is enabled**, which is what keeps §26:
+   * a project that already has a `Me` entity keeps working untouched, and
+   * turning authentication on gives its author a validation error naming the
+   * entity to rename — rather than a route that silently resolves to the wrong
+   * handler.
+   */
+  if (schema.authentication !== undefined && schema.authentication !== null) {
+    const mode = (schema.authentication as { mode?: unknown }).mode;
+    if (typeof mode === 'string' && mode !== 'NONE' && Array.isArray(schema.entities)) {
+      schema.entities.forEach((entity, index) => {
+        const name = (entity as Partial<Entity> | null)?.name;
+        if (typeof name === 'string' && RESERVED_ENTITY_NAMES.has(name.toLowerCase())) {
+          ctx.errors.push({
+            path: `entities[${index}].name`,
+            issue: `'${name}' collides with the Auth API endpoint /${name.toLowerCase()} — rename the entity or disable authentication`,
+          });
+        }
+      });
+    }
   }
 
   // 4. Validate entities

@@ -156,6 +156,9 @@ importers:
       ioredis:
         specifier: 5.10.1
         version: 5.10.1
+      jose:
+        specifier: ^6.0.10
+        version: 6.2.3
     devDependencies:
       '@types/node':
         specifier: ^22.0.0

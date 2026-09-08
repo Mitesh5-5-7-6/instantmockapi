@@ -62,6 +62,26 @@ export const NO_AUTH: AuthConfig = {
   userFields: [],
 };
 
+/**
+ * The Auth API's endpoint names, lowercased (Phase 3 §4).
+ *
+ * Defined here rather than in the runtime because two consumers need the exact
+ * same list and would otherwise drift: the runtime routes on it, and
+ * `validateIPS` reserves entity names against it. A name added to one and not
+ * the other is either an endpoint no validation protects or a name reserved for
+ * nothing.
+ *
+ * Lowercased because `entitySlug` lowercases, so `/signUp` and `/signup` must
+ * be treated as the same name — otherwise an entity called `Signup` claims a
+ * URL one capital letter away from the Auth API's.
+ */
+export const AUTH_ENDPOINT_NAMES = ['signup', 'signin', 'refresh', 'me', 'logout'] as const;
+
+export type AuthEndpointName = (typeof AUTH_ENDPOINT_NAMES)[number];
+
+/** Set form, for the validator's reservation check and the runtime's router. */
+export const RESERVED_ENTITY_NAMES: ReadonlySet<string> = new Set(AUTH_ENDPOINT_NAMES);
+
 function isAuthMode(value: unknown): value is AuthMode {
   return typeof value === 'string' && (AUTH_MODES as readonly string[]).includes(value);
 }

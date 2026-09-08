@@ -36,6 +36,18 @@ export {
 } from './models/artifact.js';
 export { Job, type IJob, type IJobWorker } from './models/job.js';
 export { MockStore, type IMockStore } from './models/mockStore.js';
+
+// Authentication for the GENERATED mock APIs (Phase 3). Separate from the
+// platform's own auth in `packages/auth` — different user population, different
+// signing key, no shared code paths.
+export { MockUser, type IMockUser } from './models/mockUser.js';
+export { MockSession, type IMockSession } from './models/mockSession.js';
+export {
+  MockAuthSecret,
+  ensureAuthSecret,
+  AUTH_SECRET_BYTES,
+  type IMockAuthSecret,
+} from './models/mockAuthSecret.js';
 export { ApiLog, USER_AGENT_MAX_LENGTH, type IApiLog, type ApiLogShape } from './models/apiLog.js';
 
 // Export Queries
