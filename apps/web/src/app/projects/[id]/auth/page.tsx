@@ -55,7 +55,7 @@ import {
 } from '@instantmockapi/ui';
 import { useDraft, useProject, useSaveDraft } from '../../../../lib/hooks';
 import { useAction } from '../../../../lib/use-action';
-import { notifyFailure } from '../../../../lib/toast';
+import { notifyFailure, notifySuccess } from '../../../../lib/toast';
 import { normalizeError } from '../../../../lib/errors';
 import type { IpsAuthShape } from '../../../../lib/api-types';
 import {
@@ -74,8 +74,9 @@ import {
 import {
   STATUS_LABEL,
   STATUS_TONE,
+  copyableToken,
   describeProbe,
-  maskToken,
+  tokenDisplay,
   probeContradictsConfig,
   testerActions,
   testerStatus,
@@ -105,6 +106,9 @@ export default function AuthPage() {
   const rows = useMemo(() => entityAuthRows(ips), [ips]);
   const problems = useMemo(() => authProblems(ips), [ips]);
   const enabled = authEnabled(config);
+  // An Auth API project has no entities, so the whole-project mode is not a
+  // question it can answer — see the Note below.
+  const isAuthKind = project.data?.kind === 'auth';
 
   const edit = (next: IpsAuthShape): void => setEdited(next);
 
@@ -158,24 +162,41 @@ export default function AuthPage() {
           {project.data?.publishedVersion ?? '—'} until you publish the version this produces.
         </Note>
 
-        <fieldset className="flex flex-col gap-3">
-          <legend className="text-sm font-medium">Mode</legend>
-          {AUTH_MODES.map((mode) => (
-            <label key={mode} className="flex cursor-pointer items-start gap-3">
-              <input
-                type="radio"
-                name="auth-mode"
-                className="mt-1"
-                checked={config.mode === mode}
-                onChange={() => edit(applyMode(ips, mode))}
-              />
-              <span className="flex flex-col gap-0.5">
-                <span className="text-sm">{MODE_LABEL[mode]}</span>
-                <span className="text-xs text-muted-foreground">{MODE_DESCRIPTION[mode]}</span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
+        {/*
+          The mode is not a question an Auth API project can answer.
+
+          All four options describe which *entities* require a token, and this
+          kind has none — so "All protected" and "Per entity" would be choices
+          with no effect, over an entity list that is empty. The screen instead
+          goes straight to what this project actually has: its endpoints and its
+          sign-up fields, which is what the wizard asked.
+        */}
+        {isAuthKind ? (
+          <Note>
+            This project is the login flow on its own, so there are no entities to protect. Add an
+            entity from <span className="ui-mono">Edit data model</span> and the access options
+            appear here.
+          </Note>
+        ) : (
+          <fieldset className="flex flex-col gap-3">
+            <legend className="text-sm font-medium">Mode</legend>
+            {AUTH_MODES.map((mode) => (
+              <label key={mode} className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="radio"
+                  name="auth-mode"
+                  className="mt-1"
+                  checked={config.mode === mode}
+                  onChange={() => edit(applyMode(ips, mode))}
+                />
+                <span className="flex flex-col gap-0.5">
+                  <span className="text-sm">{MODE_LABEL[mode]}</span>
+                  <span className="text-xs text-muted-foreground">{MODE_DESCRIPTION[mode]}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+        )}
       </Card>
 
       {/* §3's entity list. Rendered in every mode, not just COMBINATION: the
@@ -438,6 +459,70 @@ function UserFields({
 }
 
 /**
+ * One credential: masked, revealable, copyable.
+ *
+ * Copy does not require reveal, which is the common case — paste into curl
+ * without the token ever being on screen. `copyableToken` supplies the real
+ * value regardless of what is rendered, so this cannot copy the mask.
+ */
+function Credential({
+  label,
+  token,
+  revealed,
+  onReveal,
+}: {
+  label: string;
+  token: string | null;
+  revealed: boolean;
+  onReveal: () => void;
+}) {
+  const value = copyableToken(token);
+
+  const copy = (): void => {
+    if (value === null) {
+      return;
+    }
+    // A toast either way: a copy that silently did nothing is the worst
+    // outcome, because the user pastes whatever was on the clipboard before.
+    navigator.clipboard.writeText(value).then(
+      () => notifySuccess(`${label} copied`),
+      (cause: unknown) =>
+        notifyFailure({
+          ...normalizeError(cause),
+          title: `Could not copy the ${label.toLowerCase()}`,
+          detail: 'Your browser blocked clipboard access. Reveal it and copy by hand.',
+        }),
+    );
+  };
+
+  return (
+    <span className="flex flex-wrap items-center gap-2 text-muted-foreground">
+      <span>{label}:</span>
+      {/* `break-all` so a revealed JWT wraps instead of stretching the card. */}
+      <span className="ui-mono break-all">{tokenDisplay(token, revealed)}</span>
+      {value === null ? null : (
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onReveal}
+            aria-pressed={revealed}
+            aria-label={
+              revealed ? `Hide the ${label.toLowerCase()}` : `Show the ${label.toLowerCase()}`
+            }
+          >
+            <Icon name="eye" size={14} /> {revealed ? 'Hide' : 'Show'}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={copy}>
+            <Icon name="copy" size={14} /> Copy
+          </Button>
+        </>
+      )}
+    </span>
+  );
+}
+
+/**
  * §21's tester, against the **live** hosted API.
  *
  * Calls the hosted URL directly rather than proxying through the platform API:
@@ -462,6 +547,14 @@ function AuthTester({
   const [email, setEmail] = useState('end-user@example.com');
   const [password, setPassword] = useState('');
   const [session, setSession] = useState<TesterSession | null>(null);
+  /**
+   * Which credentials are currently on screen.
+   *
+   * Reset whenever the session is replaced — signing in again must not inherit
+   * "revealed" from the previous session, or a fresh token appears on screen
+   * without anyone asking for it.
+   */
+  const [revealed, setRevealed] = useState({ access: false, refresh: false });
   const [probe, setProbe] = useState<{
     result: ProbeResult;
     expected: 'PUBLIC' | 'PROTECTED';
@@ -525,6 +618,9 @@ function AuthTester({
   };
 
   const adopt = (body: Record<string, unknown>): void => {
+    // A new session is a new pair of tokens, so nothing carries over from the
+    // last one being on screen.
+    setRevealed({ access: false, refresh: false });
     setSession({
       email,
       accessToken: (body['accessToken'] as string | undefined) ?? null,
@@ -638,6 +734,7 @@ function AuthTester({
                   method: 'POST',
                   body: JSON.stringify({ refreshToken: session?.refreshToken }),
                 });
+                setRevealed({ access: false, refresh: false });
                 setSession(null);
               })
             }
@@ -648,19 +745,27 @@ function AuthTester({
       </div>
 
       {session !== null && (
-        <div className="flex flex-col gap-1 text-xs">
+        <div className="flex flex-col gap-2 text-xs">
           <span className="text-muted-foreground">
             User: <span className="ui-mono">{session.email}</span>
           </span>
-          {/* Masked, not rendered. These are the user's own credentials for
-              their own mock API, but a token printed as text ends up in
-              screenshots and screen shares. */}
-          <span className="text-muted-foreground">
-            Access token: <span className="ui-mono">{maskToken(session.accessToken)}</span>
-          </span>
-          <span className="text-muted-foreground">
-            Refresh token: <span className="ui-mono">{maskToken(session.refreshToken)}</span>
-          </span>
+          {/* Masked by default, one click from visible, and copyable without
+              being visible. These are the user's own credentials for their own
+              mock API — but a token printed as text ends up in every screenshot
+              and screen share of this page, so it is never on screen by
+              accident. */}
+          <Credential
+            label="Access token"
+            token={session.accessToken}
+            revealed={revealed.access}
+            onReveal={() => setRevealed((current) => ({ ...current, access: !current.access }))}
+          />
+          <Credential
+            label="Refresh token"
+            token={session.refreshToken}
+            revealed={revealed.refresh}
+            onReveal={() => setRevealed((current) => ({ ...current, refresh: !current.refresh }))}
+          />
         </div>
       )}
 

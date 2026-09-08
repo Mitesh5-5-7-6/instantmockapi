@@ -5,8 +5,10 @@ import {
   describeProbe,
   maskToken,
   probeContradictsConfig,
+  copyableToken,
   testerActions,
   testerStatus,
+  tokenDisplay,
   type TesterSession,
 } from './auth-tester';
 
@@ -177,5 +179,35 @@ describe('probeContradictsConfig', () => {
 
   it('does not flag a public entity answering normally', () => {
     expect(probeContradictsConfig({ status: 200, path: 'product' }, 'PUBLIC', false)).toBe(false);
+  });
+});
+
+describe('revealing and copying a credential', () => {
+  const TOKEN = 'header.payload.signature';
+
+  it('is masked until revealed', () => {
+    expect(tokenDisplay(TOKEN, false)).toBe('••••••••');
+    expect(tokenDisplay(TOKEN, true)).toBe(TOKEN);
+  });
+
+  it('shows a dash for nothing, revealed or not', () => {
+    // Cookie mode holds no token, and "••••••••" there would imply one exists.
+    expect(tokenDisplay(null, true)).toBe('—');
+    expect(tokenDisplay('', true)).toBe('—');
+  });
+
+  /**
+   * The bug this shape prevents rather than a hypothetical: a component that
+   * copied whatever was rendered would put `••••••••` on the clipboard while
+   * masked. The clipboard gets the real token regardless of what is on screen.
+   */
+  it('copies the real token even while masked', () => {
+    expect(copyableToken(TOKEN)).toBe(TOKEN);
+    expect(tokenDisplay(TOKEN, false)).not.toBe(copyableToken(TOKEN));
+  });
+
+  it('has nothing to copy when there is no token', () => {
+    expect(copyableToken(null)).toBeNull();
+    expect(copyableToken('')).toBeNull();
   });
 });
