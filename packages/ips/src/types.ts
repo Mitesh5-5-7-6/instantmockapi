@@ -213,6 +213,89 @@ export interface Entity {
    * per endpoint. Absent on documents written before it existed.
    */
   description?: string;
+  /**
+   * Whether this entity's endpoints require authentication (Phase 3 §3).
+   *
+   * **Optional forever**, like `id` and `relations` — every entity written
+   * before Phase 3 has none, and a project with authentication disabled has no
+   * use for it. Read it through `entityAuth`, never raw: the answer depends on
+   * the project's mode, and reading this field directly gets `NONE` and
+   * `ALL_PROTECTED` projects wrong.
+   *
+   * Set on **every** entity when the mode moves to `COMBINATION`, so switching
+   * from `ALL_PUBLIC` does not silently flip the whole API to protected. See
+   * `stampEntityAuth`.
+   */
+  authentication?: EntityAuth;
+}
+
+/* ────────────────────────── authentication ──────────────────────────
+ *
+ * Phase 3. This is authentication **for the generated mock API** — the
+ * developer's end users — and has nothing to do with the platform's own auth in
+ * `packages/auth`, which signs in project owners. The two share all five
+ * endpoint names and no code: a token minted here must never authenticate
+ * against the platform.
+ */
+
+/**
+ * How the project as a whole treats authentication (§15).
+ *
+ * `NONE` is not the same as `ALL_PUBLIC`. Both leave every business endpoint
+ * open, but `NONE` also means the Auth API does not exist — there is nothing to
+ * sign in to. That distinction is what §26 rests on: a project written before
+ * Phase 3 resolves to `NONE` and behaves exactly as it did.
+ */
+export type AuthMode = 'NONE' | 'ALL_PUBLIC' | 'ALL_PROTECTED' | 'COMBINATION';
+
+/** Whether one entity's endpoints require a token. Entity level, never method level (§2C). */
+export type EntityAuth = 'PUBLIC' | 'PROTECTED';
+
+/**
+ * A custom field on the signed-up user, beyond email and password (§5).
+ *
+ * Deliberately a much smaller vocabulary than `Field`: an auth user is not an
+ * IPS entity (the Phase 3 decision), so these describe a request body shape
+ * rather than a generated model. No relations, no nesting, no validation tree.
+ */
+export interface AuthUserField {
+  name: string;
+  type: 'string' | 'number' | 'boolean';
+  required: boolean;
+}
+
+/**
+ * Authentication configuration, versioned with the definition (§15, §17).
+ *
+ * ## Why this sits at the IPS root
+ *
+ * Sibling to `entities` and `generationConfig`, not inside the latter. Phase 2
+ * found that `ips.generationConfig` goes stale relative to the `configSnapshot`
+ * a version records, so every comparison has to overlay the snapshot's copy
+ * over the embedded one. Living at the root keeps this out of that entirely:
+ * `configSnapshot` only ever shadows `generationConfig`.
+ *
+ * ## Why the token lifetimes are here despite not affecting any artifact
+ *
+ * §17 requires an expiry change to appear in version history and the visual
+ * diff, so it has to be part of the versioned definition. Its *impact* is then
+ * scoped to `hosted_api` alone — a TTL edit must not rebuild the docs.
+ */
+export interface AuthConfig {
+  mode: AuthMode;
+  /** Whether `POST /signUp` is generated. §4 keeps it and signin separable. */
+  signup: boolean;
+  signin: boolean;
+  /** Whether `POST /refresh` exists and refresh tokens are issued. */
+  refreshToken: boolean;
+  /** HttpOnly cookie mode (§9). Changes CORS and the signin response shape. */
+  cookieAuth: boolean;
+  /** Duration string, e.g. `15m`. Default 15 minutes (§7). */
+  accessTokenExpiresIn: string;
+  /** Duration string, e.g. `7d`. Default 7 days (§8). */
+  refreshTokenExpiresIn: string;
+  /** Extra signup fields beyond email and password (§5). */
+  userFields: AuthUserField[];
 }
 
 /**
@@ -258,4 +341,12 @@ export interface InternalProjectSchema {
   entities: Entity[];
   /** Generation settings associated with this version */
   generationConfig: GenerationConfig;
+  /**
+   * Authentication for the generated API (Phase 3 §15).
+   *
+   * Optional because every project written before Phase 3 has none, and §26
+   * requires those to behave identically — read it through `projectAuth`, never
+   * raw, so an absent block resolves to mode `NONE` rather than `undefined`.
+   */
+  authentication?: AuthConfig;
 }

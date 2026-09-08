@@ -154,6 +154,28 @@ describe('restore seeds the draft', () => {
     expect(draft?.rollbackSourceVersion).toBe(1);
   });
 
+  it('still says so on an ordinary draft read, so a reload does not forget', async () => {
+    // The commit forces `mock_data` on a schema-affecting rollback whether or
+    // not the client knows it is one. If a browser reload — which loads the
+    // draft through `POST /draft` — came back without this, the review screen
+    // would stop locking `mock_data` and stop warning, while the server carried
+    // on forcing it. The user would be told one thing and given another.
+    await removeAFieldAfterSnapshot();
+    await restore(1);
+
+    const reopened = await post(`/v1/projects/${projectId}/draft`);
+    expect(reopened.statusCode, reopened.body).toBe(200);
+    expect(reopened.json().rollbackSourceVersion).toBe(1);
+  });
+
+  it('reports null on a draft that is an ordinary edit', async () => {
+    // Distinguishable from a rollback of v0, which cannot exist, and from the
+    // field being absent — the client branches on it.
+    expect((await post(`/v1/projects/${projectId}/draft`)).statusCode).toBe(201);
+    const draft = (await post(`/v1/projects/${projectId}/draft`)).json();
+    expect(draft.rollbackSourceVersion).toBeNull();
+  });
+
   it('takes over an open draft rather than refusing', async () => {
     // One draft per project, so a rollback has to claim it. Refusing while
     // unsaved edits exist would leave the user unable to roll back without
@@ -333,6 +355,110 @@ describe('mock data is forced on a schema-affecting rollback', () => {
     // impact set — what must NOT happen is the rollback forcing it in when the
     // caller pruned it and no shape moved.
     expect(job?.requestedArtifacts).toEqual(['hosted_api']);
+  });
+});
+
+/**
+ * The lock is reported, not left for the client to derive.
+ *
+ * The server forces `mock_data` either way, so a UI that worked the rule out
+ * for itself would drift the first time `SHAPE_KINDS` gained a member — and the
+ * failure would be silent: a checkbox offered as optional, unticked, and
+ * regenerated anyway. `lockedArtifacts` and `forceMockDataOnRollback` read the
+ * same function, and these tests are what hold them to it.
+ */
+describe('the review payload names what it will force', () => {
+  const impact = () => get(`/v1/projects/${projectId}/draft/impact`);
+
+  it('reports mock_data as locked, with a reason code', async () => {
+    await removeAFieldAfterSnapshot();
+    await restore(1);
+
+    const body = (await impact()).json();
+    expect(body.rollbackSourceVersion).toBe(1);
+    expect(body.lockedArtifacts).toEqual([
+      { artifactType: 'mock_data', reason: 'ROLLBACK_RESEED' },
+    ]);
+  });
+
+  it('reports the same lock on the restore response itself', async () => {
+    // So the review screen renders correctly on the payload it already has,
+    // without a second request whose answer could differ.
+    await removeAFieldAfterSnapshot();
+    const body = (await restore(1)).json();
+    expect(body.analysis.lockedArtifacts).toEqual([
+      { artifactType: 'mock_data', reason: 'ROLLBACK_RESEED' },
+    ]);
+  });
+
+  it('locks nothing on an ordinary edit', async () => {
+    expect((await post(`/v1/projects/${projectId}/draft`)).statusCode).toBe(201);
+    const body = (await impact()).json();
+    expect(body.lockedArtifacts).toEqual([]);
+    expect(body.rollbackSourceVersion).toBeNull();
+  });
+
+  it('locks nothing on a rollback that changes no record shape', async () => {
+    // Matches `does not force it for a rollback that changes no record shape`:
+    // the same predicate decides both, which is the point of reporting it.
+    await history();
+    await patch(`/v1/projects/${projectId}`, {
+      generationConfig: { ...(await reload()).generationConfig, mockRecords: 7 },
+    });
+    await restore(1);
+
+    expect((await impact()).json().lockedArtifacts).toEqual([]);
+  });
+
+  it('keeps the lock when the user edits the restored definition further', async () => {
+    /*
+     * A rollback draft is still an editable draft — "Back to editing", change
+     * something, review again. `PATCH /draft` must not clear
+     * `rollbackSourceVersion`, and the reason is the reseed rather than
+     * bookkeeping: the records on disk were seeded for the newer schema whether
+     * or not the user has since tweaked the restored one, so the staleness this
+     * forces a fix for is unaffected by the edit.
+     *
+     * The lineage stays honest too — the new version's definition did come
+     * from v1, plus edits.
+     */
+    await removeAFieldAfterSnapshot();
+    await restore(1);
+
+    const draft = (await post(`/v1/projects/${projectId}/draft`)).json();
+    const edited = draft.ips as InternalProjectSchema;
+    leaf(edited, 'name').required = !leaf(edited, 'name').required;
+    const saved = await patch(`/v1/projects/${projectId}/draft`, {
+      ips: edited as unknown as Record<string, unknown>,
+    });
+    expect(saved.statusCode, saved.body).toBe(200);
+    expect(saved.json().rollbackSourceVersion).toBe(1);
+
+    expect((await impact()).json().lockedArtifacts).toEqual([
+      { artifactType: 'mock_data', reason: 'ROLLBACK_RESEED' },
+    ]);
+
+    const response = await commit(['hosted_api']);
+    expect(response.statusCode, response.body).toBe(202);
+    const job = await Job.findById(response.json().job.jobId);
+    expect(job?.requestedArtifacts).toContain('mock_data');
+    // And the version still records where the definition came from.
+    expect((await Version.findOne({ projectId, version: 3 }))?.changeType).toBe('ROLLBACK');
+  });
+
+  it('agrees with what the commit actually regenerates', async () => {
+    // The two together are the guarantee: whatever the payload says is locked
+    // is present in the job, and nothing else was forced in behind the user.
+    await removeAFieldAfterSnapshot();
+    await restore(1);
+
+    const locked = ((await impact()).json().lockedArtifacts as { artifactType: string }[]).map(
+      (lock) => lock.artifactType,
+    );
+    const response = await commit(['hosted_api']);
+    const job = await Job.findById(response.json().job.jobId);
+
+    expect(job?.requestedArtifacts).toEqual(['hosted_api', ...locked]);
   });
 });
 

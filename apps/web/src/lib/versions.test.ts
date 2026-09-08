@@ -213,3 +213,37 @@ describe('describeChangeType', () => {
     expect(describeChangeType(version({ changeType: 'INITIAL' }))).toBe('Initial version');
   });
 });
+
+describe('who can be rolled back to', () => {
+  /**
+   * Keyed on the definition version, not the live one. The draft a rollback
+   * seeds is forked from the current definition, so restoring *that* version
+   * produces a draft identical to it — the review screen would read "No
+   * changes" and the button would look broken.
+   */
+  const rollback = (at: number, published: number | null, current: number | null) =>
+    toVersionRow(version({ version: at }), published, current).canRollBack;
+
+  it('offers a rollback to an older version', () => {
+    expect(rollback(2, 4, 4)).toBe(true);
+  });
+
+  it('does not offer a rollback to the current definition', () => {
+    expect(rollback(4, 4, 4)).toBe(false);
+  });
+
+  /**
+   * The live version is a real rollback target when the definition has moved
+   * past it — v4 live, v5 committed and generating: reverting the *definition*
+   * to v4 is a genuine edit even though callers already get v4.
+   */
+  it('still offers a rollback to the live version when the definition has moved on', () => {
+    expect(rollback(4, 4, 5)).toBe(true);
+  });
+
+  it('falls back to the live pointer while the project is still loading', () => {
+    // Rather than offering a rollback that would turn out to be a no-op.
+    expect(rollback(4, 4, null)).toBe(false);
+    expect(rollback(2, 4, null)).toBe(true);
+  });
+});

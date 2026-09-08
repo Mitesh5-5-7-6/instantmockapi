@@ -12,7 +12,7 @@ vi.mock('@instantmockapi/queue', async (importOriginal) => {
 });
 
 import type { FastifyInstance } from 'fastify';
-import { Artifact } from '@instantmockapi/db';
+import { Artifact, Project } from '@instantmockapi/db';
 import { artifactKey, bundleKey, encodeBundle } from '@instantmockapi/storage';
 import {
   authHeader,
@@ -62,7 +62,12 @@ describe('GET /v1/projects/:id/artifacts', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.meta).toEqual({ version: 1 });
+    // `meta` gained `publishedVersion` and a §18 sync report in Phase 2. The
+    // keys stay pinned rather than loosened to `toMatchObject`, so a future
+    // addition to this payload is a failing test rather than an unnoticed one.
+    expect(Object.keys(body.meta).sort()).toEqual(['publishedVersion', 'sync', 'version']);
+    expect(body.meta.version).toBe(1);
+    expect(body.meta.publishedVersion).toBeNull();
     expect(body.data.length).toBeGreaterThan(0);
     expect(body.data[0]).toMatchObject({
       projectId,
@@ -95,6 +100,80 @@ describe('GET /v1/projects/:id/artifacts', () => {
       headers: authHeader(session.accessToken),
     });
     expect(badType.statusCode).toBe(400);
+  });
+});
+
+/**
+ * §18's warning, at the route.
+ *
+ * `evaluateSyncState` is unit-tested in `@instantmockapi/shared`; what can only
+ * be checked here is the wiring — that the baseline is the project's
+ * `publishedVersion`, that the expected set comes from its generation config,
+ * and that a pinned version is not given a sync report at all.
+ */
+describe('the sync report on GET /v1/projects/:id/artifacts', () => {
+  const list = (query = '') =>
+    app.inject({
+      method: 'GET',
+      url: `/v1/projects/${projectId}/artifacts${query}`,
+      headers: authHeader(session.accessToken),
+    });
+
+  it('reports nothing out of sync while nothing has ever been published', async () => {
+    // The first generation is still pending, so every artifact is missing —
+    // but nothing is being served, so nothing can disagree with it.
+    const body = (await list()).json();
+    expect(body.meta.sync.outOfSync).toEqual([]);
+    expect(body.meta.sync.publishedVersion).toBeNull();
+  });
+
+  it('names the artifact a partial regeneration left behind', async () => {
+    // v1 generated and published in full...
+    await Artifact.updateMany({ projectId, version: 1 }, { $set: { status: 'completed' } });
+    await Project.updateOne(
+      { _id: projectId },
+      { $set: { currentVersion: 2, publishedVersion: 2 } },
+    );
+    // ...then v2 regenerated the schema and the hosted API, but the user
+    // deselected the docs. The OpenAPI on disk now describes v1.
+    await Artifact.create([
+      { projectId, version: 2, artifactType: 'hosted_api', status: 'completed' },
+      { projectId, version: 2, artifactType: 'zod', status: 'completed' },
+    ]);
+
+    const body = (await list()).json();
+    expect(body.meta.publishedVersion).toBe(2);
+    expect(body.meta.sync.outOfSync).toContain('openapi');
+    expect(body.meta.sync.outOfSync).not.toContain('zod');
+    expect(body.meta.sync.outOfSync).not.toContain('hosted_api');
+    // Behind is not the same as absent: every type completed at v1.
+    expect(body.meta.sync.missing).toEqual([]);
+    const openapi = body.meta.sync.artifacts.find(
+      (state: { artifactType: string }) => state.artifactType === 'openapi',
+    );
+    expect(openapi.generatedVersion).toBe(1);
+  });
+
+  it('does not report an artifact the project never asked for', async () => {
+    // A project generating no Yup schemas has not lost one.
+    await Project.updateOne(
+      { _id: projectId },
+      { $set: { 'generationConfig.validators': ['zod'] } },
+    );
+    const body = (await list()).json();
+    expect(body.meta.sync.missing).not.toContain('yup');
+    expect(
+      body.meta.sync.artifacts.map((s: { artifactType: string }) => s.artifactType),
+    ).not.toContain('yup');
+  });
+
+  it('gives a pinned version no sync report', async () => {
+    // Asking for a specific version is asking what that version holds.
+    // "Out of sync" is a property of the registry's current state, not of a
+    // snapshot, so answering it here would be answering a different question.
+    const body = (await list('?version=1')).json();
+    expect(body.meta.sync).toBeNull();
+    expect(body.meta.version).toBe(1);
   });
 });
 

@@ -14,6 +14,7 @@ import type {
   Relation,
   RelationKind,
 } from './types.js';
+import { AUTH_MODES } from './auth.js';
 import {
   completeRelation,
   entityIdentity,
@@ -129,6 +130,16 @@ export function validateIPS(ips: unknown, maxDepth = 10): Result<InternalProject
     }
   }
 
+  // 3b. Validate authentication (Phase 3 §15)
+  //
+  // Absent is valid and means mode NONE — §26's compatibility rule. Present and
+  // malformed is an error the author must see: `projectAuth` deliberately
+  // tolerates junk so a comparison of two historical versions cannot crash, and
+  // this is the counterpart that stops junk being *written* in the first place.
+  if (schema.authentication !== undefined && schema.authentication !== null) {
+    validateAuth(schema.authentication, ctx);
+  }
+
   // 4. Validate entities
   if (!Array.isArray(schema.entities)) {
     ctx.errors.push({ path: 'entities', issue: 'entities must be an array' });
@@ -195,6 +206,28 @@ export function validateIPS(ips: unknown, maxDepth = 10): Result<InternalProject
       if (ent.identity !== undefined) {
         validateIdentity(ent.identity, `${path}.identity`, ctx);
       }
+
+      /*
+       * Entity protection (Phase 3 §3).
+       *
+       * The value only, not whether it belongs here: a stale stamp left by a
+       * previous stint in COMBINATION mode is harmless, because `entityAuth`
+       * ignores the field outside that mode. Rejecting its presence would break
+       * a PATCH that faithfully round-trips an older document.
+       *
+       * The value itself does matter. `entityAuth` fails closed on anything it
+       * does not recognise, so a lowercase `'public'` silently protects the
+       * entity — safe, but not what the author wrote, and they would have no
+       * way to find out except by getting a 401.
+       */
+      if (ent.authentication !== undefined) {
+        if (ent.authentication !== 'PUBLIC' && ent.authentication !== 'PROTECTED') {
+          ctx.errors.push({
+            path: `${path}.authentication`,
+            issue: "authentication must be 'PUBLIC' or 'PROTECTED'",
+          });
+        }
+      }
     });
 
     // Relations are validated once every entity is known, so targets resolve and
@@ -214,6 +247,111 @@ export function validateIPS(ips: unknown, maxDepth = 10): Result<InternalProject
   }
 
   return ok(schema as InternalProjectSchema);
+}
+
+/** `15m`, `7d`, `900s` — the duration grammar §7 and §8 write their defaults in. */
+const DURATION_REGEX = /^[1-9][0-9]*(s|m|h|d)$/;
+
+/** Reserved on the auth user, so a custom field cannot shadow or leak one. */
+const RESERVED_USER_FIELDS = new Set([
+  'id',
+  'email',
+  'password',
+  'passwordHash',
+  'createdAt',
+  'updatedAt',
+]);
+
+/**
+ * Validate the authentication block (Phase 3 §15, §23).
+ *
+ * The reserved-name check is the security-relevant one. §23 forbids exposing a
+ * password hash, and §10 forbids returning one from `/me` — but a custom signup
+ * field named `passwordHash` would be written from the request body and echoed
+ * back as ordinary user data, defeating both rules without either being
+ * violated in code. Rejecting the name is the only place that can be caught.
+ */
+function validateAuth(authentication: unknown, ctx: ValidationCtx): void {
+  if (typeof authentication !== 'object' || Array.isArray(authentication)) {
+    ctx.errors.push({ path: 'authentication', issue: 'authentication must be an object' });
+    return;
+  }
+  const value = authentication as Record<string, unknown>;
+
+  if (!(AUTH_MODES as readonly unknown[]).includes(value['mode'])) {
+    ctx.errors.push({
+      path: 'authentication.mode',
+      issue: `mode must be one of ${AUTH_MODES.join(', ')}`,
+    });
+  }
+
+  for (const flag of ['signup', 'signin', 'refreshToken', 'cookieAuth'] as const) {
+    if (value[flag] !== undefined && typeof value[flag] !== 'boolean') {
+      ctx.errors.push({ path: `authentication.${flag}`, issue: `${flag} must be a boolean` });
+    }
+  }
+
+  for (const key of ['accessTokenExpiresIn', 'refreshTokenExpiresIn'] as const) {
+    const ttl = value[key];
+    if (ttl !== undefined && (typeof ttl !== 'string' || !DURATION_REGEX.test(ttl))) {
+      ctx.errors.push({
+        path: `authentication.${key}`,
+        issue: `${key} must be a duration such as 15m, 24h or 7d`,
+      });
+    }
+  }
+
+  // A project that requires authentication with no way to obtain a token is a
+  // locked door with no key: every endpoint 401s and nothing can ever sign in.
+  // Rejecting it here beats generating an API nobody can call.
+  if (value['mode'] !== 'NONE' && value['signin'] === false) {
+    ctx.errors.push({
+      path: 'authentication.signin',
+      issue:
+        'signin cannot be disabled while authentication is enabled — nothing could obtain a token',
+    });
+  }
+
+  const fields = value['userFields'];
+  if (fields !== undefined) {
+    if (!Array.isArray(fields)) {
+      ctx.errors.push({ path: 'authentication.userFields', issue: 'userFields must be an array' });
+      return;
+    }
+    const seen = new Set<string>();
+    fields.forEach((field, index) => {
+      const path = `authentication.userFields[${index}]`;
+      if (typeof field !== 'object' || field === null) {
+        ctx.errors.push({ path, issue: 'each user field must be an object' });
+        return;
+      }
+      const entry = field as Record<string, unknown>;
+      const name = entry['name'];
+      if (typeof name !== 'string' || !FIELD_NAME_REGEX.test(name)) {
+        ctx.errors.push({ path: `${path}.name`, issue: 'name must be a valid field name' });
+        return;
+      }
+      if (RESERVED_USER_FIELDS.has(name)) {
+        ctx.errors.push({
+          path: `${path}.name`,
+          issue: `'${name}' is reserved on the auth user and cannot be a custom field`,
+        });
+      }
+      if (seen.has(name)) {
+        ctx.errors.push({ path: `${path}.name`, issue: `duplicate user field '${name}'` });
+      }
+      seen.add(name);
+      if (entry['type'] !== 'string' && entry['type'] !== 'number' && entry['type'] !== 'boolean') {
+        ctx.errors.push({
+          path: `${path}.type`,
+          issue: "type must be 'string', 'number' or 'boolean'",
+        });
+      }
+      if (entry['required'] !== undefined && typeof entry['required'] !== 'boolean') {
+        ctx.errors.push({ path: `${path}.required`, issue: 'required must be a boolean' });
+      }
+    });
+  }
 }
 
 function validateIdentity(identity: unknown, path: string, ctx: ValidationCtx): void {

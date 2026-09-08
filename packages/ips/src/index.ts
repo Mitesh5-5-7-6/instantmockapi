@@ -11,7 +11,23 @@ export {
   type RelationKind,
   type GenerationConfig,
   type InternalProjectSchema,
+  type AuthConfig,
+  type AuthMode,
+  type AuthUserField,
+  type EntityAuth,
 } from './types.js';
+
+export {
+  AUTH_MODES,
+  DEFAULT_ACCESS_TOKEN_TTL,
+  DEFAULT_REFRESH_TOKEN_TTL,
+  NO_AUTH,
+  authEnabled,
+  entityAuth,
+  projectAuth,
+  protectedEntities,
+  stampEntityAuth,
+} from './auth.js';
 
 export { validateIPS } from './validator.js';
 

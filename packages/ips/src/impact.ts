@@ -214,7 +214,22 @@ function changeCandidates(change: SchemaChange): { ids: string[]; identified: bo
     change.kind === 'METHODS_CHANGED' ||
     change.kind === 'QUERY_FEATURES_CHANGED' ||
     change.kind === 'GENERATORS_CHANGED' ||
-    change.kind === 'MOCK_RECORDS_CHANGED';
+    change.kind === 'MOCK_RECORDS_CHANGED' ||
+    /*
+     * The Auth API's own settings (Phase 3 §16).
+     *
+     * These name no entity because the Auth API is not one — the Phase 3
+     * decision was that it is runtime-native rather than a synthesized `User`
+     * entity, so there is no node to resolve to and `identified` has to say so
+     * explicitly. `ENTITY_AUTH_CHANGED` is deliberately absent: it carries an
+     * `entityId` and resolves by traversal like any other entity change, which
+     * is what makes §18's "do not regenerate Product" fall out for free.
+     */
+    change.kind === 'AUTH_MODE_CHANGED' ||
+    change.kind === 'AUTH_ENDPOINTS_CHANGED' ||
+    change.kind === 'AUTH_COOKIE_CHANGED' ||
+    change.kind === 'AUTH_TOKEN_EXPIRY_CHANGED' ||
+    change.kind === 'AUTH_USER_FIELDS_CHANGED';
   return { ids: [], identified: projectLevel };
 }
 
@@ -282,7 +297,23 @@ export function analyseImpact(
       }
     }
 
-    if (allowed.length === 0 || nodeId === undefined) {
+    /*
+     * The nodes this change is attributed to.
+     *
+     * Normally one — the most specific element that exists in the graph, since
+     * resolving to both a field and its entity would double-report. A
+     * project-level change that names the entities it reaches (`entityIds`, set
+     * by an auth mode change) fans out across them instead: one diff row, every
+     * affected endpoint enumerated.
+     */
+    const targets =
+      change.entityIds !== undefined && change.entityIds.length > 0
+        ? change.entityIds.map(entityNode).filter((id) => graph.out.has(id))
+        : nodeId === undefined
+          ? []
+          : [nodeId];
+
+    if (allowed.length === 0 || targets.length === 0) {
       // Either nothing reaches a wire, or the change is project-level. Both are
       // legitimately endpoint-less; project-level changes still touch artifacts,
       // which the block below records.
@@ -298,34 +329,68 @@ export function analyseImpact(
       if (change.kind === 'MOCK_RECORDS_CHANGED') {
         artifacts.add('mock_data');
       }
+      /*
+       * Authentication's artifact set (Phase 3 §18, §19, §20).
+       *
+       * The surface artifacts and nothing else. `zod`, `typescript`,
+       * `json_schema` and `yup` describe entity *shapes*, which an auth change
+       * does not touch — emitting them would contradict §18's "do not
+       * regenerate unrelated" and reseed nothing useful. `mock_data` likewise:
+       * §22's users live in their own collection precisely so that regenerating
+       * fixtures cannot delete accounts.
+       */
+      if (
+        change.kind === 'AUTH_MODE_CHANGED' ||
+        change.kind === 'AUTH_ENDPOINTS_CHANGED' ||
+        change.kind === 'AUTH_USER_FIELDS_CHANGED'
+      ) {
+        artifacts.add('hosted_api');
+        artifacts.add('openapi');
+        artifacts.add('postman');
+        artifacts.add('export_zip');
+      }
+      if (change.kind === 'AUTH_COOKIE_CHANGED') {
+        // Cookie mode changes the runtime's CORS handling and the signin
+        // response, and both are documented — but no path appears or moves.
+        artifacts.add('hosted_api');
+        artifacts.add('openapi');
+        artifacts.add('postman');
+      }
+      if (change.kind === 'AUTH_TOKEN_EXPIRY_CHANGED') {
+        // Only the runtime signs tokens. Rebuilding the docs for a TTL edit is
+        // the noise §18 exists to prevent.
+        artifacts.add('hosted_api');
+      }
       continue;
     }
 
     let reached = 0;
-    for (const edge of graph.out.get(nodeId) ?? []) {
-      if (!allowed.includes(edge.aspect)) {
-        continue;
+    for (const source of targets) {
+      for (const edge of graph.out.get(source) ?? []) {
+        if (!allowed.includes(edge.aspect)) {
+          continue;
+        }
+        const target = graph.nodes.get(edge.target);
+        if (target === undefined) {
+          continue;
+        }
+        if (target.kind === 'generator' && target.artifact !== undefined) {
+          artifacts.add(target.artifact);
+          continue;
+        }
+        if (target.kind !== 'endpoint' || target.endpoint === undefined) {
+          continue;
+        }
+        reached += 1;
+        recordEndpoint(affected, target, change, graph.nodes.get(source), edge);
       }
-      const target = graph.nodes.get(edge.target);
-      if (target === undefined) {
-        continue;
-      }
-      if (target.kind === 'generator' && target.artifact !== undefined) {
-        artifacts.add(target.artifact);
-        continue;
-      }
-      if (target.kind !== 'endpoint' || target.endpoint === undefined) {
-        continue;
-      }
-      reached += 1;
-      recordEndpoint(affected, target, change, graph.nodes.get(nodeId), edge);
-    }
 
-    // Schema generators hang off the entity, not off each field, so a field
-    // change reaches `zod` and `typescript` only by walking up. Without this a
-    // type change would regenerate the hosted API and leave the emitted types
-    // describing the previous shape.
-    collectAncestorArtifacts(graph, nodeId, artifacts);
+      // Schema generators hang off the entity, not off each field, so a field
+      // change reaches `zod` and `typescript` only by walking up. Without this a
+      // type change would regenerate the hosted API and leave the emitted types
+      // describing the previous shape.
+      collectAncestorArtifacts(graph, source, artifacts);
+    }
 
     if (reached === 0) {
       unattributed.push({ change, cause: 'no-wire' });

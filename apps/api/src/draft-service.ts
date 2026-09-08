@@ -133,6 +133,14 @@ export interface DraftAnalysis {
   requiresAcknowledgement: boolean;
   /** The value a risky commit must echo back as `acknowledgeImpact`. */
   digest: string;
+  /**
+   * The version this draft was restored from, or null for an ordinary edit.
+   *
+   * Carried on the analysis rather than looked up again at each call site,
+   * because two decisions key off it — which artifacts are locked, and how the
+   * review screen describes what is about to happen.
+   */
+  rollbackSourceVersion: number | null;
 }
 
 /**
@@ -346,6 +354,7 @@ export function analyseDraft(ctx: DraftContext): DraftAnalysis {
     summary: summariseChanges(impact.changes),
     requiresAcknowledgement: needsAttention(impact.changes),
     digest: impactDigest(draft),
+    rollbackSourceVersion: draft.rollbackSourceVersion ?? null,
   };
 }
 
@@ -467,7 +476,10 @@ export async function commitDraft(params: {
   project.markModified('ips');
   await project.save();
 
-  const rollbackSource = draft.rollbackSourceVersion ?? null;
+  // From the analysis, which read it off this same draft — one read, so the
+  // locked checkboxes the client was shown and the artifacts forced here cannot
+  // come from different values.
+  const rollbackSource = analysis.rollbackSourceVersion;
   const artifacts = forceMockDataOnRollback(
     params.artifacts ?? analysis.impact.artifacts,
     analysis,
@@ -555,10 +567,39 @@ export function forceMockDataOnRollback(
   analysis: DraftAnalysis,
   rollbackSourceVersion: number | null,
 ): ArtifactType[] {
+  const forced = lockedArtifacts(analysis, rollbackSourceVersion).map((lock) => lock.artifactType);
+  return [...artifacts, ...forced.filter((artifact) => !artifacts.includes(artifact))];
+}
+
+/**
+ * Why an artifact cannot be deselected. A code, not a sentence — the copy
+ * belongs to the UI that renders it, and `ERROR_PHASE.md`'s vocabulary is not
+ * something a serializer should be inventing variants of.
+ */
+export type ArtifactLockReason = 'ROLLBACK_RESEED';
+
+export interface ArtifactLock {
+  artifactType: ArtifactType;
+  reason: ArtifactLockReason;
+}
+
+/**
+ * Artifacts this commit will regenerate whether or not the client asks.
+ *
+ * The **single** implementation of the rule: `forceMockDataOnRollback` applies
+ * it and `toDraftAnalysisResponse` reports it, so the checkbox the user sees
+ * locked and the artifact the commit actually forces cannot disagree. Mirroring
+ * the predicate in the browser was the alternative, and it would have gone
+ * stale the first time `SHAPE_KINDS` gained a member.
+ */
+export function lockedArtifacts(
+  analysis: DraftAnalysis,
+  rollbackSourceVersion: number | null,
+): ArtifactLock[] {
   if (rollbackSourceVersion === null || !affectsRecordShape(analysis)) {
-    return artifacts;
+    return [];
   }
-  return artifacts.includes('mock_data') ? artifacts : [...artifacts, 'mock_data'];
+  return [{ artifactType: 'mock_data', reason: 'ROLLBACK_RESEED' }];
 }
 
 /** A version note a human can read in the history list. */
@@ -603,6 +644,15 @@ export function toDraftAnalysisResponse(analysis: DraftAnalysis): Record<string,
     requiresAcknowledgement: analysis.requiresAcknowledgement,
     // Echo this back as `acknowledgeImpact` on a risky commit.
     digest: analysis.digest,
+    rollbackSourceVersion: analysis.rollbackSourceVersion,
+    /*
+     * Which regenerate checkboxes the client must render locked.
+     *
+     * Reported rather than left for the client to work out: the server forces
+     * these on commit either way, and a UI that offered `mock_data` as
+     * deselectable would be showing the user a choice they do not have.
+     */
+    lockedArtifacts: lockedArtifacts(analysis, analysis.rollbackSourceVersion),
     // Through the shared serializer, so this payload and the comparison
     // endpoint describe a change identically. Everything the old inline mapper
     // produced is still here, spelled the same way; the additions (stable ids,
@@ -626,6 +676,16 @@ export function toDraftResponse(ctx: DraftContext): Record<string, unknown> {
     stale: ctx.stale,
     ips: ctx.draft.ips,
     generationConfig: ctx.draft.generationConfig,
+    /*
+     * On every draft response, not just the restore that seeded it.
+     *
+     * `POST /draft` returns an already-open draft, so a browser reload
+     * mid-review goes through here. Without this the UI would forget the draft
+     * was a rollback and stop locking `mock_data` and stop asking for §23's
+     * confirmation — while the server carried on forcing `mock_data` anyway.
+     * A silent divergence between what the user is told and what runs.
+     */
+    rollbackSourceVersion: ctx.draft.rollbackSourceVersion ?? null,
     createdAt: ctx.draft.createdAt,
     updatedAt: ctx.draft.updatedAt,
   };

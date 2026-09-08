@@ -177,6 +177,40 @@ export interface ArtifactView {
   storageRef: string | null;
 }
 
+/**
+ * §18's sync report — which generated files are behind the version the API is
+ * actually serving.
+ *
+ * Restated rather than imported: `apps/web` may not import server packages
+ * (`web-must-not-import-server`, severity error), so every wire shape is
+ * declared here against the JSON the route sends.
+ */
+export interface ArtifactSyncStateView {
+  artifactType: string;
+  /** The newest version this file completed at, or null if never. */
+  generatedVersion: number | null;
+  outOfSync: boolean;
+  missing: boolean;
+}
+
+export interface SyncReportView {
+  /** The version the comparison was made against. Null when nothing is live. */
+  publishedVersion: number | null;
+  artifacts: ArtifactSyncStateView[];
+  outOfSync: string[];
+  missing: string[];
+}
+
+export interface ArtifactListMeta {
+  version: number;
+  publishedVersion: number | null;
+  /**
+   * Null when a specific version was requested: "out of sync" is a property of
+   * the registry's current state, not of a snapshot.
+   */
+  sync: SyncReportView | null;
+}
+
 export interface ArtifactContent {
   artifactType: string;
   version: number;
@@ -474,6 +508,24 @@ export interface DraftAnalysis {
   affected: AffectedEndpoint[];
   unaffected: UnaffectedEndpoint[];
   artifacts: string[];
+  /** Set when this draft came from a rollback (§22). Null for an ordinary edit. */
+  rollbackSourceVersion: number | null;
+  /**
+   * Artifacts the commit will regenerate whether or not they are selected.
+   *
+   * Reported by the server rather than derived here, because the server forces
+   * them either way — a client that worked the rule out for itself would
+   * eventually offer the user a choice they do not have.
+   */
+  lockedArtifacts: ArtifactLock[];
+}
+
+/** Why an artifact cannot be deselected. The copy for each code lives in the UI. */
+export type ArtifactLockReason = 'ROLLBACK_RESEED';
+
+export interface ArtifactLock {
+  artifactType: string;
+  reason: ArtifactLockReason;
 }
 
 /* ── Version comparison (Phase 2 §24, §36, §37) ────────────────────────────
@@ -618,8 +670,23 @@ export interface ProjectDraft {
   stale: boolean;
   ips: unknown;
   generationConfig: GenerationConfig;
+  /**
+   * The version this draft's definition was restored from, or null for an
+   * ordinary edit.
+   *
+   * Sent on every draft read, not only on the restore that seeded it, so a
+   * browser reload mid-review still knows it is looking at a rollback — the
+   * server forces `mock_data` on one either way (§16).
+   */
+  rollbackSourceVersion: number | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** What `POST /versions/:version/restore` answers with: the draft, ready to review. */
+export interface RestoredDraft extends ProjectDraft {
+  rollbackSourceVersion: number;
+  analysis: DraftAnalysis;
 }
 
 export interface DraftCommitResult {
