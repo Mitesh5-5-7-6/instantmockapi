@@ -145,6 +145,46 @@ export interface ProjectDetail extends ProjectSummary {
   generationConfig: GenerationConfig;
 }
 
+/* ── Authentication for the generated API (Phase 3) ────────────────────────
+ *
+ * The mock API's own end users, not InstantMockAPI's. Restated rather than
+ * imported, like every other wire shape here — `apps/web` may not import server
+ * packages.
+ *
+ * The config lives at the IPS root, so it is edited by PATCHing the draft's
+ * `ips` and reaches a version through the ordinary commit. There is no separate
+ * endpoint, and there should not be: §17 requires auth changes to be versioned
+ * and diffed like any other schema change.
+ */
+
+export type AuthMode = 'NONE' | 'ALL_PUBLIC' | 'ALL_PROTECTED' | 'COMBINATION';
+
+/** Per entity, and only consulted in COMBINATION mode — read through `entityAuthOf`. */
+export type EntityAuth = 'PUBLIC' | 'PROTECTED';
+
+export interface AuthUserField {
+  name: string;
+  type: 'string' | 'number' | 'boolean';
+  required: boolean;
+}
+
+export interface AuthConfigView {
+  mode: AuthMode;
+  signup: boolean;
+  signin: boolean;
+  refreshToken: boolean;
+  cookieAuth: boolean;
+  accessTokenExpiresIn: string;
+  refreshTokenExpiresIn: string;
+  userFields: AuthUserField[];
+}
+
+/** The shape the draft's `ips` carries, for the parts this UI reads and writes. */
+export interface IpsAuthShape {
+  entities: { id?: string; name: string; authentication?: EntityAuth }[];
+  authentication?: AuthConfigView;
+}
+
 export interface JobWorkerView {
   worker: string;
   artifactType: string;

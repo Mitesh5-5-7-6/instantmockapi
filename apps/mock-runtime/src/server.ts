@@ -20,13 +20,19 @@ import type { CacheService } from './cache.js';
 import { lookupPublicId } from './identity.js';
 import { firstHostedSegment } from './path.js';
 import { registerHostedRoutes } from './routes.js';
+import { authAttemptKey } from './auth/rate-limit.js';
 
 export interface BuildRuntimeOptions {
   config?: EnvConfig;
   storage: StorageClient;
   cache: CacheService;
-  /** Override the per-project rate limit, or `false` to disable (tests). */
-  rateLimit?: { max?: number; timeWindowMs?: number } | false;
+  /**
+   * Override the rate limits, or `false` to disable both (tests).
+   *
+   * `authMax` is the separate, much tighter credential budget — see the
+   * registration below and `auth/rate-limit.ts`.
+   */
+  rateLimit?: { max?: number; timeWindowMs?: number; authMax?: number } | false;
 }
 
 export async function buildMockRuntime(options: BuildRuntimeOptions): Promise<FastifyInstance> {
@@ -106,11 +112,36 @@ export async function buildMockRuntime(options: BuildRuntimeOptions): Promise<Fa
     // resolver populates; a cold process keys on the raw public id for its first
     // request, which is the only imprecision. `proj:`/`ip:` are namespaced so a
     // project id can never collide with an IP.
+    const projectMax = options.rateLimit?.max ?? config.mockRateLimitPerMinute;
+    const authMax = options.rateLimit?.authMax ?? config.mockAuthRateLimitPerMinute;
+
     await app.register(rateLimit, {
-      max: options.rateLimit?.max ?? config.mockRateLimitPerMinute,
+      /*
+       * Two ceilings on one limiter (Phase 3 §23).
+       *
+       * The credential endpoints get their own namespaced key — per caller IP
+       * per project — and a much lower max. Sharing the project bucket would
+       * allow 200 password guesses a minute AND spend a legitimate caller's
+       * allowance doing it, so the defence would itself be the denial of
+       * service. See `auth/rate-limit.ts`.
+       *
+       * `max` and `keyGenerator` both parse the URL rather than sharing state
+       * through the request. It is pure string work on a path already in
+       * memory, and a stashed value would be a second source of truth for
+       * which bucket a request belongs to.
+       */
+      max: (request) =>
+        authAttemptKey(request.raw.url ?? request.url, request.ip, lookupPublicId) === null
+          ? projectMax
+          : authMax,
       timeWindow: options.rateLimit?.timeWindowMs ?? 60_000,
       keyGenerator: (request) => {
-        const first = firstHostedSegment(request.raw.url ?? request.url);
+        const url = request.raw.url ?? request.url;
+        const credential = authAttemptKey(url, request.ip, lookupPublicId);
+        if (credential !== null) {
+          return credential;
+        }
+        const first = firstHostedSegment(url);
         if (!first) {
           return `ip:${request.ip}`;
         }

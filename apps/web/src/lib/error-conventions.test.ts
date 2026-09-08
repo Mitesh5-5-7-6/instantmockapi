@@ -75,6 +75,17 @@ describe('raw error blocks', () => {
      */
     ['components/builder/endpoint-card.tsx', 'a duplicate endpoint name, beside that name input'],
     ['components/builder/relation-editor.tsx', 'name and target issues, beside their own selects'],
+    /*
+     * The auth tab, and the guard earned its keep here: the first version of
+     * that page also rendered the *save* failure through `FieldError`, which is
+     * precisely the misuse this list exists to catch. That one is a `FormError`
+     * now. What remains is genuinely per-control — a malformed token lifetime
+     * beside its input, a reserved signup-field name beside the field it names.
+     */
+    [
+      'app/projects/[id]/auth/page.tsx',
+      'token-lifetime and signup-field messages, each beside the input it belongs to',
+    ],
   ]);
 
   it('appear only where a message belongs beside its control', () => {

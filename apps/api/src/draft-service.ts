@@ -39,7 +39,9 @@ import {
   highestRisk,
   materializeRelations,
   needsAttention,
+  projectAuth,
   reconcileEntityRenames,
+  stampEntityAuth,
   summariseChanges,
   validateIPS,
   type GenerationConfig,
@@ -281,6 +283,25 @@ export async function loadDraft(project: IProject): Promise<DraftContext> {
  * identity and foreign-key fields the client never sent and then report
  * validation errors against indices it cannot map back to its own form.
  */
+/**
+ * Stamp the entities when a draft edit changes the authentication mode.
+ *
+ * A no-op when the mode is unchanged, which is the overwhelming majority of
+ * edits — including every edit on a project with authentication off, so §26's
+ * projects never acquire a stamp they have no use for.
+ *
+ * `incoming` is mutated in place, matching `reconcileEntityRenames` and
+ * `materializeRelations` either side of it in the save path.
+ */
+function stampAuthModeChange(previous: unknown, incoming: Record<string, unknown>): void {
+  const outgoing = projectAuth(previous as InternalProjectSchema);
+  const requested = projectAuth(incoming as unknown as InternalProjectSchema);
+  if (requested.mode === outgoing.mode) {
+    return;
+  }
+  stampEntityAuth(incoming as unknown as InternalProjectSchema, requested.mode, outgoing);
+}
+
 export async function applyDraftEdit(
   ctx: DraftContext,
   body: { ips?: Record<string, unknown>; generationConfig?: Record<string, unknown> },
@@ -303,6 +324,25 @@ export async function applyDraftEdit(
     // whole document with the new name, and `draft.ips` still holds the old one
     // under the same stable id.
     const reconciled = reconcileEntityRenames(draft.ips, body.ips);
+
+    /*
+     * Carry an authentication mode change onto the entities (Phase 3 §3).
+     *
+     * Also before validation, and for a related reason to the rename
+     * reconciliation above: the stamps this writes are what `validateIPS` then
+     * checks, and `entityAuth` reads.
+     *
+     * The surprise it prevents: switching `ALL_PUBLIC → COMBINATION` with no
+     * stamping leaves every entity unstamped, and `entityAuth`'s fail-closed
+     * fallback then takes the whole API dark in one click — a breaking change
+     * the user never asked for, reported as one row per entity.
+     *
+     * The outgoing configuration comes from the **stored draft**, because the
+     * incoming document already carries the new mode. Everything else in the
+     * incoming auth block survives, so changing the mode and the cookie setting
+     * in one edit does both rather than reverting one.
+     */
+    stampAuthModeChange(draft.ips, reconciled);
 
     const validated = unwrap(
       validateIPS(

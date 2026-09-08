@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { authDirection, diffSchemas, type SchemaChange } from './changes.js';
+import { groupChanges } from './grouping.js';
 import { classifyImpact } from './classification.js';
 import { analyseDraftImpact } from './impact.js';
 import { NO_AUTH } from './auth.js';
@@ -373,5 +374,63 @@ describe('§18: what an auth change regenerates', () => {
       ips({ authentication: auth('ALL_PROTECTED', { cookieAuth: true }) }),
     );
     expect(report.unattributed.every((entry) => entry.cause !== 'unidentified')).toBe(true);
+  });
+});
+
+describe('§37: where an auth change appears in the grouped tree', () => {
+  const combination = (payment: 'PUBLIC' | 'PROTECTED') =>
+    ips({
+      entities: [entity('Product', 'ent_prod', 'PUBLIC'), entity('Payment', 'ent_pay', payment)],
+      authentication: auth('COMBINATION'),
+    });
+
+  /**
+   * A per-entity change nests under its entity, so the compare page shows it
+   * beside that entity's field changes rather than in a project-level bucket.
+   */
+  it('nests ENTITY_AUTH_CHANGED under its entity', () => {
+    const changes = diffSchemas(combination('PUBLIC'), combination('PROTECTED'));
+    const tree = groupChanges(changes);
+
+    const payment = tree.entities.find((group) => group.name === 'Payment');
+    expect(payment).toBeDefined();
+    expect(payment!.own.some((entry) => entry.change.kind === 'ENTITY_AUTH_CHANGED')).toBe(true);
+    expect(tree.project.changes.some((entry) => entry.change.kind === 'ENTITY_AUTH_CHANGED')).toBe(
+      false,
+    );
+  });
+
+  /**
+   * A mode change genuinely has no entity — it is one decision about the whole
+   * project — so it belongs in the project group even though its *impact* fans
+   * out across every entity it moved.
+   */
+  it('puts AUTH_MODE_CHANGED in the project group', () => {
+    const changes = diffSchemas(
+      ips({ authentication: auth('ALL_PUBLIC') }),
+      ips({ authentication: auth('ALL_PROTECTED') }),
+    );
+    const tree = groupChanges(changes);
+
+    expect(tree.project.changes.some((entry) => entry.change.kind === 'AUTH_MODE_CHANGED')).toBe(
+      true,
+    );
+    // And it is not duplicated into the entities it reached.
+    expect(
+      tree.entities.some((group) =>
+        group.own.some((entry) => entry.change.kind === 'AUTH_MODE_CHANGED'),
+      ),
+    ).toBe(false);
+  });
+
+  it('groups the Auth API settings at project level too', () => {
+    const changes = diffSchemas(
+      ips({ authentication: auth('ALL_PROTECTED') }),
+      ips({ authentication: auth('ALL_PROTECTED', { cookieAuth: true }) }),
+    );
+    const tree = groupChanges(changes);
+    expect(tree.project.changes.some((entry) => entry.change.kind === 'AUTH_COOKIE_CHANGED')).toBe(
+      true,
+    );
   });
 });

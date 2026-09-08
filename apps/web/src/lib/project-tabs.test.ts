@@ -16,9 +16,22 @@ describe('PROJECT_TABS', () => {
     expect(new Set(PROJECT_TABS.map((tab) => tab.label)).size).toBe(PROJECT_TABS.length);
   });
 
-  it('does not offer an Auth tab', () => {
-    // Nothing backs it: no per-project keys, no runtime enforcement, no schema.
-    expect(PROJECT_TABS.map((tab) => tab.label)).not.toContain('Auth');
+  /**
+   * This assertion used to be its inverse.
+   *
+   * Through Phases 1 and 2 the rule was *no Auth tab*, for a stated reason:
+   * "nothing backs it — no per-project keys, no runtime enforcement, no
+   * schema." Phase 3 built all three (`MockAuthSecret`, the runtime's
+   * protection gate, `ips.authentication`), so the guard was satisfied the only
+   * way it should have been, by building the thing rather than by deleting the
+   * check.
+   *
+   * Kept as a positive assertion rather than removed, so the tab cannot quietly
+   * disappear either — and `every tab has a route` below still refuses a tab
+   * that links to a 404.
+   */
+  it('offers an Auth tab, now that Phase 3 backs one', () => {
+    expect(PROJECT_TABS.map((tab) => tab.label)).toContain('Auth');
   });
 
   it('gives generated artifacts a home', () => {
