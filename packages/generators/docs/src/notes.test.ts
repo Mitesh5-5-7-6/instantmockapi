@@ -226,6 +226,30 @@ describe('§4: relationships', () => {
       expect(notes).not.toContain('## Relationships');
     }
   });
+
+  /**
+   * A historical snapshot is a `Mixed` document, so its relations are not
+   * guaranteed to satisfy `RelationKind`.
+   *
+   * Phase 4 renders old versions (§20) and, later, imported blueprints (§14),
+   * neither of which passed through today's validator. The failure this guards
+   * is cosmetic but corrosive: a document containing the literal word
+   * `undefined` reads as a broken renderer, so a reviewer stops trusting the
+   * facts around it.
+   */
+  it('says unspecified rather than undefined for a relation with no kind', () => {
+    const ips = relationalIps();
+    const relation = ips.entities.flatMap((entity) => entity.relations)[0];
+    if (relation === undefined) {
+      throw new Error('fixture shape changed');
+    }
+    // Exactly what an old snapshot can hold, reached the way Mongo would.
+    delete (relation as { kind?: unknown }).kind;
+
+    const notes = render(ips);
+    expect(notes).not.toContain('undefined');
+    expect(notes).toContain('unspecified');
+  });
 });
 
 describe('§5: the API surface', () => {

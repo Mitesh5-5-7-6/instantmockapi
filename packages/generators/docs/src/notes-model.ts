@@ -283,7 +283,16 @@ function toNotesField(field: Field, prefix: string): NotesField {
   };
 }
 
-/** `one-to-many` and friends, from the relation kind and its direction. */
+/**
+ * A relation's cardinality, in the words §4 asks for.
+ *
+ * The `default` branch is unreachable for a well-typed definition — `kind` is a
+ * closed union of four values — but a `Version.ipsSnapshot` is a `Mixed`
+ * document and an imported blueprint (§14) is arbitrary JSON, so an unknown or
+ * absent kind is reachable in practice. Echoing it keeps the document honest
+ * about what it read; the string guard is what stops it printing the literal
+ * `undefined`, which reads as a rendering bug rather than as missing data.
+ */
 function describeCardinality(relation: Relation): string {
   switch (relation.kind) {
     case 'hasMany':
@@ -295,7 +304,9 @@ function describeCardinality(relation: Relation): string {
     case 'manyToMany':
       return 'many-to-many';
     default:
-      return relation.kind;
+      return typeof relation.kind === 'string' && relation.kind !== ''
+        ? relation.kind
+        : 'unspecified';
   }
 }
 
