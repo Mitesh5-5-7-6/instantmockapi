@@ -26,13 +26,46 @@
  */
 
 import { OBJECT_ID_PATTERN, PUBLIC_ID_PATTERN } from '@instantmockapi/shared';
+import { RESERVED_ENTITY_NAMES, type AuthEndpointName } from '@instantmockapi/ips';
 
 /** How a request addressed its project. */
 export type HostedRefInput =
   { form: 'legacy'; projectId: string } | { form: 'pretty'; publicId: string; slug: string };
 
+/**
+ * The Auth API's five endpoints (Phase 3 §4).
+ *
+ * At the root of the hosted API rather than under an `/auth/` prefix, because
+ * §4 names them `POST /signUp`, `POST /signIn`, `POST /refresh`, `GET /me`,
+ * `POST /logout` and that shape reaches the generated OpenAPI and Postman
+ * collection. Nesting them would put this file's convenience ahead of the
+ * documented contract.
+ *
+ * The cost is a namespace shared with entities, which `validateIPS` handles by
+ * reserving these five names when authentication is enabled — a visible error
+ * at authoring time rather than a route that resolves to the wrong handler.
+ */
+export { AUTH_ENDPOINT_NAMES as AUTH_ENDPOINTS, RESERVED_ENTITY_NAMES } from '@instantmockapi/ips';
+
+export type AuthEndpoint = AuthEndpointName;
+
+/**
+ * Matched case-insensitively.
+ *
+ * §4 writes `/signUp` in camelCase while `entitySlug` lowercases, so
+ * `/signup` and `/signUp` would otherwise be two different routes — one the
+ * Auth API and one an entity called `Signup`. That is a trap nobody would find
+ * by reading either the spec or their own schema, so both spellings resolve
+ * here and the name is reserved in both.
+ */
+function authEndpointOf(segment: string): AuthEndpoint | null {
+  const lowered = segment.toLowerCase();
+  return RESERVED_ENTITY_NAMES.has(lowered) ? (lowered as AuthEndpoint) : null;
+}
+
 export type HostedTarget =
   | { ref: HostedRefInput; kind: 'index' }
+  | { ref: HostedRefInput; kind: 'auth'; endpoint: AuthEndpoint }
   | { ref: HostedRefInput; kind: 'collection'; entity: string }
   | { ref: HostedRefInput; kind: 'record'; entity: string; recordId: string };
 
@@ -81,8 +114,15 @@ export function parseHostedPath(pathname: string): HostedTarget | null {
     switch (segments.length) {
       case 1:
         return { ref, kind: 'index' };
-      case 2:
-        return { ref, kind: 'collection', entity: segments[1]! };
+      case 2: {
+        // Auth before entities: these five names are reserved when
+        // authentication is on, so an entity can never reach this branch under
+        // one of them.
+        const endpoint = authEndpointOf(segments[1]!);
+        return endpoint === null
+          ? { ref, kind: 'collection', entity: segments[1]! }
+          : { ref, kind: 'auth', endpoint };
+      }
       case 3:
         return { ref, kind: 'record', entity: segments[1]!, recordId: segments[2]! };
       default:
@@ -98,8 +138,12 @@ export function parseHostedPath(pathname: string): HostedTarget | null {
     switch (segments.length) {
       case 2:
         return { ref, kind: 'index' };
-      case 3:
-        return { ref, kind: 'collection', entity: segments[2]! };
+      case 3: {
+        const endpoint = authEndpointOf(segments[2]!);
+        return endpoint === null
+          ? { ref, kind: 'collection', entity: segments[2]! }
+          : { ref, kind: 'auth', endpoint };
+      }
       case 4:
         return { ref, kind: 'record', entity: segments[2]!, recordId: segments[3]! };
       default:

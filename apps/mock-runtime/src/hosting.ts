@@ -13,7 +13,11 @@ import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import { Project, publishedVersionOf } from '@instantmockapi/db';
 import { getArtifactRecord } from '@instantmockapi/registry';
 import type { StorageClient } from '@instantmockapi/storage';
-import type { HostedEntityConfig, HostingConfig } from '@instantmockapi/generator-hosting';
+import type {
+  HostedAuthConfig,
+  HostedEntityConfig,
+  HostingConfig,
+} from '@instantmockapi/generator-hosting';
 import type { CacheService } from './cache.js';
 import { rememberPublicId } from './identity.js';
 import type { HostedRefInput } from './path.js';
@@ -42,6 +46,19 @@ export interface HostedContext {
    * rather than by issuing DELs.
    */
   stamp: string;
+  /**
+   * The project's Auth API, or null when it has none (Phase 3 §26).
+   *
+   * `null` rather than a defaulted object, so "this project has no
+   * authentication" is a state the type forces every caller to handle —
+   * `/signUp` must 404 and a protected entity is a generation bug. A default
+   * would let both slip through as "auth is configured, just all-off".
+   *
+   * Carries no signing key: the key lives in `MockAuthSecret` and is fetched
+   * per request, because this object is built from an artifact that ships in
+   * the export bundle.
+   */
+  auth: HostedAuthConfig | null;
 }
 
 export function notFound(message = 'Not found'): AppError {
@@ -144,6 +161,9 @@ export async function resolveHostedProject(
     slug: project.slug ?? null,
     entities,
     features: resolveQueryFeatures(config.features),
+    // Absent on every config generated before Phase 3, which is exactly §26's
+    // case: no Auth API, and `/signUp` 404s as it always did.
+    auth: config.auth ?? null,
     stamp,
   };
 }

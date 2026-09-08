@@ -3,6 +3,7 @@ import {
   ALL_QUERY_FEATURES,
   NO_QUERY_FEATURES,
   materializeRelations,
+  type InternalProjectSchema,
   type QueryFeatures,
 } from '@instantmockapi/ips';
 import { entitySlug } from '@instantmockapi/shared';
@@ -286,5 +287,85 @@ describe('routing identity comes from the shared slug', () => {
       expect(source, `no source entity for hosted path ${hosted.path}`).toBeDefined();
       expect(hosted.path).toBe(entitySlug(source!));
     }
+  });
+});
+
+describe('authentication (Phase 3)', () => {
+  const baseIps = () => JSON.parse(JSON.stringify(goldenFixtureIPS)) as InternalProjectSchema;
+
+  const protectedIps = (over: Record<string, unknown> = {}) =>
+    ({
+      ...baseIps(),
+      authentication: {
+        mode: 'COMBINATION',
+        signup: true,
+        signin: true,
+        refreshToken: true,
+        cookieAuth: false,
+        accessTokenExpiresIn: '15m',
+        refreshTokenExpiresIn: '7d',
+        userFields: [{ name: 'name', type: 'string', required: true }],
+        ...over,
+      },
+    }) as unknown as InternalProjectSchema;
+
+  const parse = (ips: InternalProjectSchema) =>
+    JSON.parse(generateHostingConfig(ips)['hosting.config.json']!) as HostingConfig;
+
+  /**
+   * §26. A project with authentication off must produce a config byte-identical
+   * to a pre-Phase-3 one — no `auth` block, no per-entity key. Emitting
+   * `authentication: 'PUBLIC'` everywhere would change every existing project's
+   * hosted artifact for no behavioural reason.
+   */
+  it('emits nothing at all when authentication is off', () => {
+    const config = parse(baseIps());
+    expect(config.auth).toBeUndefined();
+    expect(config.entities.every((entity) => entity.requiresAuth === undefined)).toBe(true);
+  });
+
+  it('carries the auth endpoints and settings the runtime needs', () => {
+    const config = parse(protectedIps());
+    expect(config.auth).toEqual({
+      signup: true,
+      signin: true,
+      refresh: true,
+      cookieAuth: false,
+      accessTokenExpiresIn: '15m',
+      refreshTokenExpiresIn: '7d',
+      userFields: [{ name: 'name', type: 'string', required: true }],
+    });
+  });
+
+  /**
+   * The Stage 1 invariant, crossing the artifact boundary: protection is
+   * resolved here once, so the runtime is handed the answer and never the
+   * inputs it could get `ALL_PROTECTED` wrong with.
+   */
+  it('resolves protection rather than copying the mode across', () => {
+    const config = parse(protectedIps({ mode: 'ALL_PROTECTED' }));
+    expect(config.entities.every((entity) => entity.requiresAuth === true)).toBe(true);
+    // The mode itself is deliberately absent — nothing downstream may re-derive.
+    expect(JSON.stringify(config.auth)).not.toContain('ALL_PROTECTED');
+  });
+
+  it('applies a stale entity stamp only in COMBINATION mode', () => {
+    const stamped = {
+      ...protectedIps({ mode: 'ALL_PROTECTED' }),
+      entities: baseIps().entities.map((entity) => ({ ...entity, authentication: 'PUBLIC' })),
+    } as unknown as InternalProjectSchema;
+
+    // The mode wins: a leftover PUBLIC stamp cannot expose an endpoint.
+    expect(parse(stamped).entities.every((e) => e.requiresAuth === true)).toBe(true);
+  });
+
+  /**
+   * §23, §27: this config ships inside the export ZIP, so a signing key here
+   * would hand anyone who downloaded it the ability to mint tokens for the
+   * project. The key lives in its own collection and is fetched at request time.
+   */
+  it('never carries a signing key', () => {
+    const serialised = generateHostingConfig(protectedIps())['hosting.config.json']!;
+    expect(serialised).not.toMatch(/secret|signingKey|jwtSecret|passwordHash/i);
   });
 });
