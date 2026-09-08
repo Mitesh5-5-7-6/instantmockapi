@@ -48,6 +48,7 @@ import { useAction } from '../../../lib/use-action';
 import { authProblems } from '../../../lib/auth-config';
 import {
   AUTH_ENDPOINT_OPTIONS,
+  AUTH_PROJECT_MOCK_RECORDS,
   REQUIRED_AUTH_ENDPOINTS,
   authProjectConfig,
   describeAuthProject,
@@ -123,7 +124,21 @@ export default function NewAuthApiPage() {
             validators: [],
             types: ['typescript'],
             methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-            mockRecords: 0,
+            /*
+             * `AUTH_PROJECT_MOCK_RECORDS`, not 0.
+             *
+             * Nothing is seeded either way — there are no entities — so 0 read
+             * as the honest value. It is not: `validateGenerationConfig`
+             * requires 1..maxMockRecords on the **generate** path while
+             * `validateIPS` accepts any non-negative integer on the **create**
+             * path, so 0 created the project and then failed generation with
+             * "must be an integer between 1 and 1000".
+             *
+             * The value also stops being inert the moment somebody adds an
+             * entity to this project, which is supported — so it is the
+             * ordinary default rather than the smallest number that passes.
+             */
+            mockRecords: AUTH_PROJECT_MOCK_RECORDS,
             features: { search: false, filter: false, sort: false, include: false },
           },
           authentication: config,

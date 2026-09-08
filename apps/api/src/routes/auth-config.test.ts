@@ -578,3 +578,113 @@ describe('the Auth API project kind', () => {
     expect(saved.statusCode, saved.body).toBe(200);
   });
 });
+
+/**
+ * Create **then generate**, for the Auth API kind.
+ *
+ * The bug this exists for: the wizard sent `mockRecords: 0`, which is honest —
+ * there are no entities to seed — and the project was created successfully. It
+ * then failed generation with "must be an integer between 1 and 1000".
+ *
+ * Two validators disagree about the same field:
+ *
+ *   validateIPS               (create path)    non-negative integer  → 0 passes
+ *   validateGenerationConfig  (generate path)  1..maxMockRecords     → 0 fails
+ *
+ * So no create-time test could have caught it. This one drives both paths in
+ * sequence, which is the shape of the mistake rather than the instance of it.
+ */
+describe('an Auth API project generates, not just creates', () => {
+  /** What `apps/web`'s Auth wizard actually sends. Kept in step deliberately. */
+  const wizardPayload = () => ({
+    entities: [],
+    generationConfig: {
+      validators: [],
+      types: ['typescript'],
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+      // `AUTH_PROJECT_MOCK_RECORDS` in `apps/web/src/lib/auth-onboarding.ts`.
+      // The web app cannot be imported here, so the value is restated — which
+      // is exactly why the assertion below is a *range*, not an equality: what
+      // matters is that whatever the wizard sends survives both validators.
+      mockRecords: 25,
+      features: { search: false, filter: false, sort: false, include: false },
+    },
+    authentication: authConfig('ALL_PUBLIC'),
+  });
+
+  it('accepts the wizard payload at create and at generate', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(token),
+      payload: {
+        name: 'Accounts',
+        kind: 'auth',
+        inputSource: { type: 'builder', raw: JSON.stringify(wizardPayload()) },
+      },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+
+    const generated = await post(`/v1/projects/${created.json().id as string}/generate`);
+    expect(generated.statusCode, generated.body).toBe(202);
+  });
+
+  /**
+   * The trap itself, pinned. `mockRecords: 0` must not reach a stored project —
+   * and until the generate-path rule is relaxed, the honest place to refuse it
+   * is here, in a test that records why the two numbers differ.
+   */
+  it('shows why mockRecords 0 cannot be used, even though create accepts it', async () => {
+    const payload = wizardPayload();
+    payload.generationConfig.mockRecords = 0;
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(token),
+      payload: {
+        name: 'Zero',
+        kind: 'auth',
+        inputSource: { type: 'builder', raw: JSON.stringify(payload) },
+      },
+    });
+    // Create is happy: `validateIPS` allows any non-negative integer.
+    expect(created.statusCode, created.body).toBe(201);
+
+    // Generate is not, which is where the user actually found out.
+    const generated = await post(`/v1/projects/${created.json().id as string}/generate`);
+    expect(generated.statusCode).toBe(422);
+    expect((generated.json().error.details as { path: string }[])[0]!.path).toBe(
+      'generationConfig.mockRecords',
+    );
+  });
+
+  it('generates for a Project API sent the same way, so the fix is not kind-specific', async () => {
+    const payload = {
+      ...wizardPayload(),
+      entities: [
+        {
+          name: 'Product',
+          identity: { field: 'id', style: 'uuid' },
+          fields: [{ name: 'label', type: 'string', required: false, default: null, children: [] }],
+          relations: [],
+        },
+      ],
+    };
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(token),
+      payload: {
+        name: 'Shop',
+        kind: 'project',
+        inputSource: { type: 'builder', raw: JSON.stringify(payload) },
+      },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+
+    const generated = await post(`/v1/projects/${created.json().id as string}/generate`);
+    expect(generated.statusCode, generated.body).toBe(202);
+  });
+});

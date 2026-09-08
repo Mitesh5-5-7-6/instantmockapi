@@ -164,6 +164,20 @@ export const AUTH_ENDPOINT_OPTIONS: readonly AuthEndpointOption[] = [
   },
 ];
 
+/**
+ * `mockRecords` for an Auth API project.
+ *
+ * Not 0, and the reason is a rule split across two validators: `validateIPS`
+ * accepts any non-negative integer on the **create** path, while
+ * `validateGenerationConfig` requires `1..maxMockRecords` on the **generate**
+ * path. A project sent with 0 is therefore created successfully and then fails
+ * generation — which is exactly what happened.
+ *
+ * Named rather than inlined so the value is testable against both validators;
+ * see the create-then-generate test in `apps/api`.
+ */
+export const AUTH_PROJECT_MOCK_RECORDS = 25;
+
 /** The always-present endpoints, for the wizard to show as fixed. */
 export const REQUIRED_AUTH_ENDPOINTS: readonly { route: string; note: string }[] = [
   { route: 'POST /signIn', note: 'Always generated — without it nothing could obtain a token.' },
