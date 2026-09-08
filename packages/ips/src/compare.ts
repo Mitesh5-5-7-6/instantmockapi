@@ -133,11 +133,21 @@ function clone<T>(value: T): T {
 /**
  * The comparable form of one side.
  *
+ * Exported because Phase 4's Technical Notes need the identical treatment: a
+ * document describing a historical version must read `configSnapshot` rather
+ * than the copy embedded in `ipsSnapshot`, or it reports a config the version
+ * never had. A second implementation of that overlay would be a second place
+ * for the bug to come back.
+ *
  * Note what is deliberately *not* normalised: `diffSchemas` reads only
  * `generationConfig` and `entities`, so `projectId`, `version`, `publicId` and
- * `slug` are never compared and copying them across would be noise.
+ * `slug` are never compared and copying them across would be noise. Callers
+ * that need those read them off the snapshot themselves.
  */
-function normalise(snapshot: SchemaSnapshot, materialize: boolean): InternalProjectSchema {
+export function normaliseSnapshot(
+  snapshot: SchemaSnapshot,
+  materialize = true,
+): InternalProjectSchema {
   const copy = clone(snapshot.ips);
   const withConfig: InternalProjectSchema = {
     ...copy,
@@ -205,8 +215,8 @@ export function diffSnapshots(
   options: CompareOptions = {},
 ): SchemaDiff {
   const materialize = options.materialize ?? true;
-  const before = normalise(from, materialize);
-  const after = normalise(to, materialize);
+  const before = normaliseSnapshot(from, materialize);
+  const after = normaliseSnapshot(to, materialize);
 
   const changes = diffSchemas(before, after, { match: options.match ?? 'auto' });
 
@@ -246,7 +256,7 @@ export function compareSnapshots(
   options: CompareOptions = {},
 ): { diff: SchemaDiff; impact: ImpactReport } {
   const diff = diffSnapshots(from, to, options);
-  const target = normalise(to, options.materialize ?? true);
+  const target = normaliseSnapshot(to, options.materialize ?? true);
   const graph = buildDependencyGraph(target, target.generationConfig);
 
   return { diff, impact: analyseImpact(diff.changes, graph) };

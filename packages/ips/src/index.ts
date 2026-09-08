@@ -156,6 +156,7 @@ export {
 export {
   compareSnapshots,
   diffSnapshots,
+  normaliseSnapshot,
   type CompareOptions,
   type MatchingReport,
   type SchemaDiff,
