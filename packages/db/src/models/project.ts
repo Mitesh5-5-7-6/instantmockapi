@@ -1,11 +1,12 @@
 import { Schema, model, Document, Types } from 'mongoose';
+import { PROJECT_KINDS, type ProjectKind } from '@instantmockapi/shared';
 import type { InternalProjectSchema, GenerationConfig } from '@instantmockapi/ips';
 
 export interface IProject extends Document {
   ownerId: Types.ObjectId;
   name: string;
   /** What this project generates. Absent on documents written before kinds. */
-  kind?: 'project' | 'single';
+  kind?: ProjectKind;
   /**
    * Public routing id (`prj_`/`sng_` + hex) — **authoritative for hosted URL
    * resolution**. Null until minted, in which case only the legacy ObjectId URL
@@ -83,7 +84,11 @@ const projectSchema = new Schema<IProject>(
     },
     kind: {
       type: String,
-      enum: ['project', 'single'],
+      // From `PROJECT_KINDS` rather than a second hardcoded list. The duplicate
+      // is what made adding the `auth` kind fail here with a 500 after every
+      // other layer had been updated — the shared constant is the one place a
+      // new kind should have to be declared.
+      enum: [...PROJECT_KINDS],
       default: 'project',
     },
     publicId: {

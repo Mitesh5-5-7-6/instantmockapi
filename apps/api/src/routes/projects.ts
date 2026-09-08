@@ -239,7 +239,14 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
       });
       const projectId = String(project._id);
 
-      const ips = parseInputSource(projectId, body.name, body.inputSource.type, rawString, config);
+      const ips = parseInputSource(
+        projectId,
+        body.name,
+        body.inputSource.type,
+        rawString,
+        config,
+        project.kind,
+      );
       project.ips = { ...ips, projectId, version: 1 };
       // Stable ids from birth, so the first edit is already diffable.
       //
@@ -501,6 +508,9 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
       project.inputSource.type,
       project.inputSource.raw,
       config,
+      // Same kind on the way back in, or a re-parse of an Auth API project would
+      // fail the at-least-one-entity rule its kind exempts it from.
+      project.kind,
     );
     // Refresh the draft IPS; the user's config edits and version survive re-parse
     project.ips = {

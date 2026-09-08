@@ -127,6 +127,99 @@ export function stampChoices(
   }));
 }
 
+/* ────────────────── the Auth API project kind ────────────────── */
+
+/**
+ * One of the five endpoints, as the Auth API wizard offers it.
+ *
+ * `signin` is absent from this list on purpose — it is not optional. A project
+ * that requires a token with no way to obtain one is a locked door with no key,
+ * which `authProblems` and the server's validator both refuse. Offering a
+ * checkbox for it would be offering an invalid configuration.
+ */
+export type OptionalAuthEndpoint = 'signup' | 'refreshToken';
+
+export interface AuthEndpointOption {
+  key: OptionalAuthEndpoint;
+  /** The route, so the checkbox names the thing it produces. */
+  route: string;
+  label: string;
+  description: string;
+}
+
+export const AUTH_ENDPOINT_OPTIONS: readonly AuthEndpointOption[] = [
+  {
+    key: 'signup',
+    route: 'POST /signUp',
+    label: 'Let callers create an account',
+    description:
+      'Turn this off for an invite-only API — accounts still exist, just not through a public endpoint.',
+  },
+  {
+    key: 'refreshToken',
+    route: 'POST /refresh',
+    label: 'Issue refresh tokens',
+    description:
+      'Lets a client stay signed in without asking for the password again. Turn it off and callers sign in again when the access token expires.',
+  },
+];
+
+/** The always-present endpoints, for the wizard to show as fixed. */
+export const REQUIRED_AUTH_ENDPOINTS: readonly { route: string; note: string }[] = [
+  { route: 'POST /signIn', note: 'Always generated — without it nothing could obtain a token.' },
+  {
+    route: 'GET /me',
+    note: 'Returns the signed-in user. The one auth endpoint that needs a token.',
+  },
+  { route: 'POST /logout', note: 'Revokes the refresh session.' },
+];
+
+/**
+ * The configuration for an Auth API project.
+ *
+ * Mode `ALL_PUBLIC` rather than a fifth mode, and the reading is exact: the
+ * Auth API exists, and no *entity* requires a token — because there are no
+ * entities. `/me` is still protected, since that is a property of the endpoint
+ * rather than of the mode.
+ *
+ * Inventing an `AUTH_ONLY` mode was the alternative. It would have to be handled
+ * in `entityAuth`, the diff, the classification table, both generators and the
+ * runtime — all to express something `ALL_PUBLIC` plus an empty entity list
+ * already says.
+ */
+export function authProjectConfig(params: {
+  signup: boolean;
+  refreshToken: boolean;
+  cookieAuth: boolean;
+  userFields: AuthConfigView['userFields'];
+}): AuthConfigView {
+  return {
+    mode: 'ALL_PUBLIC',
+    signup: params.signup,
+    signin: true,
+    refreshToken: params.refreshToken,
+    cookieAuth: params.cookieAuth,
+    accessTokenExpiresIn: DEFAULT_ACCESS_TTL,
+    refreshTokenExpiresIn: DEFAULT_REFRESH_TTL,
+    userFields: params.userFields,
+  };
+}
+
+/**
+ * A one-line summary for the Auth API wizard's review line.
+ *
+ * Counts the endpoints rather than naming the mode, because "5 endpoints" is
+ * what the user is deciding and `ALL_PUBLIC` would be actively confusing on a
+ * project whose whole purpose is authentication.
+ */
+export function describeAuthProject(config: AuthConfigView): string {
+  const count = 3 + (config.signup ? 1 : 0) + (config.refreshToken ? 1 : 0);
+  const fields = config.userFields.filter((field) => field.name.trim() !== '').length;
+  const fieldNote =
+    fields === 0 ? '' : ` · ${fields} extra ${fields === 1 ? 'field' : 'fields'} on sign-up`;
+  return `${count} endpoints${fieldNote}`;
+}
+
 export interface EndpointPreview {
   method: string;
   path: string;

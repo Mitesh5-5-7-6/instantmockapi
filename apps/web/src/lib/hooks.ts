@@ -388,7 +388,7 @@ export function useCreateProject() {
   return useMutation({
     mutationFn: (input: {
       name: string;
-      kind?: 'project' | 'single';
+      kind?: 'project' | 'single' | 'auth';
       slug?: string;
       description?: string;
       inputSource: { type: string; raw: unknown };

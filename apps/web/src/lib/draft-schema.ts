@@ -408,13 +408,32 @@ export interface EditorCapabilities {
  * same thing its wizard does with a second endpoint row, and it hosts at
  * `/p/{sng_…}/{slug}/{endpoint}` exactly as the first one does.
  */
-export function editorCapabilities(kind: 'project' | 'single' | undefined): EditorCapabilities {
-  return kind === 'single'
-    ? { noun: 'endpoint', showRelations: false }
-    : // Anything unrecognised, including an absent kind on a document written
-      // before kinds existed, gets the relational editor. It is the superset, so
-      // the failure mode is an offered control rather than a hidden one.
-      { noun: 'entity', showRelations: true };
+export function editorCapabilities(
+  kind: 'project' | 'single' | 'auth' | undefined,
+): EditorCapabilities {
+  if (kind === 'single') {
+    return { noun: 'endpoint', showRelations: false };
+  }
+  if (kind === 'auth') {
+    /*
+     * An Auth API project has no entities at all — its whole surface is the
+     * five auth endpoints, configured on the Auth tab.
+     *
+     * The schema editor is therefore not where its work happens, and the two
+     * capabilities below are what it needs if somebody does open it: no
+     * relations to draw, and "endpoint" as the noun, since anything they add
+     * here becomes a hosted resource rather than a member of a relational
+     * model. Adding one is allowed — a project that grew past pure auth is a
+     * reasonable thing to have — and `validateIPS` waives the
+     * at-least-one-entity rule for this kind, so an empty model stays valid
+     * either way.
+     */
+    return { noun: 'endpoint', showRelations: false };
+  }
+  // Anything unrecognised, including an absent kind on a document written
+  // before kinds existed, gets the relational editor. It is the superset, so
+  // the failure mode is an offered control rather than a hidden one.
+  return { noun: 'entity', showRelations: true };
 }
 
 /**
