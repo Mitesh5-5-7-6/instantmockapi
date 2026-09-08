@@ -7,6 +7,7 @@
 import { type Result, ok, err } from '@instantmockapi/shared';
 import {
   validateIPS,
+  type AuthConfig,
   type InternalProjectSchema,
   type Entity,
   type GenerationConfig,
@@ -20,12 +21,24 @@ export function parseBuilderPayload(
   _projectName: string,
   entities: Entity[],
   generationConfig: GenerationConfig,
+  /**
+   * Authentication chosen in the wizard (Phase 3 §1, §2).
+   *
+   * Optional, and omitted rather than defaulted when absent: a project created
+   * without answering the question has no `authentication` block at all, which
+   * is the same shape every pre-Phase-3 project carries. Writing
+   * `{ mode: 'NONE' }` here would make "never asked" and "asked and declined"
+   * different documents that behave identically — and the first version's diff
+   * would then show a change nobody made.
+   */
+  authentication?: AuthConfig,
 ): Result<InternalProjectSchema, Error> {
   const ips: InternalProjectSchema = {
     projectId,
     version: 1,
     entities,
     generationConfig,
+    ...(authentication !== undefined && authentication.mode !== 'NONE' ? { authentication } : {}),
   };
 
   const validationResult = validateIPS(ips);

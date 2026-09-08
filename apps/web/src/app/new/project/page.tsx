@@ -1,16 +1,18 @@
 'use client';
 
 /**
- * Project API wizard (sample design, PROJECT API FLOW steps 1–4):
+ * Project API wizard (sample design, PROJECT API FLOW):
  *
  *   1 Create Project      name, slug, description
  *   2 Design Data Model   entities, fields, relationships + ER diagram
  *   3 Configure APIs      which entities get generated
- *   4 Configure Generation validators, methods, query features, seed volume
+ *   4 Authentication      who may call them (Phase 3 §2)
+ *   5 Configure Generation validators, methods, query features, seed volume
  *
- * The project is created at the end of step 4 rather than at step 1: creating
- * early would leave a draft row behind every time someone opened the wizard and
- * changed their mind, and the input source is not known until the model is done.
+ * The project is created at the end of the last step rather than at step 1:
+ * creating early would leave a draft row behind every time someone opened the
+ * wizard and changed their mind, and the input source is not known until the
+ * model is done.
  */
 
 import { useMemo, useState } from 'react';
@@ -30,7 +32,7 @@ import {
 } from '@instantmockapi/ui';
 import { useCreateProject } from '../../../lib/hooks';
 import { apiFetch } from '../../../lib/api-client';
-import type { GenerationConfig } from '../../../lib/api-types';
+import type { AuthMode, GenerationConfig } from '../../../lib/api-types';
 import {
   builderFieldToIPS,
   hasEmptyEnum,
@@ -51,12 +53,29 @@ import { normalizeError } from '../../../lib/errors';
 import { notifyFailure } from '../../../lib/toast';
 import { useAction } from '../../../lib/use-action';
 import { ErDiagram, ErLegend } from '../../../components/er-diagram';
+import { AuthStep } from '../../../components/builder/auth-step';
+import { PROJECT_CHOICES, configForChoice } from '../../../lib/auth-onboarding';
 import {
   ALL_FEATURES,
   GenerationConfigFields,
 } from '../../../components/builder/generation-config';
 
-const STEPS = ['Create Project', 'Design Data Model', 'Configure APIs', 'Configure Generation'];
+/*
+ * Five steps, not four.
+ *
+ * Authentication sits after Configure APIs and before Configure Generation,
+ * which is where it belongs in the reading: the previous step decides which
+ * endpoints exist, this one decides who may call them, the next decides what
+ * gets generated from that. Folding it into Configure APIs was the alternative
+ * and it buries the one screen where a first-time user meets the concept.
+ */
+const STEPS = [
+  'Create Project',
+  'Design Data Model',
+  'Configure APIs',
+  'Authentication',
+  'Configure Generation',
+];
 
 const DEFAULT_CONFIG: GenerationConfig = {
   validators: ['zod'],
@@ -100,6 +119,17 @@ export default function NewProjectPage() {
   const [config, setConfig] = useState<GenerationConfig>(DEFAULT_CONFIG);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  /**
+   * The authentication answer (Phase 3 §2).
+   *
+   * Defaults to `NONE`, so a user who skips the step gets exactly the project
+   * this wizard produced before the step existed — and `configForChoice`
+   * returns null for it, meaning no `authentication` block is stored at all.
+   * Defaulting to anything else would turn a feature on by silence.
+   */
+  const [authMode, setAuthMode] = useState<AuthMode>('NONE');
+  const [protectedNames, setProtectedNames] = useState<string[]>([]);
 
   // The slug follows the name until it is edited by hand, after which it is the
   // author's — silently rewriting a deliberate slug on the next keystroke of the
@@ -187,11 +217,39 @@ export default function NewProjectPage() {
       }),
     );
 
+    /*
+     * The wizard's authentication answer, stamped onto the entities.
+     *
+     * Stamped here rather than in the payload's `authentication` block alone,
+     * because `COMBINATION` is resolved per entity — and only the pruned list
+     * is sent, so an excluded entity must not carry a stamp for an entity that
+     * will not exist.
+     */
+    const authentication = configForChoice(authMode);
+    const withAuth =
+      authMode === 'COMBINATION'
+        ? raw.map((entity) => ({
+            ...entity,
+            authentication: protectedNames.includes(entity.name)
+              ? ('PROTECTED' as const)
+              : ('PUBLIC' as const),
+          }))
+        : raw;
+
     return {
-      inputSource: { type: 'builder', raw: { entities: raw, generationConfig: config } },
+      inputSource: {
+        type: 'builder',
+        raw: {
+          entities: withAuth,
+          generationConfig: config,
+          // Absent when the user declined, which is the same document a
+          // pre-Phase-3 project carries — see `configForChoice`.
+          ...(authentication === null ? {} : { authentication }),
+        },
+      },
       pathIndex: paths.build(),
     };
-  }, [entities, config]);
+  }, [entities, config, authMode, protectedNames]);
 
   async function generate(): Promise<void> {
     setBusy(true);
@@ -385,6 +443,40 @@ export default function NewProjectPage() {
       ) : null}
 
       {step === 4 ? (
+        <div className="ui-stack">
+          <AuthStep
+            choices={PROJECT_CHOICES}
+            mode={authMode}
+            onMode={(mode) => {
+              setAuthMode(mode);
+              // Selections are kept across a mode change, so flipping to
+              // "everything" to look at the preview and back again does not
+              // discard the entities the user already ticked.
+              if (mode !== 'COMBINATION' && authMode !== 'COMBINATION') {
+                setProtectedNames([]);
+              }
+            }}
+            entities={included}
+            protectedNames={protectedNames}
+            onToggleEntity={(entityName) =>
+              setProtectedNames((current) =>
+                current.includes(entityName)
+                  ? current.filter((entry) => entry !== entityName)
+                  : [...current, entityName],
+              )
+            }
+            methods={config.methods}
+          />
+          <div className="ui-row">
+            <Button variant="secondary" onClick={() => setStep(3)}>
+              Back
+            </Button>
+            <Button onClick={() => goToStep(5)}>Next</Button>
+          </div>
+        </div>
+      ) : null}
+
+      {step === 5 ? (
         <Card className="ui-stack">
           <h2>Configure Generation</h2>
           <GenerationConfigFields config={config} onChange={setConfig} />
@@ -394,7 +486,7 @@ export default function NewProjectPage() {
             {config.methods.length} methods
           </div>
           <div className="ui-row">
-            <Button variant="secondary" onClick={() => setStep(3)}>
+            <Button variant="secondary" onClick={() => setStep(4)}>
               Back
             </Button>
             <Button
