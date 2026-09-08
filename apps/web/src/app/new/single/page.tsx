@@ -37,7 +37,9 @@ import { PathIndexBuilder } from '../../../lib/error-paths';
 import { normalizeError } from '../../../lib/errors';
 import { notifyFailure } from '../../../lib/toast';
 import { useAction } from '../../../lib/use-action';
-import type { GenerationConfig } from '../../../lib/api-types';
+import type { AuthMode, GenerationConfig } from '../../../lib/api-types';
+import { AuthStep } from '../../../components/builder/auth-step';
+import { SIMPLE_CHOICES, configForChoice } from '../../../lib/auth-onboarding';
 import {
   basePathToSlug,
   endpointsToEntities,
@@ -99,6 +101,8 @@ export default function NewSingleApiPage() {
   const [rawJson, setRawJson] = useState(SAMPLE_JSON);
   const [swaggerRaw, setSwaggerRaw] = useState('');
   const [config, setConfig] = useState<GenerationConfig>(DEFAULT_CONFIG);
+  // §1's yes/no. Defaults to no, so skipping the question changes nothing.
+  const [authMode, setAuthMode] = useState<AuthMode>('NONE');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -136,14 +140,22 @@ export default function NewSingleApiPage() {
         pathIndex: new Map<string, string>(),
       };
     }
+    // §1's answer. `configForChoice` returns null for "no", so declining
+    // stores no `authentication` block at all — the same document this wizard
+    // produced before the question existed.
+    const authentication = configForChoice(authMode);
     return {
       inputSource: {
         type: 'builder',
-        raw: { entities: endpointsToEntities(endpoints), generationConfig: config },
+        raw: {
+          entities: endpointsToEntities(endpoints),
+          generationConfig: config,
+          ...(authentication === null ? {} : { authentication }),
+        },
       },
       pathIndex: endpointPathIndex(endpoints),
     };
-  }, [tab, rawJson, swaggerRaw, endpoints, config]);
+  }, [tab, rawJson, swaggerRaw, endpoints, config, authMode]);
 
   const create = useAction(useCreateProject(), {
     // Declared after the memo it reads, so the dependency is visible in the
@@ -355,32 +367,67 @@ export default function NewSingleApiPage() {
       ) : null}
 
       {step === 3 ? (
-        <Card className="ui-stack">
-          <h2>Configure &amp; Generate</h2>
-          <GenerationConfigFields
-            config={config}
-            onChange={setConfig}
-            // A single API declares no relations, so there is nothing to include.
-            showRelations={false}
-            recordLabel="Mock records per endpoint"
-          />
-          {/* Stated rather than offered as a choice: the runtime serves JSON
+        <div className="ui-stack">
+          {/*
+           * §1's question, and only on the authoring tab.
+           *
+           * A JSON or Swagger import goes through a parser that builds the IPS
+           * from the file, and the create payload has no slot for an answer
+           * given here — so asking on those tabs would collect a choice and
+           * silently drop it, which is worse than not asking. They get a
+           * pointer to the Auth tab instead, where the same choice applies
+           * after the project exists.
+           */}
+          {tab === 'endpoints' ? (
+            <AuthStep
+              choices={SIMPLE_CHOICES}
+              mode={authMode}
+              onMode={setAuthMode}
+              entities={endpoints
+                .filter((endpoint) => endpoint.name.trim())
+                .map((endpoint) => ({ name: endpoint.name.trim() }))}
+              protectedNames={[]}
+              onToggleEntity={() => undefined}
+              methods={config.methods}
+              // §1: a Single API is one resource, so there is nothing to pick
+              // between and the per-entity list would be a list of one.
+              showEntityPicker={false}
+            />
+          ) : (
+            <Note>
+              Authentication is set on the project&rsquo;s Auth tab once this import has been
+              created — the imported file decides the shape, and who may call it is a separate
+              choice.
+            </Note>
+          )}
+
+          <Card className="ui-stack">
+            <h2>Configure &amp; Generate</h2>
+            <GenerationConfigFields
+              config={config}
+              onChange={setConfig}
+              // A single API declares no relations, so there is nothing to include.
+              showRelations={false}
+              recordLabel="Mock records per endpoint"
+            />
+            {/* Stated rather than offered as a choice: the runtime serves JSON
               only, and a permanently-disabled XML checkbox would advertise a
               format that does not exist. */}
-          <Note>Responses are JSON. XML is not available.</Note>
-          <div className="ui-row">
-            <Button variant="secondary" onClick={() => setStep(2)}>
-              Back
-            </Button>
-            <Button
-              disabled={busy || create.isPending || config.methods.length === 0}
-              onClick={() => void generate()}
-            >
-              {busy ? 'Starting…' : 'Generate'}
-            </Button>
-          </div>
-          {error ? <FormError title={error} /> : null}
-        </Card>
+            <Note>Responses are JSON. XML is not available.</Note>
+            <div className="ui-row">
+              <Button variant="secondary" onClick={() => setStep(2)}>
+                Back
+              </Button>
+              <Button
+                disabled={busy || create.isPending || config.methods.length === 0}
+                onClick={() => void generate()}
+              >
+                {busy ? 'Starting…' : 'Generate'}
+              </Button>
+            </div>
+            {error ? <FormError title={error} /> : null}
+          </Card>
+        </div>
       ) : null}
 
       {error && step === 1 ? <FormError title={error} /> : null}

@@ -342,3 +342,117 @@ describe('the diff sees an auth change', () => {
     expect(impact.artifacts).not.toContain('mock_data');
   });
 });
+
+/**
+ * The wizard's answer, through create (Phase 3 §1, §2).
+ *
+ * The whole point of asking at creation time is that the first generated API
+ * already behaves the way the user chose. That means the builder payload's
+ * `authentication` block has to survive `parseInputSource` and land on the live
+ * definition of **v1** — not arrive later as a v2 edit, which would leave a v1
+ * that produced an API nobody asked for.
+ */
+describe('creating a project with the wizard’s authentication answer', () => {
+  const createWith = (raw: Record<string, unknown>) =>
+    app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: authHeader(token),
+      payload: {
+        name: 'Shop',
+        inputSource: { type: 'builder', raw: JSON.stringify(raw) },
+      },
+    });
+
+  const entity = (name: string, authentication?: 'PUBLIC' | 'PROTECTED') => ({
+    name,
+    identity: { field: 'id', style: 'uuid' },
+    fields: [{ name: 'label', type: 'string', required: false, default: null, children: [] }],
+    relations: [],
+    ...(authentication === undefined ? {} : { authentication }),
+  });
+
+  const generationConfig = {
+    validators: ['zod'],
+    types: ['typescript'],
+    methods: ['GET', 'POST', 'DELETE'],
+    mockRecords: 5,
+    features: { search: false, filter: false, sort: false, include: false },
+  };
+
+  it('stores the answer on v1, so the first generated API already honours it', async () => {
+    const created = await createWith({
+      entities: [entity('Product'), entity('Order')],
+      generationConfig,
+      authentication: authConfig('ALL_PROTECTED'),
+    });
+    expect(created.statusCode, created.body).toBe(201);
+
+    const project = await Project.findById(created.json().id as string);
+    const ips = project!.ips as InternalProjectSchema;
+    expect(ips.authentication?.mode).toBe('ALL_PROTECTED');
+    // The version the first generation will run against.
+    expect(project!.currentVersion).toBe(1);
+  });
+
+  it('carries the per-entity answer through for the mixed mode', async () => {
+    const created = await createWith({
+      entities: [entity('Product', 'PUBLIC'), entity('Order', 'PROTECTED')],
+      generationConfig,
+      authentication: authConfig('COMBINATION'),
+    });
+    expect(created.statusCode, created.body).toBe(201);
+
+    const ips = (await Project.findById(created.json().id as string))!.ips as InternalProjectSchema;
+    expect(ips.authentication?.mode).toBe('COMBINATION');
+    expect(ips.entities.find((e) => e.name === 'Product')?.authentication).toBe('PUBLIC');
+    expect(ips.entities.find((e) => e.name === 'Order')?.authentication).toBe('PROTECTED');
+  });
+
+  /**
+   * §26, at creation time. Declining the question — or a wizard that never
+   * asked — must produce the same document, or the first version's diff would
+   * report a setting nobody chose.
+   */
+  it('stores no block at all when the answer is omitted', async () => {
+    const created = await createWith({ entities: [entity('Product')], generationConfig });
+    expect(created.statusCode, created.body).toBe(201);
+
+    const ips = (await Project.findById(created.json().id as string))!.ips as InternalProjectSchema;
+    expect(ips.authentication).toBeUndefined();
+  });
+
+  it('stores no block for an explicit NONE either', async () => {
+    // The client sends null rather than `{mode:'NONE'}`, but a hand-rolled
+    // caller might send the latter — and the two must not produce different
+    // documents that behave identically.
+    const created = await createWith({
+      entities: [entity('Product')],
+      generationConfig,
+      authentication: { ...authConfig('ALL_PROTECTED'), mode: 'NONE' },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+
+    const ips = (await Project.findById(created.json().id as string))!.ips as InternalProjectSchema;
+    expect(ips.authentication).toBeUndefined();
+  });
+
+  /** The validator still applies — a bad answer must not create a project. */
+  it('rejects a malformed answer rather than dropping it', async () => {
+    const created = await createWith({
+      entities: [entity('Product')],
+      generationConfig,
+      authentication: { ...authConfig('ALL_PROTECTED'), accessTokenExpiresIn: '900' },
+    });
+    expect(created.statusCode).toBe(422);
+  });
+
+  it('rejects an entity that collides with an auth endpoint', async () => {
+    const created = await createWith({
+      entities: [entity('Me')],
+      generationConfig,
+      authentication: authConfig('ALL_PROTECTED'),
+    });
+    expect(created.statusCode).toBe(422);
+  });
+});

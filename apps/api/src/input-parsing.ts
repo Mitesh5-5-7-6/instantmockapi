@@ -10,6 +10,7 @@ import {
   ALL_QUERY_FEATURES,
   materializeRelations,
   validateIPS,
+  type AuthConfig,
   type Entity,
   type GenerationConfig,
   type InternalProjectSchema,
@@ -40,7 +41,11 @@ function parseBuilderRaw(
   } catch {
     throw new AppError({ code: 'PARSE_ERROR', message: 'Builder payload must be valid JSON' });
   }
-  const builder = raw as { entities?: Entity[]; generationConfig?: GenerationConfig };
+  const builder = raw as {
+    entities?: Entity[];
+    generationConfig?: GenerationConfig;
+    authentication?: AuthConfig;
+  };
   if (!Array.isArray(builder.entities)) {
     throw new AppError({
       code: 'PARSE_ERROR',
@@ -53,6 +58,11 @@ function parseBuilderRaw(
     name,
     builder.entities,
     builder.generationConfig ?? defaultGenerationConfig(env),
+    // Not defaulted: a wizard that never asked, and a user who answered "no",
+    // both produce a project with no `authentication` block — the same document
+    // a pre-Phase-3 project has. `validateIPS` inside the adapter is what
+    // rejects a malformed one, so nothing needs sanitising here.
+    builder.authentication,
   );
 }
 

@@ -275,6 +275,22 @@ const ALLOWED: Record<string, string> = {
    */
   'apps/web/src/lib/auth-config.ts':
     'owns the client-side resolution; pins the same matrix in its own test since it cannot import this module',
+  /*
+   * A pass-through, not a read for a decision.
+   *
+   * `parseBuilderRaw` lifts the wizard's answer off an untrusted payload and
+   * hands it to the adapter, which puts it on the IPS — where `projectAuth`
+   * reads it later. Nothing here compares it to a protection value.
+   *
+   * Destructuring it (`const { authentication } = builder`) would slip past the
+   * regex without changing what the code does, so it is exempted honestly
+   * instead. This is the third entry on the list, and every addition is a
+   * little less protection: a broad pattern with reviewed exemptions still
+   * beats a narrow one that would miss the two-line form of the mistake, but
+   * the list is worth resisting.
+   */
+  'apps/api/src/input-parsing.ts':
+    'passes the wizard payload’s auth block to the adapter; makes no protection decision',
 };
 
 /**
