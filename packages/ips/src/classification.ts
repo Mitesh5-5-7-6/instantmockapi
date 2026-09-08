@@ -195,6 +195,28 @@ function featuresImpact(change: SchemaChange): ChangeImpact {
     : 'NON_BREAKING';
 }
 
+/**
+ * Project the five-value risk onto the three-value impact.
+ *
+ * Used only where `changes.ts` has *already* weighed the direction of the
+ * change — the authentication kinds, whose `risk` comes from `authDirection`.
+ * Deliberately not a general fallback: for most kinds a risk→impact map cannot
+ * satisfy §12 at all, which is why this table is keyed on `kind` in the first
+ * place. Applying it wholesale would quietly undo that.
+ */
+function fromRisk(change: SchemaChange): ChangeImpact {
+  switch (change.risk) {
+    case 'BREAKING':
+    case 'ROUTING':
+      return 'BREAKING';
+    case 'WARNING':
+      return 'POTENTIALLY_BREAKING';
+    case 'SAFE':
+    case 'INFO':
+      return 'NON_BREAKING';
+  }
+}
+
 /** A relation echoing an entity rename resolves to the same records. */
 function isRenameEcho(change: SchemaChange): boolean {
   // `changes.ts` marks the echo by demoting it to INFO with no aspect; nothing
@@ -263,6 +285,30 @@ const IMPACT_RULES: Record<ChangeKind, Rule> = {
   MOCK_RECORDS_CHANGED: 'NON_BREAKING',
   // Which files a developer can download. The hosted API is untouched.
   GENERATORS_CHANGED: 'NON_BREAKING',
+
+  /* ── authentication (Phase 3 §17) ──
+   *
+   * The asymmetry runs through all six: requiring a token where none was
+   * required breaks every caller of that endpoint at once, while dropping the
+   * requirement breaks nobody — an unnecessary `Authorization` header is
+   * ignored, not rejected.
+   *
+   * Read off `risk`, which `authDirection` already decided, rather than
+   * re-deriving the direction from `before`/`after` here. That is the same
+   * single-reader rule `validationDirection` established: two readers of the
+   * same evidence eventually disagree, and the two axes are never shown
+   * together, so the disagreement would be invisible.
+   */
+  AUTH_MODE_CHANGED: fromRisk,
+  ENTITY_AUTH_CHANGED: fromRisk,
+  AUTH_ENDPOINTS_CHANGED: fromRisk,
+  // Breaking in both directions: enabling it stops returning tokens in the
+  // body, disabling it leaves a browser client holding no credential.
+  AUTH_COOKIE_CHANGED: 'BREAKING',
+  // A caller that refreshes on 401 cannot tell. In the diff only because §17
+  // requires the history to show it.
+  AUTH_TOKEN_EXPIRY_CHANGED: 'NON_BREAKING',
+  AUTH_USER_FIELDS_CHANGED: fromRisk,
 };
 
 const TYPE_RULES: Record<ChangeKind, ChangeType> = {
@@ -302,6 +348,20 @@ const TYPE_RULES: Record<ChangeKind, ChangeType> = {
   QUERY_FEATURES_CHANGED: 'MODIFIED',
   MOCK_RECORDS_CHANGED: 'MODIFIED',
   GENERATORS_CHANGED: 'MODIFIED',
+
+  /* ── authentication ──
+   *
+   * All MODIFIED, including the endpoint toggles. `AUTH_ENDPOINTS_CHANGED`
+   * genuinely does add and remove endpoints, but a single row cannot be both
+   * ADDED and REMOVED and it can carry either in the same edit. MODIFIED is the
+   * honest label for "this setting moved"; the summary names which endpoints.
+   */
+  AUTH_MODE_CHANGED: 'MODIFIED',
+  ENTITY_AUTH_CHANGED: 'MODIFIED',
+  AUTH_ENDPOINTS_CHANGED: 'MODIFIED',
+  AUTH_COOKIE_CHANGED: 'MODIFIED',
+  AUTH_TOKEN_EXPIRY_CHANGED: 'MODIFIED',
+  AUTH_USER_FIELDS_CHANGED: 'MODIFIED',
 };
 
 /* ────────────────────────── the projections ────────────────────────── */

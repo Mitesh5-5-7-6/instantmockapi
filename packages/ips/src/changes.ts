@@ -27,11 +27,19 @@
  *   - `read` — only response-shaped endpoints.
  *   - `both` — a type change or a field appearing/disappearing alters the
  *     response body *and* the accepted request.
- *   - `routing` — the endpoint's own path moves. Entity renames do this, because
- *     the hosted route is derived from the entity name.
+ *   - `routing` — the endpoint's own path moves, **or whether it can be called
+ *     at all changes**. Entity renames do the first, because the hosted route is
+ *     derived from the entity name; authentication changes do the second.
  *
  * Without the aspect, an `age` type change would mark `DELETE /users/{id}` as
  * affected — and the spec is explicit that it must not.
+ *
+ * That exclusion is also why authentication uses `routing` rather than `both`.
+ * `both` resolves to the `read`/`write` entity→endpoint edges, which omit DELETE
+ * by design; protecting an entity under `both` would report every method except
+ * the destructive one, and would additionally drag in the schema generators and
+ * reseed the mock store. `routing` is emitted for every row and stops at the
+ * surface. See `diffAuth`.
  *
  * ## What this module deliberately does not do
  *
@@ -40,7 +48,15 @@
  * endpoints is what lets it be a pure function of two schemas.
  */
 
-import type { Entity, Field, InternalProjectSchema, Relation, ValidationRules } from './types.js';
+import type {
+  Entity,
+  EntityAuth,
+  Field,
+  InternalProjectSchema,
+  Relation,
+  ValidationRules,
+} from './types.js';
+import { entityAuth, projectAuth } from './auth.js';
 import type { GenerationConfig } from './types.js';
 
 export const CHANGE_KINDS = [
@@ -73,6 +89,17 @@ export const CHANGE_KINDS = [
   'QUERY_FEATURES_CHANGED',
   'MOCK_RECORDS_CHANGED',
   'GENERATORS_CHANGED',
+  /* Authentication (Phase 3 §17). Six kinds rather than one
+   * `AUTHENTICATION_CHANGED`, because their risks genuinely differ: turning a
+   * project protected breaks every caller, while lengthening a token lifetime
+   * breaks nobody. One kind would have to take the worst of them and would
+   * report a TTL edit as breaking. */
+  'AUTH_MODE_CHANGED',
+  'ENTITY_AUTH_CHANGED',
+  'AUTH_ENDPOINTS_CHANGED',
+  'AUTH_COOKIE_CHANGED',
+  'AUTH_TOKEN_EXPIRY_CHANGED',
+  'AUTH_USER_FIELDS_CHANGED',
 ] as const;
 
 export type ChangeKind = (typeof CHANGE_KINDS)[number];
@@ -124,6 +151,22 @@ export interface SchemaChange {
   aspect: ChangeAspect;
   /** Stable id of the entity this change belongs to, when there is one. */
   entityId?: string;
+  /**
+   * Every entity a **project-level** change reaches, when that set is
+   * computable and smaller than "all of them".
+   *
+   * One row in the diff, many endpoints in the impact report — the same split a
+   * field change already gets, and the reason it exists here is that the two
+   * requirements pull in opposite directions. §37 forbids the wall of rows a
+   * per-entity diff of `ALL_PUBLIC → ALL_PROTECTED` would produce; the impact
+   * report has to enumerate anyway, or the affected list reads `0 APIs` for the
+   * most breaking change the product can make, and every endpoint appears under
+   * "No impact" as a confident and false claim.
+   *
+   * Only the diff can compute this: it is the difference between two resolved
+   * states, and `analyseImpact` holds a graph built from one side only.
+   */
+  entityIds?: string[];
   /** Entity name as it reads in the DRAFT — what the user is looking at. */
   entityName?: string;
   fieldId?: string;
@@ -1033,6 +1076,279 @@ function diffConfig(before: GenerationConfig, after: GenerationConfig): SchemaCh
   return changes;
 }
 
+/* ────────────────────────── authentication diff ──────────────────────────
+ *
+ * Phase 3 §17. Every one of these is a change to the *generated* API's
+ * authentication — never the platform's.
+ */
+
+/**
+ * Which way a protection requirement moved.
+ *
+ * Exported and read by **both** the risk choice here and the three-value impact
+ * projection in `classification.ts`, following `validationDirection`'s
+ * precedent exactly. One reader of the evidence, so the commit dialog and the
+ * compare page cannot disagree about the same edit.
+ *
+ * The asymmetry is the whole content of the type:
+ *
+ * - `tightened` — a caller that worked now gets 401. Unconditionally broken,
+ *   for every caller of that endpoint, immediately.
+ * - `relaxed` — a token is no longer required. Nothing that worked stops
+ *   working: an unnecessary `Authorization` header is ignored, not rejected.
+ *   This is `SAFE` in the sense `changes.ts` already defines, and calling it
+ *   breaking would train people to ignore the label.
+ *
+ * A relaxation is still worth *seeing* — it exposes data that was protected —
+ * but that is a security review, not a compatibility break, and conflating the
+ * two is how a genuine outage gets the same chip as a deliberate opening.
+ */
+export type AuthDirection = 'tightened' | 'relaxed' | 'unchanged';
+
+export function authDirection(before: EntityAuth, after: EntityAuth): AuthDirection {
+  if (before === after) {
+    return 'unchanged';
+  }
+  return after === 'PROTECTED' ? 'tightened' : 'relaxed';
+}
+
+/**
+ * The protection every entity ends up with, so a mode change can be reported
+ * once rather than as one row per entity.
+ *
+ * `ALL_PUBLIC → ALL_PROTECTED` on a twelve-entity project is one decision. §37
+ * forbids the wall of rows the naive per-entity diff would produce, and the
+ * mode row already says what happened — the entity rows would be its echo, the
+ * same relation-cascade problem Phase 2 solved by attributing to the cause.
+ */
+function authOf(ips: InternalProjectSchema, entity: Pick<Entity, 'authentication'>): EntityAuth {
+  return entityAuth(projectAuth(ips), entity);
+}
+
+function diffAuth(
+  active: InternalProjectSchema,
+  draft: InternalProjectSchema,
+  entities: { matched: { before: Entity; after: Entity; by: MatchBasis }[] },
+  ctx: DiffContext,
+): SchemaChange[] {
+  const before = projectAuth(active);
+  const after = projectAuth(draft);
+  const changes: SchemaChange[] = [];
+
+  if (before.mode !== after.mode) {
+    /*
+     * Which entities the mode change actually moved, and which way.
+     *
+     * Computed from the *matched* pairs, so an entity added or removed in the
+     * same edit is left to its own ENTITY_ADDED/REMOVED row rather than being
+     * counted twice.
+     */
+    const movements = entities.matched.map(({ before: previous, after: next }) => ({
+      entity: next,
+      direction: authDirection(authOf(active, previous), authOf(draft, next)),
+    }));
+
+    /*
+     * The project-level direction is "did anything get tightened", not "is
+     * anything protected".
+     *
+     * The coarser reading — comparing whether *any* entity was protected before
+     * against whether *any* is now — calls `COMBINATION → ALL_PROTECTED`
+     * unchanged whenever a single entity was already protected, because both
+     * sides answer yes. That collapses to `aspect: 'none'` and the change stops
+     * reaching any endpoint at all.
+     *
+     * `NONE → ALL_PUBLIC` still comes out unchanged, which is the case worth
+     * preserving: it adds an Auth API and protects nothing, so calling it
+     * breaking would report a breaking change that breaks nobody.
+     */
+    const direction: AuthDirection = movements.some((move) => move.direction === 'tightened')
+      ? 'tightened'
+      : movements.some((move) => move.direction === 'relaxed')
+        ? 'relaxed'
+        : 'unchanged';
+
+    /*
+     * The moved entities travel with the change, so the impact report can
+     * enumerate their endpoints while the diff shows one row.
+     *
+     * Only the ones that moved: `COMBINATION → ALL_PROTECTED` leaves an
+     * already-protected entity exactly as it was, and listing its endpoints as
+     * affected would cost the precision the no-impact list exists to
+     * demonstrate.
+     */
+    const moved = movements
+      .filter((move) => move.direction !== 'unchanged')
+      .map((move) => entityKeyOf(ctx, move.entity))
+      .filter((id): id is string => id !== undefined);
+
+    changes.push({
+      ...(moved.length > 0 ? { entityIds: moved } : {}),
+      kind: 'AUTH_MODE_CHANGED',
+      risk: direction === 'tightened' ? 'BREAKING' : direction === 'relaxed' ? 'SAFE' : 'INFO',
+      /*
+       * `routing`, not `both`, and this is not a technicality.
+       *
+       * `EdgeAspect` defines routing as "the target's URL, **or its
+       * existence**, depends on the source" — and an auth change decides
+       * whether the endpoint exists *for a given caller*. More concretely,
+       * `both` resolves to the `read`/`write` entity→endpoint edges, and
+       * `graph.ts` excludes DELETE from those on purpose (its contract is a
+       * path parameter and an empty body, so a field change cannot reach it).
+       *
+       * Under `both` this would report GET, POST, PUT and PATCH as affected and
+       * silently omit `DELETE /payment/{id}` — the one endpoint whose exposure
+       * matters most. The `routing` edge is emitted for every row, DELETE
+       * included.
+       *
+       * Independent of `risk`, which stays BREAKING rather than ROUTING: no
+       * caller has a URL to update.
+       */
+      aspect: direction === 'unchanged' ? 'none' : 'routing',
+      before: before.mode,
+      after: after.mode,
+      summary: `Authentication mode changed from ${before.mode} to ${after.mode}`,
+    });
+  }
+
+  /*
+   * Per-entity rows only while the mode itself held still.
+   *
+   * A mode change already accounts for every entity it moved, so emitting both
+   * double-counts the summary and buries the one row that explains the rest.
+   */
+  if (before.mode === after.mode) {
+    for (const { before: previous, after: entity, by } of entities.matched) {
+      const direction = authDirection(authOf(active, previous), authOf(draft, entity));
+      if (direction === 'unchanged') {
+        continue;
+      }
+      const id = entityKeyOf(ctx, entity);
+      changes.push({
+        ...(id === undefined ? {} : { entityId: id }),
+        entityName: entity.name,
+        ...basis(by),
+        kind: 'ENTITY_AUTH_CHANGED',
+        risk: direction === 'tightened' ? 'BREAKING' : 'SAFE',
+        // See `AUTH_MODE_CHANGED` above: `routing` is the only aspect that
+        // reaches DELETE, and an auth change reaches every method.
+        aspect: 'routing',
+        before: authOf(active, previous),
+        after: authOf(draft, entity),
+        summary:
+          direction === 'tightened'
+            ? `${entity.name} now requires authentication`
+            : `${entity.name} no longer requires authentication`,
+      });
+    }
+  }
+
+  const endpointsBefore = {
+    signup: before.signup,
+    signin: before.signin,
+    refresh: before.refreshToken,
+  };
+  const endpointsAfter = {
+    signup: after.signup,
+    signin: after.signin,
+    refresh: after.refreshToken,
+  };
+  if (!sameValue(endpointsBefore, endpointsAfter)) {
+    const removed = (['signup', 'signin', 'refresh'] as const).filter(
+      (name) => endpointsBefore[name] && !endpointsAfter[name],
+    );
+    changes.push({
+      kind: 'AUTH_ENDPOINTS_CHANGED',
+      // These endpoints EXIST or do not, so removing one 404s a URL callers
+      // were using — the same reasoning `METHODS_CHANGED` applies.
+      risk: removed.length > 0 ? 'BREAKING' : 'SAFE',
+      aspect: 'routing',
+      before: endpointsBefore,
+      after: endpointsAfter,
+      summary:
+        removed.length > 0
+          ? `Auth endpoints removed: ${removed.join(', ')}`
+          : 'Auth endpoints changed',
+    });
+  }
+
+  if (before.cookieAuth !== after.cookieAuth) {
+    changes.push({
+      kind: 'AUTH_COOKIE_CHANGED',
+      /*
+       * Breaking in both directions, unusually.
+       *
+       * Turning cookies ON can stop returning tokens in the signin body, so a
+       * client reading `response.accessToken` gets undefined. Turning them OFF
+       * leaves a browser client with no credential at all, because it never
+       * held the token. Either way the client's way of authenticating stops
+       * working, which is the definition the file uses.
+       */
+      risk: 'BREAKING',
+      aspect: 'both',
+      before: before.cookieAuth,
+      after: after.cookieAuth,
+      summary: after.cookieAuth
+        ? 'Cookie authentication enabled'
+        : 'Cookie authentication disabled',
+    });
+  }
+
+  if (
+    before.accessTokenExpiresIn !== after.accessTokenExpiresIn ||
+    before.refreshTokenExpiresIn !== after.refreshTokenExpiresIn
+  ) {
+    changes.push({
+      kind: 'AUTH_TOKEN_EXPIRY_CHANGED',
+      // No endpoint, shape or contract moves — a caller that refreshes on 401
+      // cannot tell. §17 still requires it in the history, which is why it is
+      // a change at all rather than an untracked runtime setting.
+      risk: 'INFO',
+      aspect: 'none',
+      before: {
+        accessTokenExpiresIn: before.accessTokenExpiresIn,
+        refreshTokenExpiresIn: before.refreshTokenExpiresIn,
+      },
+      after: {
+        accessTokenExpiresIn: after.accessTokenExpiresIn,
+        refreshTokenExpiresIn: after.refreshTokenExpiresIn,
+      },
+      summary: 'Token lifetimes changed',
+    });
+  }
+
+  if (!sameValue(before.userFields, after.userFields)) {
+    const addedRequired = after.userFields.filter(
+      (field) =>
+        field.required && !before.userFields.some((existing) => existing.name === field.name),
+    );
+    const removed = before.userFields.filter(
+      (field) => !after.userFields.some((existing) => existing.name === field.name),
+    );
+    changes.push({
+      kind: 'AUTH_USER_FIELDS_CHANGED',
+      /*
+       * The signup request body. A new *required* field 422s every existing
+       * signup call; a removed one stops being accepted. A new optional field
+       * is strictly additive — the same three-way reading `FIELD_ADDED` gets,
+       * and the reason this is not a flat BREAKING.
+       */
+      risk: addedRequired.length > 0 || removed.length > 0 ? 'BREAKING' : 'SAFE',
+      aspect: 'write',
+      before: before.userFields,
+      after: after.userFields,
+      summary:
+        addedRequired.length > 0
+          ? `Signup now requires: ${addedRequired.map((field) => field.name).join(', ')}`
+          : removed.length > 0
+            ? `Signup fields removed: ${removed.map((field) => field.name).join(', ')}`
+            : 'Signup fields changed',
+    });
+  }
+
+  return changes;
+}
+
 /* ────────────────────────── entry point ────────────────────────── */
 
 /**
@@ -1072,6 +1388,18 @@ export function diffSchemas(
     }
   }
   const ctx: DiffContext = { renamedEntities, match };
+
+  /*
+   * Authentication, after the config and before the entities.
+   *
+   * It needs `entities.matched` — a per-entity protection change has to be
+   * reported against the entity that survived, and pairing is what identifies
+   * it — so this cannot live in `diffConfig`, which sees only the two configs.
+   *
+   * Ordered here so the rendered list reads outside-in: what the whole project
+   * generates, then who can call it, then what the shapes are.
+   */
+  changes.push(...diffAuth(active, draft, entities, ctx));
 
   for (const entity of entities.addedOnly) {
     // In 'id' mode an entity with no id is skipped rather than reported: it is
