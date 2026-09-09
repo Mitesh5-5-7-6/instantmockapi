@@ -86,6 +86,22 @@ export interface RuntimeFacts {
   hostedUrl?: string | null;
   /** Where the definition came from: a stored version, or the live project. */
   source?: 'version' | 'project' | 'draft';
+  /**
+   * Whether the definition being documented is the one the hosted API serves.
+   *
+   * §20's hard rule is that draft configuration must never be combined with
+   * published runtime configuration, and this is the field that makes the rule
+   * expressible rather than a matter of care. The trap is specifically
+   * `hostedUrl`: printing a live URL beside a definition that URL does not
+   * serve invites a reader to conclude it does — and a developer who writes
+   * client code against a draft's field list and the published URL gets 422s
+   * they cannot explain.
+   *
+   * So the renderer prints `hostedUrl` only when this is true, and when it is
+   * false it says which version *is* live instead. Absent means unstated, for
+   * a caller documenting a definition with no deployment in the picture at all.
+   */
+  serving?: boolean;
   /** Rendered in its own section, never inside the canonical body (§8). */
   generatedAt?: string;
 }

@@ -14,7 +14,13 @@ import {
 } from '@instantmockapi/db';
 import { artifactKey, createMemoryStorage, type MemoryStorage } from '@instantmockapi/storage';
 import { generateHostingConfig } from '@instantmockapi/generator-hosting';
-import type { AuthConfig, AuthMode, InternalProjectSchema } from '@instantmockapi/ips';
+import {
+  buildBlueprint,
+  readBlueprint,
+  type AuthConfig,
+  type AuthMode,
+  type InternalProjectSchema,
+} from '@instantmockapi/ips';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import { createMemoryCache } from '../cache.js';
 import { buildMockRuntime } from '../server.js';
@@ -972,5 +978,189 @@ describe('§23: the credential throttle, live', () => {
     expect(
       (await limited.inject({ method: 'POST', url: `/p/${projectId}/logout` })).statusCode,
     ).toBe(204);
+  });
+});
+
+describe('Phase 4 §26: an imported copy shares no credential with its source', () => {
+  /**
+   * The test §26 names, with the pairing Phase 4 introduces.
+   *
+   *     Project A → Blueprint → Project B
+   *     A auth secret !== B auth secret
+   *     A token cannot authenticate against B
+   *
+   * §26 says to reuse Phase 3's project-isolation behaviour, and the tests
+   * above already prove it for two *unrelated* projects. What is untested until
+   * here is the composition: a project built by the blueprint pathway from
+   * another project's definition. Every field of its definition is identical —
+   * same entities, same stamps, same auth configuration, same stable ids — so
+   * if anything about isolation depended on the definitions differing, this is
+   * where it would show.
+   *
+   * The blueprint is built and read with the real `buildBlueprint` and
+   * `readBlueprint`, so this exercises the actual pathway rather than a copy of
+   * the definition. The HTTP import route is tested separately in `apps/api`;
+   * what only the runtime can prove is that a real token is refused.
+   */
+  async function stageImportedCopy(sourceId: string): Promise<string> {
+    const source = await Project.findById(sourceId);
+    const sourceIps = source!.ips as InternalProjectSchema;
+
+    const blueprint = buildBlueprint(sourceIps, { name: 'Imported copy' });
+
+    const owner = await User.create({
+      email: `owner-${Math.random().toString(36).slice(2)}@x.dev`,
+      authProvider: 'email',
+    });
+    const copy = new Project({
+      ownerId: owner._id,
+      name: 'Imported copy',
+      status: 'active',
+      inputSource: { type: 'builder', raw: '{}' },
+      currentVersion: 1,
+      hosted: {
+        url: 'https://api.instantmockapi.dev/p/y',
+        expiresAt: new Date(Date.now() + 86_400_000),
+      },
+    });
+    const copyId = String(copy._id);
+
+    const read = readBlueprint(blueprint, { projectId: copyId });
+    if (!read.ok) {
+      throw new Error(`blueprint did not read back: ${JSON.stringify(read.error.details)}`);
+    }
+    copy.ips = read.value.ips;
+    copy.generationConfig = read.value.ips.generationConfig;
+    await copy.save();
+
+    const files = generateHostingConfig(read.value.ips);
+    const ref = artifactKey(copyId, 1, 'hosted_api', 'hosting.config.json');
+    await storage.put(ref, files['hosting.config.json'] ?? '{}', 'application/json');
+    await Artifact.create({
+      projectId: copy._id,
+      artifactType: 'hosted_api',
+      version: 1,
+      status: 'completed',
+      storageRef: ref,
+      generatedAt: new Date(),
+      workerId: 'F',
+    });
+    for (const entity of ['product', 'order']) {
+      await MockStore.create({
+        projectId: copy._id,
+        entity,
+        records: [{ id: `${entity}-1`, label: 'One' }],
+      });
+    }
+    return copyId;
+  }
+
+  /**
+   * Isolation holds — but note *why*, because it is not what it looks like.
+   *
+   * Two independent mechanisms refuse this token: the key differs, and the
+   * `aud` claim names the project it was minted for. The audience alone is
+   * enough, so this test would still pass if an importer copied the signing
+   * key. It is therefore evidence that a token cannot cross, and **not**
+   * evidence that the credential was not copied — "gives the copy a signing key
+   * that never existed before" is the test that carries that claim.
+   *
+   * Worth saying out loud: a mutation making the importer copy the secret
+   * passed this test, which is exactly the kind of false confidence a
+   * defence-in-depth test invites.
+   */
+  it('refuses the source project’s token against the imported copy', async () => {
+    const source = await stageProject(authConfig('ALL_PROTECTED'));
+    const copy = await stageImportedCopy(source);
+
+    const a = await signUpUser(source, 'shared@example.com');
+    // The same address signs up to the copy, so nothing but the key and the
+    // audience distinguishes the two tokens.
+    await signUpUser(copy, 'shared@example.com');
+
+    // The token works where it was minted...
+    expect((await get(`/p/${source}/order`, bearer(a.accessToken))).statusCode).toBe(200);
+    // ...and nowhere else, including a project that is a copy of it.
+    expect((await get(`/p/${copy}/order`, bearer(a.accessToken))).statusCode).toBe(401);
+    expect((await get(`/p/${copy}/me`, bearer(a.accessToken))).statusCode).toBe(401);
+  });
+
+  it('refuses the source project’s refresh token too', async () => {
+    const source = await stageProject(authConfig('ALL_PROTECTED'));
+    const copy = await stageImportedCopy(source);
+    const a = await signUpUser(source);
+    await signUpUser(copy);
+
+    // A refresh token is opaque and carries no audience, so this is the session
+    // row's `projectId` doing the work rather than the signature.
+    expect((await post(`/p/${copy}/refresh`, { refreshToken: a.refreshToken })).statusCode).toBe(
+      401,
+    );
+  });
+
+  /**
+   * The source's key must already exist when the copy is made.
+   *
+   * A signing key is minted lazily, on first use. So importing from a project
+   * nobody has signed up to yet leaves nothing to copy, and asserting the copy
+   * has no key would be trivially true — which is how this test was first
+   * written, and a mutation that made the importer copy the credential passed
+   * it. Signing up on the source first is what gives the assertion something to
+   * be wrong about.
+   */
+  it('gives the copy a signing key that never existed before', async () => {
+    const source = await stageProject(authConfig('ALL_PROTECTED'));
+    await signUpUser(source);
+    const sourceSecret = await MockAuthSecret.findOne({ projectId: source });
+    expect(sourceSecret, 'the source must hold a key before the copy is made').not.toBeNull();
+
+    const copy = await stageImportedCopy(source);
+
+    // Nothing was copied, with a key sitting there to copy.
+    expect(await MockAuthSecret.countDocuments({ projectId: copy })).toBe(0);
+
+    await signUpUser(copy);
+    const copySecret = await MockAuthSecret.findOne({ projectId: copy });
+    expect(copySecret!.secret).not.toBe(sourceSecret!.secret);
+    expect(await MockAuthSecret.countDocuments({})).toBe(2);
+  });
+
+  /**
+   * The copy's users are its own.
+   *
+   * The `(projectId, email)` unique index is what allows it, and it matters
+   * here specifically: a duplicated project must not inherit the original's
+   * accounts, or importing a blueprint someone shared would hand over their
+   * end users.
+   */
+  it('shares no end users with its source', async () => {
+    const source = await stageProject(authConfig('ALL_PROTECTED'));
+    await signUpUser(source, 'shared@example.com');
+
+    const copy = await stageImportedCopy(source);
+
+    expect(await MockUser.countDocuments({ projectId: copy })).toBe(0);
+    // And the same address can sign up to the copy independently.
+    await signUpUser(copy, 'shared@example.com');
+    expect(await MockUser.countDocuments({ email: 'shared@example.com' })).toBe(2);
+  });
+
+  /**
+   * The definitions really are identical, which is what makes the assertions
+   * above meaningful rather than accidental.
+   */
+  it('serves the same surface from the copy, with its own credentials', async () => {
+    const source = await stageProject(authConfig('ALL_PROTECTED'));
+    const copy = await stageImportedCopy(source);
+
+    const b = await signUpUser(copy, 'own@example.com');
+    expect((await get(`/p/${copy}/order`, bearer(b.accessToken))).statusCode).toBe(200);
+
+    // Same entities, same stable ids: the copy is the same project definition.
+    const sourceIps = (await Project.findById(source))!.ips as InternalProjectSchema;
+    const copyIps = (await Project.findById(copy))!.ips as InternalProjectSchema;
+    expect(copyIps.entities.map((entity) => entity.id)).toEqual(
+      sourceIps.entities.map((entity) => entity.id),
+    );
   });
 });

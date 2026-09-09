@@ -307,6 +307,26 @@ const ALLOWED: Record<string, string> = {
    */
   'packages/ips/src/blueprint.ts':
     'passes an imported blueprint’s auth block onto the new IPS; makes no protection decision',
+  /*
+   * The same pass-through again, at the route that stores the input source.
+   *
+   * Both reads in that file copy a *validated blueprint's* project-level auth
+   * config into `inputSource.raw` so `POST /projects/:id/parse` can re-read the
+   * definition later. Neither compares it to a protection value and neither
+   * touches an entity's own stamp.
+   *
+   * Unavoidable rather than merely convenient: the alternative is
+   * `projectAuth`, which returns a *defaulted* config, so storing its output
+   * would rewrite the author's document — the same reason
+   * `packages/ips/src/blueprint.ts` is on this list.
+   *
+   * Worth noting for whoever reads this next: the entry arrived a stage after
+   * the code did, because the scan is sensitive to how the expression is
+   * formatted and a `prettier` pass changed it. That is a weakness of a
+   * regex-based guard, not of the exemption.
+   */
+  'apps/api/src/routes/blueprint.ts':
+    'copies a validated blueprint’s auth block into the stored input source; makes no protection decision',
 };
 
 /**

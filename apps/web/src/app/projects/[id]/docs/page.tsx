@@ -29,6 +29,7 @@
 
 import { useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
+import Link from 'next/link';
 import {
   Button,
   Card,
@@ -36,6 +37,7 @@ import {
   ErrorState,
   Icon,
   Note,
+  Select,
   Tabs,
   TabPanel,
 } from '@instantmockapi/ui';
@@ -43,14 +45,22 @@ import {
   downloadTextFile,
   useAiContext,
   useBlueprint,
+  useOpenDraft,
   useProject,
   useTechnicalNotes,
+  useVersions,
 } from '../../../../lib/hooks';
 import {
   documentSections,
   notesFilename,
   parseNotesDocument,
 } from '../../../../lib/notes-document';
+import {
+  describeDocsSource,
+  documentationViews,
+  viewChangesHref,
+  type DocsView,
+} from '../../../../lib/docs-version';
 import { NotesView } from '../../../../components/project/notes-view';
 import { normalizeError } from '../../../../lib/errors';
 import { notifyFailure } from '../../../../lib/toast';
@@ -105,12 +115,29 @@ export default function DocsPage() {
 
   const [tab, setTab] = useState<DocTab>('notes');
   const [mode, setMode] = useState<NotesMode>('rendered');
+  /*
+   * Which definition every document on this tab describes (§20).
+   *
+   * One selection for the whole tab, not one per document: the Technical Notes
+   * and the AI context describe the same project, and letting them drift to
+   * different versions is exactly the divergence §9's shared model exists to
+   * prevent — one screen showing two answers.
+   *
+   * The Blueprint pane is the exception and stays on the current definition:
+   * an export is a thing you re-import, and a blueprint of a historical version
+   * would create a project silently older than the one it came from.
+   */
+  const [view, setView] = useState<DocsView>('current');
+
+  const openDraft = useOpenDraft(id);
+  const hasOpenDraft = openDraft.isSuccess;
 
   const project = useProject(id);
-  const notes = useTechnicalNotes(id);
+  const versions = useVersions(id);
+  const notes = useTechnicalNotes(id, view);
   // Idle until the tab is opened: a reader who only wants the notes should not
   // pay for a second document.
-  const ai = useAiContext(id, tab === 'ai');
+  const ai = useAiContext(id, tab === 'ai', view);
   const blueprint = useBlueprint(id, tab === 'blueprint');
 
   const markdown = notes.data?.markdown ?? '';
@@ -120,6 +147,27 @@ export default function DocsPage() {
     () => (blueprint.data === undefined ? '' : formatBlueprint(blueprint.data)),
     [blueprint.data],
   );
+
+  const viewOptions = useMemo(
+    () =>
+      project.data === undefined
+        ? []
+        : documentationViews({
+            currentVersion: project.data.currentVersion,
+            publishedVersion: project.data.publishedVersion,
+            versions: (versions.data?.data ?? []).map((row) => row.version),
+            /*
+             * A draft is offered only when one exists. `POST /draft` forks on
+             * demand, so an always-present option would either 404 or silently
+             * create a draft the reader never asked for.
+             */
+            hasDraft: hasOpenDraft,
+          }),
+    [project.data, versions.data, hasOpenDraft],
+  );
+
+  const changesHref =
+    notes.data === undefined ? null : viewChangesHref(id, view, notes.data.version);
 
   const filenameFor = (kind: 'notes' | 'ai' | 'blueprint') =>
     notesFilename(kind, {
@@ -139,13 +187,61 @@ export default function DocsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-lg font-semibold text-foreground">Documentation</h1>
-        <p className="text-sm text-muted-foreground">
-          Generated from this project&rsquo;s definition, v{notes.data?.version ?? '—'}. Nothing here
-          is stored, so it is never out of date with the definition — though the hosted API serves
-          the published version, which may be older.
-        </p>
+      <header className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-lg font-semibold text-foreground">Documentation</h1>
+          <p className="text-sm text-muted-foreground">
+            Generated from this project&rsquo;s definition. Nothing here is stored, so it is never
+            out of date with the definition it describes.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            Describing
+            <Select
+              value={view}
+              onChange={(event) => setView(event.target.value as DocsView)}
+              className="w-auto"
+            >
+              {viewOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </label>
+
+          {/*
+           * §21: a link into Phase 2's compare page, not a second diff engine.
+           * Absent for v1 and for a draft, both of which have nothing to
+           * compare against — see `viewChangesHref`.
+           */}
+          {changesHref === null ? null : (
+            <Link href={changesHref} className="text-sm text-muted-foreground hover:text-foreground">
+              View changes →
+            </Link>
+          )}
+        </div>
+
+        {/*
+         * §20's rule, said out loud on the screen as well as in the document.
+         *
+         * A reader looking at a draft's field list needs to know the hosted API
+         * does not serve it — otherwise they write client code against this and
+         * get 422s from the live URL.
+         */}
+        {notes.data === undefined ? null : (
+          <p className="text-xs text-muted-foreground">
+            This describes {describeDocsSource(notes.data.source, notes.data.version, notes.data.serving)}.
+          </p>
+        )}
+
+        {viewOptions.find((option) => option.value === view)?.hint === undefined ? null : (
+          <p className="text-xs text-muted-foreground">
+            {viewOptions.find((option) => option.value === view)?.hint}
+          </p>
+        )}
       </header>
 
       <Tabs

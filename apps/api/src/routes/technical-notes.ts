@@ -31,15 +31,16 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import type { EnvConfig } from '@instantmockapi/config';
-import { publishedVersionOf, type IProject } from '@instantmockapi/db';
+import type { IProject } from '@instantmockapi/db';
 import {
   buildDocumentationModel,
   renderAiContext,
   renderTechnicalNotes,
   type DocumentationMeta,
+  type RuntimeFacts,
 } from '@instantmockapi/generator-docs';
 import { loadOwnedProject } from '../access.js';
-import { definitionOf } from '../project-definition.js';
+import { parseDefinitionSelector, resolveDefinition } from '../project-definition.js';
 
 export interface TechnicalNotesRouteOptions {
   config: EnvConfig;
@@ -48,21 +49,33 @@ export interface TechnicalNotesRouteOptions {
 /**
  * The mutable facts, kept out of the definition's own sections.
  *
- * `hosted.url` is the honest test for "something is live" — Phase 2 established
- * that `publishedVersion` alone can be a speculative pin written on first edit.
+ * `runtime` is supplied by `resolveDefinition` rather than read off the project
+ * here: §20 requires the runtime half to match the definition being documented,
+ * and computing it per route is how three views end up with three answers.
  */
-function metaOf(project: IProject): DocumentationMeta {
+function metaOf(project: IProject, runtime: RuntimeFacts): DocumentationMeta {
   return {
     name: project.name,
     description: project.description ?? null,
-    runtime: {
-      status: project.status,
-      publishedVersion: publishedVersionOf(project),
-      hostedUrl: project.hosted?.url ?? null,
-      source: 'project',
-    },
+    runtime,
   };
 }
+
+/**
+ * The querystring both documents accept (§20).
+ *
+ * A string rather than an integer, because the value is a number *or* one of
+ * two keywords — and `parseDefinitionSelector` returns a structured
+ * `VALIDATION_ERROR` naming what is allowed, which is more useful than ajv's
+ * type message.
+ */
+const VERSION_QUERYSTRING = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    version: { type: 'string', maxLength: 16 },
+  },
+} as const;
 
 export const technicalNotesRoutes: FastifyPluginAsync<TechnicalNotesRouteOptions> = async (app) => {
   app.addHook('onRequest', app.authenticate);
@@ -83,14 +96,29 @@ export const technicalNotesRoutes: FastifyPluginAsync<TechnicalNotesRouteOptions
    * the *same document* by construction. A model-driven rendered view would be
    * a third rendering of the definition, free to show something the `.md` does
    * not — which is the failure §9 exists to prevent, reintroduced one layer up.
+   *
+   * `?version=` selects which definition (§20): a number, `draft`, `published`,
+   * or omitted for the current one.
    */
-  app.get('/projects/:id/technical-notes', async (request) => {
-    const { id } = request.params as { id: string };
-    const project = await loadOwnedProject(id, request.authUser?.sub ?? '');
-    const model = buildDocumentationModel(definitionOf(project), metaOf(project));
+  app.get(
+    '/projects/:id/technical-notes',
+    { schema: { querystring: VERSION_QUERYSTRING } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const { version: requested } = request.query as { version?: string };
+      const project = await loadOwnedProject(id, request.authUser?.sub ?? '');
 
-    return { version: project.currentVersion, markdown: renderTechnicalNotes(model) };
-  });
+      const resolved = await resolveDefinition(project, parseDefinitionSelector(requested));
+      const model = buildDocumentationModel(resolved.ips, metaOf(project, resolved.runtime));
+
+      return {
+        version: resolved.version,
+        source: resolved.runtime.source ?? 'project',
+        serving: resolved.runtime.serving ?? false,
+        markdown: renderTechnicalNotes(model),
+      };
+    },
+  );
 
   /**
    * The AI-ready context (§7).
@@ -100,19 +128,33 @@ export const technicalNotesRoutes: FastifyPluginAsync<TechnicalNotesRouteOptions
    * them would make every notes request pay for a document most requests do not
    * show.
    *
-   * `baseUrl` is passed only when the project is actually live. A guessed base
-   * in a context document produces client code that fails against the real API,
-   * which is worse than a document with relative paths and a stated base path.
+   * Version-aware for the same reason the notes are: the two documents describe
+   * one project, and letting only one of them follow a version selection would
+   * be exactly the divergence §9's shared model exists to prevent.
+   *
+   * `baseUrl` is passed only when the documented definition is the one actually
+   * being served. A base URL beside a draft's field list produces client code
+   * that fails against the live API — which is §20's trap, and worse in a
+   * document written to be pasted into a code generator.
    */
-  app.get('/projects/:id/technical-notes/ai', async (request) => {
-    const { id } = request.params as { id: string };
-    const project = await loadOwnedProject(id, request.authUser?.sub ?? '');
-    const model = buildDocumentationModel(definitionOf(project), metaOf(project));
-    const hostedUrl = project.hosted?.url ?? null;
+  app.get(
+    '/projects/:id/technical-notes/ai',
+    { schema: { querystring: VERSION_QUERYSTRING } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const { version: requested } = request.query as { version?: string };
+      const project = await loadOwnedProject(id, request.authUser?.sub ?? '');
 
-    return {
-      version: project.currentVersion,
-      context: renderAiContext(model, hostedUrl === null ? {} : { baseUrl: hostedUrl }),
-    };
-  });
+      const resolved = await resolveDefinition(project, parseDefinitionSelector(requested));
+      const model = buildDocumentationModel(resolved.ips, metaOf(project, resolved.runtime));
+      const hostedUrl = resolved.runtime.serving === true ? (project.hosted?.url ?? null) : null;
+
+      return {
+        version: resolved.version,
+        source: resolved.runtime.source ?? 'project',
+        serving: resolved.runtime.serving ?? false,
+        context: renderAiContext(model, hostedUrl === null ? {} : { baseUrl: hostedUrl }),
+      };
+    },
+  );
 };

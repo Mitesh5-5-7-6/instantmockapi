@@ -12,7 +12,8 @@ vi.mock('@instantmockapi/queue', async (importOriginal) => {
 });
 
 import type { FastifyInstance } from 'fastify';
-import { Project } from '@instantmockapi/db';
+import { Project, ProjectDraft, Version } from '@instantmockapi/db';
+import type { InternalProjectSchema } from '@instantmockapi/ips';
 import {
   authHeader,
   buildTestServer,
@@ -52,6 +53,24 @@ beforeEach(async () => {
   projectId = (await createProjectViaApi(app, token, 'Shop')).json().id as string;
 });
 
+/** Either document, for any §20 selection. `undefined` means the default view. */
+const query = (version: string | undefined): string =>
+  version === undefined ? '' : `?version=${version}`;
+
+const notesFor = (version?: string, id = projectId, bearer = token) =>
+  app.inject({
+    method: 'GET',
+    url: `/v1/projects/${id}/technical-notes${query(version)}`,
+    headers: authHeader(bearer),
+  });
+
+const aiFor = (version?: string, id = projectId, bearer = token) =>
+  app.inject({
+    method: 'GET',
+    url: `/v1/projects/${id}/technical-notes/ai${query(version)}`,
+    headers: authHeader(bearer),
+  });
+
 const notes = (id = projectId, bearer = token) =>
   app.inject({
     method: 'GET',
@@ -72,7 +91,7 @@ describe('§10: the notes route', () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(Object.keys(body).sort()).toEqual(['markdown', 'version']);
+    expect(Object.keys(body).sort()).toEqual(['markdown', 'serving', 'source', 'version']);
     expect(body.markdown).toContain('# Shop — Technical Notes');
     expect(body.markdown).toContain('- Name: Shop');
     expect(body.version).toBe(1);
@@ -139,7 +158,7 @@ describe('§7: the AI context route', () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(Object.keys(body).sort()).toEqual(['context', 'version']);
+    expect(Object.keys(body).sort()).toEqual(['context', 'serving', 'source', 'version']);
     expect(body.context).toContain('# Project Context');
     expect(body.context).toContain('Name: Shop');
   });
@@ -289,5 +308,246 @@ describe('§26/§40: access and secrets', () => {
         expect(body.toLowerCase(), term).not.toContain(term.toLowerCase());
       }
     }
+  });
+});
+
+describe('§20: version-aware documentation', () => {
+  /** Edit the definition and advance the version, the way a commit does. */
+  async function advanceTo(version: number, entityName: string): Promise<void> {
+    const project = await Project.findById(projectId);
+    const ips = project!.ips as InternalProjectSchema;
+    const next = JSON.parse(JSON.stringify(ips)) as InternalProjectSchema;
+    next.entities[0]!.name = entityName;
+    next.version = version;
+
+    await Version.create({
+      projectId,
+      version,
+      ipsSnapshot: next,
+      configSnapshot: project!.generationConfig,
+    });
+    await Project.updateOne({ _id: projectId }, { $set: { ips: next, currentVersion: version } });
+  }
+
+  it('describes a historical version, not the current one', async () => {
+    // v1 is the created definition; v2 renames the entity.
+    await Version.create({
+      projectId,
+      version: 1,
+      ipsSnapshot: (await Project.findById(projectId))!.ips,
+      configSnapshot: (await Project.findById(projectId))!.generationConfig,
+    });
+    await advanceTo(2, 'RenamedEntity');
+
+    const current = (await notesFor()).json();
+    expect(current.version).toBe(2);
+    expect(current.markdown).toContain('RenamedEntity');
+
+    const historical = await notesFor('1');
+    expect(historical.statusCode, historical.body).toBe(200);
+    const body = historical.json();
+    expect(body.version).toBe(1);
+    expect(body.source).toBe('version');
+    expect(body.markdown).toContain('MainEntity');
+    expect(body.markdown).not.toContain('RenamedEntity');
+  });
+
+  it('describes the draft, not the committed definition', async () => {
+    // Open a draft and edit it, without committing.
+    const draft = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${projectId}/draft`,
+      headers: authHeader(token),
+    });
+    // 201: the project has no draft, so this forks one. An existing draft comes
+    // back 200 — `POST /draft` is idempotent by contract.
+    expect(draft.statusCode, draft.body).toBe(201);
+
+    const stored = await ProjectDraft.findOne({ projectId });
+    const ips = stored!.ips as InternalProjectSchema;
+    ips.entities[0]!.name = 'DraftOnlyEntity';
+    await ProjectDraft.updateOne({ projectId }, { $set: { ips } });
+
+    const body = (await notesFor('draft')).json();
+    expect(body.source).toBe('draft');
+    expect(body.markdown).toContain('DraftOnlyEntity');
+    expect(body.markdown).toContain('Describes: the draft definition');
+
+    // The current view is unaffected by an uncommitted draft.
+    expect((await notesFor()).json().markdown).not.toContain('DraftOnlyEntity');
+  });
+
+  it('404s a draft view when no draft is open', async () => {
+    const response = await notesFor('draft');
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('describes the published version when asked for it', async () => {
+    await Version.create({
+      projectId,
+      version: 1,
+      ipsSnapshot: (await Project.findById(projectId))!.ips,
+      configSnapshot: (await Project.findById(projectId))!.generationConfig,
+    });
+    await advanceTo(2, 'NewerEntity');
+    // v1 is live; the definition has moved to v2.
+    await Project.updateOne(
+      { _id: projectId },
+      { $set: { publishedVersion: 1, 'hosted.url': 'https://api.example.dev/prj_abc/shop' } },
+    );
+
+    const body = (await notesFor('published')).json();
+    expect(body.version).toBe(1);
+    expect(body.serving).toBe(true);
+    expect(body.markdown).toContain('MainEntity');
+    expect(body.markdown).not.toContain('NewerEntity');
+  });
+
+  it('404s a version that was never snapshotted, with the reason', async () => {
+    const response = await notesFor('7');
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.message).toContain('never snapshotted');
+  });
+
+  it.each([
+    ['a word', 'latest'],
+    ['zero', '0'],
+    ['a negative', '-2'],
+    ['a decimal', '1.5'],
+  ])('rejects %s as a version', async (_label, raw) => {
+    const response = await notesFor(raw);
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.details[0].path).toBe('version');
+  });
+
+  it('applies the same selection to the AI context', async () => {
+    await Version.create({
+      projectId,
+      version: 1,
+      ipsSnapshot: (await Project.findById(projectId))!.ips,
+      configSnapshot: (await Project.findById(projectId))!.generationConfig,
+    });
+    await advanceTo(2, 'RenamedEntity');
+
+    const body = (await aiFor('1')).json();
+    expect(body.version).toBe(1);
+    expect(body.context).toContain('MainEntity');
+    expect(body.context).not.toContain('RenamedEntity');
+  });
+});
+
+describe('§20: draft configuration is never combined with published runtime state', () => {
+  /**
+   * The rule §20 states, and the one line that can break it.
+   *
+   * A hosted URL printed beside a definition that URL does not serve invites a
+   * reader to conclude it does — and a developer who writes client code against
+   * a draft's field list and the published URL gets 422s they cannot explain.
+   * So the URL appears only when the documented definition is the served one.
+   */
+  async function goLive(): Promise<void> {
+    await Project.updateOne(
+      { _id: projectId },
+      {
+        $set: {
+          status: 'active',
+          publishedVersion: 1,
+          'hosted.url': 'https://api.example.dev/prj_abc/shop',
+        },
+      },
+    );
+  }
+
+  it('prints the hosted URL on the definition that is served', async () => {
+    await goLive();
+    const body = (await notesFor()).json();
+
+    expect(body.serving).toBe(true);
+    expect(body.markdown).toContain('Hosted URL: https://api.example.dev/prj_abc/shop');
+    expect(body.markdown).toContain('This is the definition the hosted API serves.');
+  });
+
+  it('withholds it from a draft, and says which version is live instead', async () => {
+    await goLive();
+    await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${projectId}/draft`,
+      headers: authHeader(token),
+    });
+
+    const body = (await notesFor('draft')).json();
+
+    expect(body.serving).toBe(false);
+    expect(body.markdown).not.toContain('https://api.example.dev');
+    expect(body.markdown).toContain('Not served.');
+  });
+
+  it('withholds it from a historical version', async () => {
+    await Version.create({
+      projectId,
+      version: 1,
+      ipsSnapshot: (await Project.findById(projectId))!.ips,
+      configSnapshot: (await Project.findById(projectId))!.generationConfig,
+    });
+    const project = await Project.findById(projectId);
+    const next = JSON.parse(JSON.stringify(project!.ips)) as InternalProjectSchema;
+    next.version = 2;
+    await Version.create({
+      projectId,
+      version: 2,
+      ipsSnapshot: next,
+      configSnapshot: project!.generationConfig,
+    });
+    await Project.updateOne(
+      { _id: projectId },
+      {
+        $set: {
+          ips: next,
+          currentVersion: 2,
+          publishedVersion: 2,
+          'hosted.url': 'https://api.example.dev/prj_abc/shop',
+        },
+      },
+    );
+
+    const body = (await notesFor('1')).json();
+
+    expect(body.serving).toBe(false);
+    expect(body.markdown).not.toContain('https://api.example.dev');
+    expect(body.markdown).toContain('The hosted API serves v2');
+  });
+
+  /**
+   * The AI context is the more dangerous of the two documents here: it exists
+   * to be pasted into a code generator, so a base URL beside the wrong field
+   * list produces code that fails against the real API.
+   */
+  it('gives the AI context no base URL for a draft', async () => {
+    await goLive();
+    await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${projectId}/draft`,
+      headers: authHeader(token),
+    });
+
+    expect((await aiFor('draft')).json().context).not.toContain('Base URL');
+    // ...and does give it for the served definition, so the absence above is a
+    // decision rather than a feature that never worked.
+    expect((await aiFor()).json().context).toContain('Base URL');
+  });
+
+  /**
+   * Nothing deployed: the document must not name a "published version" at all.
+   *
+   * `publishedVersionOf` falls back to `currentVersion`, so the pointer always
+   * holds a number — reporting it would tell a reader that v1 is live when no
+   * hosted URL exists. `hosted.url` is the only honest test.
+   */
+  it('names no published version when nothing is live', async () => {
+    const body = (await notesFor()).json();
+
+    expect(body.serving).toBe(false);
+    expect(body.markdown).not.toContain('Published version:');
+    expect(body.markdown).toContain('Nothing is published yet');
   });
 });

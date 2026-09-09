@@ -823,3 +823,66 @@ describe('§26: the no-secrets claim is tested with an actual secret', () => {
     }
   });
 });
+
+describe('§20: the runtime section cannot advertise a URL for the wrong definition', () => {
+  /**
+   * `RuntimeFacts` is a public type of this package, so the gate belongs here
+   * as well as in the caller that computes `serving`.
+   *
+   * The API's resolver already withholds `hostedUrl` for a non-serving view, so
+   * these were the tests missing when a mutation removing this gate passed the
+   * whole route suite. Two layers enforce the rule; each is now exercised by
+   * the tests nearest it.
+   */
+  const withRuntime = (runtime: Record<string, unknown>) =>
+    renderTechnicalNotes(
+      buildDocumentationModel(simpleIps(), {
+        name: 'Shop',
+        runtime: runtime as never,
+      }),
+    );
+
+  it('prints the URL when the definition is the one being served', () => {
+    const notes = withRuntime({
+      serving: true,
+      hostedUrl: 'https://api.example.dev/prj_abc/shop',
+      publishedVersion: 3,
+    });
+
+    expect(notes).toContain('Hosted URL: https://api.example.dev/prj_abc/shop');
+    expect(notes).toContain('This is the definition the hosted API serves.');
+  });
+
+  it('withholds the URL when it is not, even though one was passed', () => {
+    const notes = withRuntime({
+      serving: false,
+      hostedUrl: 'https://api.example.dev/prj_abc/shop',
+      publishedVersion: 3,
+    });
+
+    expect(notes).not.toContain('https://api.example.dev');
+    expect(notes).toContain('The hosted API serves v3; this definition is not live.');
+  });
+
+  /**
+   * Nothing deployed at all is a different statement from "a different version
+   * is live", and a reader needs to be able to tell them apart.
+   */
+  it('says nothing is published when there is no published version', () => {
+    const notes = withRuntime({ serving: false });
+
+    expect(notes).toContain('Nothing is published yet');
+    expect(notes).not.toContain('this definition is not live');
+  });
+
+  /**
+   * An unset flag keeps the pre-§20 behaviour, because omitting a fact because
+   * a flag was not passed would be a silent loss for every existing caller.
+   */
+  it('keeps the URL when serving is unstated', () => {
+    const notes = withRuntime({ hostedUrl: 'https://api.example.dev/prj_abc/shop' });
+
+    expect(notes).toContain('Hosted URL: https://api.example.dev/prj_abc/shop');
+    expect(notes).not.toContain('Not served');
+  });
+});

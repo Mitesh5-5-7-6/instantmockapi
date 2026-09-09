@@ -891,12 +891,33 @@ export function useCommitDraft(projectId: string) {
  * function of the definition. That also means it is not in the artifact cache —
  * the query key is its own.
  */
-export function useTechnicalNotes(projectId: string | null) {
+export interface DocumentResponse {
+  version: number;
+  /** `version` | `project` | `draft` — what the server resolved. */
+  source: string;
+  /** Whether the documented definition is the one the hosted API serves (§20). */
+  serving: boolean;
+}
+
+/**
+ * `view` is `current`, `draft`, `published`, or a version number as a string —
+ * and it is part of the query key, so switching views is a separate cache entry
+ * rather than an invalidation. A historical version's document cannot change.
+ *
+ * `retry: false` because the interesting failures here are answers, not
+ * transport: a version that was never snapshotted, or a draft view on a project
+ * with no draft open. Retrying those three times delays a message the reader
+ * needs immediately.
+ */
+export function useTechnicalNotes(projectId: string | null, view = 'current') {
   return useQuery({
-    queryKey: ['technical-notes', projectId],
+    queryKey: ['technical-notes', projectId, view],
     queryFn: () =>
-      apiFetch<{ version: number; markdown: string }>(`/v1/projects/${projectId}/technical-notes`),
+      apiFetch<DocumentResponse & { markdown: string }>(
+        `/v1/projects/${projectId}/technical-notes?version=${view}`,
+      ),
     enabled: projectId !== null,
+    retry: false,
   });
 }
 
@@ -907,14 +928,15 @@ export function useTechnicalNotes(projectId: string | null) {
  * for a second document, and the two are separate routes precisely so that
  * choice exists.
  */
-export function useAiContext(projectId: string | null, wanted: boolean) {
+export function useAiContext(projectId: string | null, wanted: boolean, view = 'current') {
   return useQuery({
-    queryKey: ['ai-context', projectId],
+    queryKey: ['ai-context', projectId, view],
     queryFn: () =>
-      apiFetch<{ version: number; context: string }>(
-        `/v1/projects/${projectId}/technical-notes/ai`,
+      apiFetch<DocumentResponse & { context: string }>(
+        `/v1/projects/${projectId}/technical-notes/ai?version=${view}`,
       ),
     enabled: projectId !== null && wanted,
+    retry: false,
   });
 }
 
@@ -967,5 +989,25 @@ export function useDuplicateProject(projectId: string) {
         body: input,
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
+  });
+}
+
+/**
+ * Whether a draft is open, without forking one (Phase 4 §20).
+ *
+ * `useDraft` loads with **POST**, which forks on demand — correct for the
+ * editor and wrong here: opening the Docs tab must not create a draft nobody
+ * asked for. `GET /draft` reads without forking and 404s when there is none, so
+ * `isSuccess` is the answer and a 404 is information rather than a failure.
+ *
+ * `retry: false` for that reason: retrying a 404 three times delays a "no
+ * draft" answer that is already final.
+ */
+export function useOpenDraft(projectId: string | null) {
+  return useQuery({
+    queryKey: ['open-draft', projectId],
+    queryFn: () => apiFetch<{ baseVersion: number }>(`/v1/projects/${projectId}/draft`),
+    enabled: projectId !== null,
+    retry: false,
   });
 }
