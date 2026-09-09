@@ -878,3 +878,42 @@ export function useCommitDraft(projectId: string) {
     onSuccess: forget,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Technical Notes (Phase 4 §10)
+// ---------------------------------------------------------------------------
+
+/**
+ * The human-readable Technical Notes, as markdown.
+ *
+ * Built on demand by the API rather than stored as an artifact, so there is no
+ * version to pass and nothing to be stale against: the document is a pure
+ * function of the definition. That also means it is not in the artifact cache —
+ * the query key is its own.
+ */
+export function useTechnicalNotes(projectId: string | null) {
+  return useQuery({
+    queryKey: ['technical-notes', projectId],
+    queryFn: () =>
+      apiFetch<{ version: number; markdown: string }>(`/v1/projects/${projectId}/technical-notes`),
+    enabled: projectId !== null,
+  });
+}
+
+/**
+ * The AI-ready context (§7). Idle until the view is opened.
+ *
+ * `enabled` rather than eager: a user who only reads the notes should not pay
+ * for a second document, and the two are separate routes precisely so that
+ * choice exists.
+ */
+export function useAiContext(projectId: string | null, wanted: boolean) {
+  return useQuery({
+    queryKey: ['ai-context', projectId],
+    queryFn: () =>
+      apiFetch<{ version: number; context: string }>(
+        `/v1/projects/${projectId}/technical-notes/ai`,
+      ),
+    enabled: projectId !== null && wanted,
+  });
+}

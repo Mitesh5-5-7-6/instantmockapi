@@ -22,6 +22,7 @@
  * a reader can tell which half moves on its own.
  */
 
+import { QUERY_FEATURES } from '@instantmockapi/ips';
 import type {
   DocumentationModel,
   NotesEndpoint,
@@ -29,6 +30,21 @@ import type {
   NotesField,
   NotesRelation,
 } from './notes-model.js';
+import { stringifyDefault } from './notes-model.js';
+
+/**
+ * Free text, flattened to a single line.
+ *
+ * `validateIPS` constrains entity and field names but says nothing about a
+ * description, so a description is an arbitrary string arriving inside a
+ * markdown bullet. A raw newline in one would at best break the list and at
+ * worst forge structure — `## Authentication` on its own line becomes a real
+ * heading, and a reviewer reading an imported project (§14) cannot tell it from
+ * one this renderer wrote.
+ */
+function oneLine(value: string): string {
+  return value.replace(/\s*[\r\n]+\s*/g, ' ').trim();
+}
 
 /** A markdown document, assembled as lines so blank-line rules stay visible. */
 class Lines {
@@ -70,7 +86,7 @@ function renderDefault(value: unknown): string {
   if (value === undefined || value === null) {
     return '—';
   }
-  return typeof value === 'string' ? `"${value}"` : JSON.stringify(value);
+  return typeof value === 'string' ? `"${oneLine(value)}"` : stringifyDefault(value);
 }
 
 function renderFieldLine(field: NotesField, depth: number): string {
@@ -114,7 +130,7 @@ function renderEntity(lines: Lines, entity: NotesEntity): void {
     `- Identity: \`${entity.identity.field}\` (${entity.identity.style})`,
   ];
   if (entity.description !== null && entity.description !== '') {
-    facts.unshift(`- ${entity.description}`);
+    facts.unshift(`- ${oneLine(entity.description)}`);
   }
   lines.push(...facts, '');
 
@@ -165,14 +181,14 @@ export function renderTechnicalNotes(model: DocumentationModel): string {
   const lines = new Lines();
   const { project, auth, runtime } = model;
 
-  lines.heading(1, `${project.name || 'Untitled project'} — Technical Notes`);
+  lines.heading(1, `${oneLine(project.name) || 'Untitled project'} — Technical Notes`);
 
   lines.heading(2, 'Project');
   lines.push(
-    `- Name: ${project.name || '—'}`,
+    `- Name: ${oneLine(project.name) || '—'}`,
     ...(project.description === null || project.description === ''
       ? []
-      : [`- Description: ${project.description}`]),
+      : [`- Description: ${oneLine(project.description)}`]),
     `- Type: ${project.kind}`,
     `- Definition version: v${project.version}`,
     ...(project.publicId === null ? [] : [`- Public id: \`${project.publicId}\``]),
@@ -284,7 +300,7 @@ export function renderTechnicalNotes(model: DocumentationModel): string {
   }
 
   lines.heading(2, 'Generation');
-  const enabledFeatures = (['search', 'filter', 'sort', 'include'] as const).filter(
+  const enabledFeatures = QUERY_FEATURES.filter(
     (feature) => model.generation.features[feature],
   );
   lines.push(
