@@ -15,11 +15,27 @@
  *
  * | Property | How |
  * | --- | --- |
- * | deterministic | no clock, no randomness, no unordered iteration; **definition only** — see below |
+ * | deterministic | no clock, no randomness, no unordered iteration, no locale |
  * | structured | `Key: value` for scalars, `- a \| b \| c` for repeated records |
  * | concise | pipe-delimited fields, dotted paths, no repeated labels |
  * | explicit | every endpoint states public/protected; auth states disabled outright |
- * | unambiguous | one fact per line, fixed field order, no prose that could be read as data |
+ * | unambiguous | one fact per line, fixed field order, and the grammar below |
+ *
+ * ## The grammar, stated because a consumer parses it
+ *
+ * - A scalar line is `Key: value`. Split on the **first** colon; a colon inside
+ *   a value is therefore unambiguous and is not escaped.
+ * - A record line is `- ` followed by fields joined by ` | `. Split on
+ *   unescaped `|`. A literal pipe inside a field is written `\|`.
+ * - No value spans two lines. Newlines in free text — a project or entity
+ *   description, which `validateIPS` does not constrain — are flattened to
+ *   spaces. Without that, a description containing `## Authentication` on its
+ *   own line would forge a heading, and one containing `Enabled: false` would
+ *   forge a fact: the document is read by a machine that cannot tell an
+ *   authored line from a quoted one.
+ * - Lines keyed `Note:` describe this document's own contract rather than the
+ *   project. They are the only such lines, and they are always keyed, so a
+ *   consumer can drop them wholesale.
  *
  * ## No runtime block, deliberately
  *
@@ -32,12 +48,13 @@
  * ## No prose
  *
  * §7 forbids assistant-style filler ("Here is a detailed overview…"). There is
- * no sentence in the output that is not a fact about the project, which also
- * means a consumer never has to decide whether a line is data or commentary.
+ * no sentence in the output that is not either a fact about the project or a
+ * keyed `Note:` about the format.
  */
 
+import { QUERY_FEATURES } from '@instantmockapi/ips';
 import type { DocumentationModel, NotesEndpoint, NotesField, NotesRelation } from './notes-model.js';
-import { flattenFields } from './notes-model.js';
+import { flattenFields, stringifyDefault } from './notes-model.js';
 
 export interface AiContextOptions {
   /**
@@ -50,7 +67,41 @@ export interface AiContextOptions {
   baseUrl?: string | undefined;
 }
 
-/** `min=18` rules and traits, pipe-joined; empty string when there are none. */
+/* ─────────────────────── the two line grammars ─────────────────────── */
+
+/**
+ * Free text, flattened to a single line.
+ *
+ * Entity and field names are safe by validation (`NAME_REGEX` in
+ * `validator.ts`), but descriptions, the project name and a `regex` rule are
+ * unconstrained strings, and this document's structure is carried entirely by
+ * line breaks.
+ */
+function oneLine(value: string): string {
+  return value.replace(/\s*[\r\n]+\s*/g, ' ').trim();
+}
+
+/** `Key: value`. */
+function scalar(key: string, value: string | number | boolean): string {
+  return `${key}: ${oneLine(String(value))}`;
+}
+
+/**
+ * `- a | b | c`, with a literal pipe inside a field escaped.
+ *
+ * The single chokepoint for every record in the document, so escaping is
+ * structural rather than a judgement made per field. It has to be: an `enum`
+ * rule joins its own values with `|` and a `regex` rule commonly contains one
+ * (`^(draft|live)$`), so without this a rule value silently changes a record's
+ * field count and a consumer splitting the line reads the wrong facts.
+ */
+function record(fields: readonly (string | number | boolean)[]): string {
+  return `- ${fields.map((field) => oneLine(String(field)).replace(/\|/g, '\\|')).join(' | ')}`;
+}
+
+/* ────────────────────────── the records ────────────────────────── */
+
+/** `min=18` rules, traits and a genuine default. */
 function fieldAttributes(field: NotesField): string[] {
   return [
     field.required ? 'required' : 'optional',
@@ -58,7 +109,7 @@ function fieldAttributes(field: NotesField): string[] {
     // their unset value, so testing the value directly would print
     // `default=null` on almost every field — a default the generated validators
     // never apply. See `NotesField.hasDefault`.
-    ...(field.hasDefault ? [`default=${JSON.stringify(field.default)}`] : []),
+    ...(field.hasDefault ? [`default=${stringifyDefault(field.default)}`] : []),
     ...field.validation.rules,
     // Traits carry the arrow form (`foreign key → Course`); the arrow is fine
     // in a pipe-delimited line and tells an assistant which entity a key points
@@ -73,20 +124,21 @@ function fieldAttributes(field: NotesField): string[] {
  * Nested fields use their **dotted path** rather than indentation. §7's example
  * shows a flat list, and indentation inside a pipe-delimited list is genuinely
  * ambiguous to parse — two spaces could be structure or formatting. A dotted
- * path is unambiguous, and it is also the exact string the runtime's query
- * layer and the diff engine use for a nested field, so an assistant reading
- * this and an error message from the API are talking about the same thing.
+ * path is unambiguous, and it is the same path the diff engine uses for a
+ * nested field, so an assistant reading this and a change report from the API
+ * are naming the same thing.
  */
 function renderField(field: NotesField): string {
-  return `- ${field.path} | ${field.type} | ${fieldAttributes(field).join(' | ')}`;
+  return record([field.path, field.type, ...fieldAttributes(field)]);
 }
 
 function renderRelation(relation: NotesRelation): string {
-  return (
-    `- ${relation.source}.${relation.name} -> ${relation.target}.${relation.foreignField} | ` +
-    `${relation.cardinality} | via ${relation.source}.${relation.localField} | ` +
-    `on-delete=${relation.onDelete}`
-  );
+  return record([
+    `${relation.source}.${relation.name} -> ${relation.target}.${relation.foreignField}`,
+    relation.cardinality,
+    `via ${relation.source}.${relation.localField}`,
+    `on-delete=${relation.onDelete}`,
+  ]);
 }
 
 /**
@@ -96,17 +148,21 @@ function renderRelation(relation: NotesRelation): string {
  * than once per entity is what makes each line independently true — an
  * assistant that reads only the `## APIs` section still knows which calls need
  * a token, and a line copied out of context does not lose its meaning.
+ *
+ * Used for the Auth API rows too, so both sections that mention an endpoint use
+ * one record shape. Two shapes for the same endpoint is the ambiguity this
+ * document is supposed to be free of: a consumer counting fields would see
+ * inconsistent arity, and could read one endpoint as two.
  */
 function renderEndpoint(endpoint: NotesEndpoint): string {
-  const parts = [
+  return record([
     `${endpoint.method} ${endpoint.path}`,
     endpoint.requiresAuth ? 'protected' : 'public',
     ...(endpoint.requestEntity === null ? [] : [`body=${endpoint.requestEntity}`]),
     ...(endpoint.pathParams.length > 0 ? [`path=${endpoint.pathParams.join(',')}`] : []),
     ...(endpoint.queryParams.length > 0 ? [`query=${endpoint.queryParams.join(',')}`] : []),
     `response=${endpoint.responseShape}`,
-  ];
-  return `- ${parts.join(' | ')}`;
+  ]);
 }
 
 /**
@@ -122,14 +178,30 @@ export function renderAiContext(model: DocumentationModel, options: AiContextOpt
   out.push('# Project Context', '');
 
   out.push('## Project');
-  out.push(`Name: ${project.name || 'unnamed'}`);
+  out.push(scalar('Name', project.name || 'unnamed'));
   if (project.description !== null && project.description !== '') {
-    out.push(`Description: ${project.description}`);
+    out.push(scalar('Description', project.description));
   }
-  out.push(`Type: ${project.kind}`);
-  out.push(`Version: ${project.version}`);
+  out.push(scalar('Type', project.kind));
+  out.push(scalar('Version', project.version));
+  /*
+   * The routing identity, when it exists.
+   *
+   * Every path in this document is relative, so without one of these an
+   * assistant has nothing to hang them on. `publicId` and `slug` are the two
+   * halves of the hosted address and are not secrets — they are in the URL the
+   * project hands out. `baseUrl` is the resolved form when the caller knows it;
+   * the parts are still worth stating, because a caller documenting a
+   * historical version has them and has no live URL.
+   */
+  if (project.publicId !== null) {
+    out.push(scalar('Public ID', project.publicId));
+  }
+  if (project.slug !== null) {
+    out.push(scalar('Base Path', `/${project.slug}`));
+  }
   if (options.baseUrl !== undefined && options.baseUrl !== '') {
-    out.push(`Base URL: ${options.baseUrl}`);
+    out.push(scalar('Base URL', options.baseUrl));
   }
   out.push('');
 
@@ -140,34 +212,40 @@ export function renderAiContext(model: DocumentationModel, options: AiContextOpt
      * consumer can match on it rather than inferring from a missing section —
      * an absent heading reads as "not documented", which is a different claim.
      */
-    out.push('Enabled: false');
+    out.push(scalar('Enabled', false));
     out.push('Note: every endpoint is public; no token is required.');
   } else {
-    out.push('Enabled: true');
-    out.push(`Mode: ${auth.mode}`);
-    out.push(`Cookie Auth: ${auth.cookieAuth}`);
-    out.push(`Access Token TTL: ${auth.accessTokenExpiresIn}`);
-    out.push(`Refresh Token TTL: ${auth.refreshTokenExpiresIn}`);
+    out.push(scalar('Enabled', true));
+    out.push(scalar('Mode', auth.mode));
+    out.push(scalar('Cookie Auth', auth.cookieAuth));
+    out.push(scalar('Access Token TTL', auth.accessTokenExpiresIn));
+    out.push(scalar('Refresh Token TTL', auth.refreshTokenExpiresIn));
     out.push(
-      `Protected Entities: ${
-        auth.protectedEntities.length === 0 ? 'none' : auth.protectedEntities.join(',')
-      }`,
+      scalar(
+        'Protected Entities',
+        auth.protectedEntities.length === 0 ? 'none' : auth.protectedEntities.join(','),
+      ),
     );
     out.push('');
     out.push('### Auth Endpoints');
-    for (const endpoint of auth.endpoints) {
-      out.push(
-        `- ${endpoint.method} ${endpoint.path} | ${
-          endpoint.requiresToken ? 'protected' : 'public'
-        }`,
-      );
+    /*
+     * Worded without a literal heading token on purpose.
+     *
+     * A consumer locates a section by splitting the document on its heading, so
+     * a body line containing `## APIs` would make the marker ambiguous and the
+     * split land here instead — which is the same class of defect as an
+     * unescaped separator, committed by the note that explains the format.
+     */
+    out.push('Note: these endpoints are repeated in the APIs section, in the same record shape.');
+    for (const endpoint of model.endpoints.filter((candidate) => candidate.isAuthApi)) {
+      out.push(renderEndpoint(endpoint));
     }
     if (auth.userFields.length > 0) {
       out.push('');
       out.push('### Sign-up Fields');
-      out.push('Collected in addition to email and password.');
+      out.push('Note: collected in addition to email and password.');
       for (const field of auth.userFields) {
-        out.push(`- ${field.name} | ${field.type} | ${field.required ? 'required' : 'optional'}`);
+        out.push(record([field.name, field.type, field.required ? 'required' : 'optional']));
       }
     }
   }
@@ -183,18 +261,24 @@ export function renderAiContext(model: DocumentationModel, options: AiContextOpt
     for (const entity of model.entities) {
       out.push('');
       out.push(`### ${entity.name}`);
-      out.push(`ID: ${entity.id ?? 'none'}`);
+      out.push(scalar('ID', entity.id ?? 'none'));
       if (entity.description !== null && entity.description !== '') {
-        out.push(`Description: ${entity.description}`);
+        out.push(scalar('Description', entity.description));
       }
-      out.push(`Path: /${entity.path}`);
-      out.push(`Authentication: ${entity.requiresAuth ? 'protected' : 'public'}`);
-      out.push(`Identity: ${entity.identity.field} (${entity.identity.style})`);
+      out.push(scalar('Path', `/${entity.path}`));
+      out.push(scalar('Authentication', entity.requiresAuth ? 'protected' : 'public'));
+      out.push(scalar('Identity', `${entity.identity.field} (${entity.identity.style})`));
       out.push('');
       out.push('#### Fields');
       // Flattened, so a nested field is one line with a dotted path rather than
       // a shape a consumer has to walk.
-      for (const field of flattenFields(entity.fields)) {
+      const fields = flattenFields(entity.fields);
+      if (fields.length === 0) {
+        // A bare heading reads as truncated output — the same reason `##
+        // Entities` says None rather than staying silent.
+        out.push('None.');
+      }
+      for (const field of fields) {
         out.push(renderField(field));
       }
     }
@@ -222,14 +306,15 @@ export function renderAiContext(model: DocumentationModel, options: AiContextOpt
   out.push('');
 
   out.push('## Generation');
-  out.push(`Methods: ${generation.methods.join(',') || 'none'}`);
-  out.push(`Validators: ${generation.validators.join(',') || 'none'}`);
-  out.push(`Types: ${generation.types.join(',') || 'none'}`);
-  out.push(`Mock Records Per Entity: ${generation.mockRecords}`);
-  const enabledFeatures = (['search', 'filter', 'sort', 'include'] as const).filter(
-    (feature) => generation.features[feature],
-  );
-  out.push(`Query Features: ${enabledFeatures.join(',') || 'none'}`);
+  out.push(scalar('Methods', generation.methods.join(',') || 'none'));
+  out.push(scalar('Validators', generation.validators.join(',') || 'none'));
+  out.push(scalar('Types', generation.types.join(',') || 'none'));
+  out.push(scalar('Mock Records Per Entity', generation.mockRecords));
+  // The shared vocabulary, not a copy of it: a fifth query feature added to the
+  // IPS must appear here without an edit, and a re-declared list would drop it
+  // silently.
+  const enabled = QUERY_FEATURES.filter((feature) => generation.features[feature]);
+  out.push(scalar('Query Features', enabled.join(',') || 'none'));
 
   return `${out.join('\n').trimEnd()}\n`;
 }

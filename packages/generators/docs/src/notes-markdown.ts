@@ -22,6 +22,7 @@
  * a reader can tell which half moves on its own.
  */
 
+import { QUERY_FEATURES } from '@instantmockapi/ips';
 import type {
   DocumentationModel,
   NotesEndpoint,
@@ -29,6 +30,21 @@ import type {
   NotesField,
   NotesRelation,
 } from './notes-model.js';
+import { stringifyDefault } from './notes-model.js';
+
+/**
+ * Free text, flattened to a single line.
+ *
+ * `validateIPS` constrains entity and field names but says nothing about a
+ * description, so a description is an arbitrary string arriving inside a
+ * markdown bullet. A raw newline in one would at best break the list and at
+ * worst forge structure — `## Authentication` on its own line becomes a real
+ * heading, and a reviewer reading an imported project (§14) cannot tell it from
+ * one this renderer wrote.
+ */
+function oneLine(value: string): string {
+  return value.replace(/\s*[\r\n]+\s*/g, ' ').trim();
+}
 
 /** A markdown document, assembled as lines so blank-line rules stay visible. */
 class Lines {
@@ -70,7 +86,7 @@ function renderDefault(value: unknown): string {
   if (value === undefined || value === null) {
     return '—';
   }
-  return typeof value === 'string' ? `"${value}"` : JSON.stringify(value);
+  return typeof value === 'string' ? `"${oneLine(value)}"` : stringifyDefault(value);
 }
 
 function renderFieldLine(field: NotesField, depth: number): string {
@@ -114,7 +130,7 @@ function renderEntity(lines: Lines, entity: NotesEntity): void {
     `- Identity: \`${entity.identity.field}\` (${entity.identity.style})`,
   ];
   if (entity.description !== null && entity.description !== '') {
-    facts.unshift(`- ${entity.description}`);
+    facts.unshift(`- ${oneLine(entity.description)}`);
   }
   lines.push(...facts, '');
 
@@ -165,14 +181,14 @@ export function renderTechnicalNotes(model: DocumentationModel): string {
   const lines = new Lines();
   const { project, auth, runtime } = model;
 
-  lines.heading(1, `${project.name || 'Untitled project'} — Technical Notes`);
+  lines.heading(1, `${oneLine(project.name) || 'Untitled project'} — Technical Notes`);
 
   lines.heading(2, 'Project');
   lines.push(
-    `- Name: ${project.name || '—'}`,
+    `- Name: ${oneLine(project.name) || '—'}`,
     ...(project.description === null || project.description === ''
       ? []
-      : [`- Description: ${project.description}`]),
+      : [`- Description: ${oneLine(project.description)}`]),
     `- Type: ${project.kind}`,
     `- Definition version: v${project.version}`,
     ...(project.publicId === null ? [] : [`- Public id: \`${project.publicId}\``]),
@@ -187,6 +203,13 @@ export function renderTechnicalNotes(model: DocumentationModel): string {
    * document to be deterministic. These move without the definition changing,
    * so they go under a heading that says as much — and a determinism check can
    * compare everything else.
+   *
+   * §20 adds a harder rule to the same section: draft configuration must never
+   * be combined with published runtime configuration. `serving` is what carries
+   * it. A hosted URL beside a definition that URL does not serve is the one
+   * genuinely dangerous line this document can print, because a reader who
+   * takes both at face value writes client code against a field list the live
+   * API will reject.
    */
   const runtimeLines = [
     ...(runtime.status === undefined ? [] : [`- Status: ${runtime.status}`]),
@@ -194,15 +217,34 @@ export function renderTechnicalNotes(model: DocumentationModel): string {
       ? []
       : [
           `- Published version: ${
-            runtime.publishedVersion === null ? 'nothing published yet' : `v${runtime.publishedVersion}`
+            runtime.publishedVersion === null
+              ? 'nothing published yet'
+              : `v${runtime.publishedVersion}`
           }`,
         ]),
     ...(runtime.pendingRegeneration === undefined
       ? []
       : [`- Pending regeneration: ${yesNo(runtime.pendingRegeneration)}`]),
-    ...(runtime.hostedUrl === undefined || runtime.hostedUrl === null
+    /*
+     * The URL, only when this definition is the one behind it.
+     *
+     * `serving === undefined` keeps the URL, which is the pre-§20 behaviour and
+     * the right default for a caller that has not said: omitting a fact because
+     * a flag was not passed would be a silent loss.
+     */
+    ...(runtime.hostedUrl === undefined || runtime.hostedUrl === null || runtime.serving === false
       ? []
       : [`- Hosted URL: ${runtime.hostedUrl}`]),
+    ...(runtime.serving === true ? ['- This is the definition the hosted API serves.'] : []),
+    ...(runtime.serving === false
+      ? [
+          // Stated, not omitted: silence here reads as "no deployment", which
+          // is a different and often wrong claim.
+          runtime.publishedVersion === undefined || runtime.publishedVersion === null
+            ? '- **Not served.** Nothing is published yet, so no hosted API reflects this definition.'
+            : `- **Not served.** The hosted API serves v${runtime.publishedVersion}; this definition is not live.`,
+        ]
+      : []),
     ...(runtime.source === undefined ? [] : [`- Describes: the ${runtime.source} definition`]),
     ...(runtime.generatedAt === undefined ? [] : [`- Generated at: ${runtime.generatedAt}`]),
   ];
@@ -284,7 +326,7 @@ export function renderTechnicalNotes(model: DocumentationModel): string {
   }
 
   lines.heading(2, 'Generation');
-  const enabledFeatures = (['search', 'filter', 'sort', 'include'] as const).filter(
+  const enabledFeatures = QUERY_FEATURES.filter(
     (feature) => model.generation.features[feature],
   );
   lines.push(

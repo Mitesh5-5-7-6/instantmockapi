@@ -28,10 +28,19 @@
  * document would read in an arbitrary sequence that changes the moment anything
  * is re-created. Author order is both stable *and* the order the author meant.
  *
- * **Endpoints sort by `(method, path)`.** They have no stable id — endpoint
- * identity in this codebase is `(method, path)` and Phase 2 deliberately left
- * `ep_` unminted. That pair is deterministic, so §8's requirement is satisfied
- * by the only key that exists.
+ * **Endpoints sort by `(path, method)`, in code-unit order.** They have no
+ * stable id — endpoint identity in this codebase is `(method, path)` and Phase
+ * 2 deliberately left `ep_` unminted — so that pair is the only deterministic
+ * key available. Path first, so every operation on a resource is adjacent:
+ * `GET /post`, `POST /post`, `GET /post/{id}` read as one group rather than
+ * being split across the document by verb.
+ *
+ * Compared with `<`/`>` rather than `localeCompare`, which resolves against the
+ * **host's** default locale. ICU gives punctuation variable weight and locales
+ * disagree about letters, so `localeCompare` would order `/post-archive`
+ * against `/post/{id}`, or two non-ASCII entity names, differently on different
+ * machines — §8 determinism broken by the environment rather than by the
+ * definition. Code-unit order is total, locale-free and identical everywhere.
  *
  * Nothing here reads a clock, a database, or `Math.random`.
  */
@@ -77,6 +86,22 @@ export interface RuntimeFacts {
   hostedUrl?: string | null;
   /** Where the definition came from: a stored version, or the live project. */
   source?: 'version' | 'project' | 'draft';
+  /**
+   * Whether the definition being documented is the one the hosted API serves.
+   *
+   * §20's hard rule is that draft configuration must never be combined with
+   * published runtime configuration, and this is the field that makes the rule
+   * expressible rather than a matter of care. The trap is specifically
+   * `hostedUrl`: printing a live URL beside a definition that URL does not
+   * serve invites a reader to conclude it does — and a developer who writes
+   * client code against a draft's field list and the published URL gets 422s
+   * they cannot explain.
+   *
+   * So the renderer prints `hostedUrl` only when this is true, and when it is
+   * false it says which version *is* live instead. Absent means unstated, for
+   * a caller documenting a definition with no deployment in the picture at all.
+   */
+  serving?: boolean;
   /** Rendered in its own section, never inside the canonical body (§8). */
   generatedAt?: string;
 }
@@ -404,9 +429,56 @@ function authEndpoints(auth: AuthConfig): NotesEndpoint[] {
   return rows;
 }
 
-/** Deterministic endpoint order: method then path. See the module docstring. */
-function byMethodThenPath(a: NotesEndpoint, b: NotesEndpoint): number {
-  return a.path === b.path ? a.method.localeCompare(b.method) : a.path.localeCompare(b.path);
+/**
+ * Code-unit comparison — the locale-free half of §8.
+ *
+ * `String.prototype.localeCompare` would read the host's default locale, so the
+ * same definition could render in a different order on a developer's machine
+ * and on the server. See the module docstring.
+ */
+function byCodeUnit(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
+/** Deterministic endpoint order: path, then method. See the module docstring. */
+function byPathThenMethod(a: NotesEndpoint, b: NotesEndpoint): number {
+  return a.path === b.path ? byCodeUnit(a.method, b.method) : byCodeUnit(a.path, b.path);
+}
+
+/**
+ * A stored value, serialised for a document.
+ *
+ * Object keys are sorted. `JSON.stringify` emits them in insertion order, which
+ * for a value read out of a `Mixed` Mongo field is whatever the driver returned
+ * — the one thing this module's determinism rule names as off-limits. Sorting
+ * costs nothing and makes the claim true for every input rather than for the
+ * scalar defaults that happen to be common.
+ */
+export function stringifyDefault(value: unknown): string {
+  return JSON.stringify(value, (_key, raw) => {
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+      return raw;
+    }
+    const source = raw as Record<string, unknown>;
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(source).sort(byCodeUnit)) {
+      sorted[key] = source[key];
+    }
+    return sorted;
+  });
+}
+
+/**
+ * Everything the model needs that is not in the definition.
+ *
+ * `name` and `description` live on the `Project` document rather than in the
+ * IPS, and `runtime` is the mutable half §8 keeps out of the canonical body.
+ */
+export interface DocumentationMeta {
+  name: string;
+  description?: string | null;
+  runtime?: RuntimeFacts;
 }
 
 /**
@@ -419,7 +491,7 @@ function byMethodThenPath(a: NotesEndpoint, b: NotesEndpoint): number {
  */
 export function buildDocumentationModel(
   ips: InternalProjectSchema,
-  meta: { name: string; description?: string | null; runtime?: RuntimeFacts } = { name: '' },
+  meta: DocumentationMeta = { name: '' },
 ): DocumentationModel {
   const config: GenerationConfig = ips.generationConfig;
   const features = queryFeatures(config);
@@ -503,7 +575,7 @@ export function buildDocumentationModel(
     // first group before the protected half of the second works.
     endpoints: [
       ...(enabled ? authEndpoints(auth) : []),
-      ...entityRows.sort(byMethodThenPath),
+      ...entityRows.sort(byPathThenMethod),
     ],
     generation: {
       validators: [...config.validators],

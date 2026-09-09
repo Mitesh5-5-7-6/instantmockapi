@@ -24,7 +24,12 @@ import { useEffect, useId, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button, Card, Checkbox, Field, Input, Modal, Note, Textarea } from '@instantmockapi/ui';
 import { ApiError } from '../../../../lib/api-client';
-import { useDeleteProject, useProject, useUpdateProject } from '../../../../lib/hooks';
+import {
+  useDeleteProject,
+  useDuplicateProject,
+  useProject,
+  useUpdateProject,
+} from '../../../../lib/hooks';
 import type { QueryFeatures } from '../../../../lib/api-types';
 
 /** Mirrors the API's own allow-list; anything else is rejected server-side. */
@@ -45,10 +50,13 @@ export default function SettingsPage() {
   const project = useProject(id);
   const update = useUpdateProject(id);
   const remove = useDeleteProject();
+  const duplicate = useDuplicateProject(id);
+  const [duplicateName, setDuplicateName] = useState('');
 
   const nameId = useId();
   const slugId = useId();
   const descriptionId = useId();
+  const duplicateNameId = useId();
 
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
@@ -81,6 +89,7 @@ export default function SettingsPage() {
   }
 
   const error = update.error instanceof ApiError ? update.error : null;
+  const duplicateError = duplicate.error instanceof ApiError ? duplicate.error : null;
 
   const addressingChanged =
     name !== detail.name ||
@@ -263,6 +272,80 @@ export default function SettingsPage() {
       {update.isSuccess && !addressingChanged && !generationChanged ? (
         <Note variant="info">Saved.</Note>
       ) : null}
+
+      {/*
+       * Duplicate sits with the project's own lifecycle, not in the Docs tab.
+       *
+       * It runs through the blueprint pathway (§19) and the Docs tab is where
+       * blueprints are exported, so grouping them there was tempting. But Docs
+       * holds *documents about* the project, and this makes a new project —
+       * which is the same category of action as Delete, and §18 asks these to
+       * live in one predictable place rather than being scattered.
+       */}
+      <Card className="ui-stack">
+        <div>
+          <h2>Duplicate project</h2>
+          <p className="ui-meta">
+            Creates a new project with the same entities, relationships, authentication settings and
+            generation options. Nothing else comes across: the copy gets its own hosted URL, its own
+            credentials, and none of this project&rsquo;s users, sessions or mock records. It starts
+            as a draft, so nothing is generated until you say so.
+          </p>
+        </div>
+        <Field label="Name for the copy" htmlFor={duplicateNameId}>
+          <Input
+            id={duplicateNameId}
+            value={duplicateName}
+            placeholder={`${detail.name} (copy)`}
+            maxLength={120}
+            onChange={(event) => setDuplicateName(event.target.value)}
+          />
+        </Field>
+        <div className="ui-row">
+          <Button
+            variant="secondary"
+            disabled={duplicate.isPending}
+            onClick={() => {
+              void duplicate
+                .mutateAsync(duplicateName.trim() === '' ? {} : { name: duplicateName.trim() })
+                .then((copy) => {
+                  router.push(`/projects/${copy.id}`);
+                })
+                .catch(() => {
+                  // Swallowed on purpose: nothing was created, so there is
+                  // nowhere to navigate. The Note below reports why.
+                });
+            }}
+          >
+            {duplicate.isPending ? 'Duplicating…' : 'Duplicate this project'}
+          </Button>
+        </div>
+
+        {/*
+         * Duplicating can genuinely fail, and silently failing here would be
+         * the worst outcome: the user waits for a page that never arrives.
+         *
+         * Two real cases. The plan limit — a duplicate is a create, so an
+         * account at its ceiling is refused. And a definition that no longer
+         * validates: the blueprint pathway re-checks the canonical rules, so a
+         * project whose stored schema has drifted is refused with the field
+         * named, which is exactly what the owner needs to fix the original.
+         */}
+        {duplicateError ? (
+          <Note variant="warning">
+            <strong>{duplicateError.message}</strong>
+            {duplicateError.details?.length ? (
+              <ul style={{ margin: 'var(--space-2) 0 0', paddingLeft: 'var(--space-4)' }}>
+                {duplicateError.details.map((issue) => (
+                  <li key={`${issue.path}:${issue.issue}`}>
+                    <span className="ui-mono">{issue.path}</span> — {issue.issue}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </Note>
+        ) : null}
+      </Card>
 
       <Card className="ui-stack settings-danger">
         <div>

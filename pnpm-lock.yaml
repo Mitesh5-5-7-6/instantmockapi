@@ -71,6 +71,9 @@ importers:
       '@instantmockapi/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@instantmockapi/generator-docs':
+        specifier: workspace:*
+        version: link:../../packages/generators/docs
       '@instantmockapi/ips':
         specifier: workspace:*
         version: link:../../packages/ips

@@ -16,14 +16,26 @@ export interface ProjectTab {
 }
 
 /**
- * Seven tabs, matching the target design's shape with one substitution.
+ * The workspace tabs.
  *
- * **No Auth tab.** Hosted mock APIs have no per-project auth model — no keys, no
- * enforcement in the runtime, nothing in the schema. A tab explaining its own
- * absence is worse than no tab.
+ * **Files** was not in the target design at all; generated artifacts (types,
+ * validators, docs, Postman collections) are real, useful output and had no
+ * home, so they got a slot. **Auth** arrived with Phase 3, which gave hosted
+ * mock APIs a real per-project auth model — the comment that used to sit here
+ * argued against an Auth tab on the grounds that nothing backed it, and that
+ * stopped being true.
  *
- * **Files replaces it**, because generated artifacts (types, validators, docs,
- * Postman collections) are real, useful, and had no home in the design at all.
+ * **Docs** is Phase 4 §10: the Technical Notes and the AI-ready context. It is
+ * deliberately not folded into Files, which serves *stored artifacts a worker
+ * produced*; these two are built on demand from the definition and have no
+ * artifact row, no version and no download from storage. §18 also asks that
+ * these actions live in one place rather than being scattered, so both
+ * documents share this tab.
+ *
+ * It is offered for every project kind, Auth API included: a project whose
+ * whole surface is authentication still has endpoints, sign-up fields and a
+ * token lifetime to document, and both renderers state the no-entities case
+ * explicitly rather than rendering an empty section.
  */
 export const PROJECT_TABS: readonly ProjectTab[] = [
   { segment: '', label: 'Overview', icon: 'home' },
@@ -34,6 +46,7 @@ export const PROJECT_TABS: readonly ProjectTab[] = [
   { segment: 'mock-data', label: 'Mock Data', icon: 'database' },
   { segment: 'logs', label: 'Logs', icon: 'activity' },
   { segment: 'files', label: 'Files', icon: 'file-code' },
+  { segment: 'docs', label: 'Docs', icon: 'book' },
   { segment: 'activity', label: 'Activity', icon: 'clock' },
   { segment: 'settings', label: 'Settings', icon: 'settings' },
 ];

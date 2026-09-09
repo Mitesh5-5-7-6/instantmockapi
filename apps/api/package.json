@@ -18,6 +18,7 @@
     "@instantmockapi/auth": "workspace:*",
     "@instantmockapi/config": "workspace:*",
     "@instantmockapi/db": "workspace:*",
+    "@instantmockapi/generator-docs": "workspace:*",
     "@instantmockapi/ips": "workspace:*",
     "@instantmockapi/parsers": "workspace:*",
     "@instantmockapi/queue": "workspace:*",

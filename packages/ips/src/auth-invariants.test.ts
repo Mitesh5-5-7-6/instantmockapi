@@ -291,6 +291,42 @@ const ALLOWED: Record<string, string> = {
    */
   'apps/api/src/input-parsing.ts':
     'passes the wizard payload’s auth block to the adapter; makes no protection decision',
+  /*
+   * The same pass-through as `input-parsing.ts`, for the other untrusted input.
+   *
+   * A blueprint arrives from outside the system and `normalizeBlueprint` puts
+   * its auth block on the new IPS, where `projectAuth` reads it later. Nothing
+   * compares it to a protection value, and the envelope key scan touches the
+   * name only to refuse a credential hidden beside it.
+   *
+   * Routing it through `projectAuth` instead — which would satisfy the scan —
+   * was considered and rejected: that returns a *defaulted* config, so storing
+   * its output would rewrite the author's document on import and make a
+   * blueprint round trip lossy. A lint rule is not worth changing what gets
+   * stored.
+   */
+  'packages/ips/src/blueprint.ts':
+    'passes an imported blueprint’s auth block onto the new IPS; makes no protection decision',
+  /*
+   * The same pass-through again, at the route that stores the input source.
+   *
+   * Both reads in that file copy a *validated blueprint's* project-level auth
+   * config into `inputSource.raw` so `POST /projects/:id/parse` can re-read the
+   * definition later. Neither compares it to a protection value and neither
+   * touches an entity's own stamp.
+   *
+   * Unavoidable rather than merely convenient: the alternative is
+   * `projectAuth`, which returns a *defaulted* config, so storing its output
+   * would rewrite the author's document — the same reason
+   * `packages/ips/src/blueprint.ts` is on this list.
+   *
+   * Worth noting for whoever reads this next: the entry arrived a stage after
+   * the code did, because the scan is sensitive to how the expression is
+   * formatted and a `prettier` pass changed it. That is a weakness of a
+   * regex-based guard, not of the exemption.
+   */
+  'apps/api/src/routes/blueprint.ts':
+    'copies a validated blueprint’s auth block into the stored input source; makes no protection decision',
 };
 
 /**

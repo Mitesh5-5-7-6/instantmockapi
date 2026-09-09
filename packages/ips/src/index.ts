@@ -213,3 +213,23 @@ export {
   type UnaffectedEndpoint,
   type UnattributedChange,
 } from './impact.js';
+
+export {
+  BLUEPRINT_FORBIDDEN_KEYS,
+  blueprintFilename,
+  buildBlueprint,
+  BLUEPRINT_MIGRATIONS,
+  BLUEPRINT_SCHEMA_VERSION,
+  BLUEPRINT_VERSION,
+  blueprintVersionOf,
+  migrateBlueprint,
+  normalizeBlueprint,
+  readBlueprint,
+  validateBlueprint,
+  type Blueprint,
+  type BlueprintMetadata,
+  type BlueprintMigration,
+  type BlueprintProject,
+  type BuildBlueprintOptions,
+  type NormalizeBlueprintOptions,
+} from './blueprint.js';

@@ -19,6 +19,7 @@ export { type EntityExamples } from './examples.js';
 export {
   buildDocumentationModel,
   flattenFields,
+  type DocumentationMeta,
   type DocumentationModel,
   type NotesAuth,
   type NotesEndpoint,
