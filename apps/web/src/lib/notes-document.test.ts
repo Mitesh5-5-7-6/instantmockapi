@@ -260,3 +260,27 @@ describe('notesFilename', () => {
     expect(notesFilename('ai', { name: '———' })).toBe('section-ai-context.md');
   });
 });
+
+describe('notesFilename for a blueprint', () => {
+  /**
+   * The mirror of `blueprintFilename` in `packages/ips/src/blueprint.ts`.
+   *
+   * `web-must-not-import-server` forbids importing it, and this app needs the
+   * name client-side because it downloads from the parsed body — it
+   * pretty-prints the JSON — rather than following the API's
+   * `content-disposition` header. These are the same literals that side pins;
+   * a drift shows up as one suite passing and the other failing.
+   */
+  it('uses the §17 suffix with the project stem', () => {
+    expect(notesFilename('blueprint', { slug: 'shop' })).toBe('shop.blueprint.json');
+  });
+
+  it('lowercases and slugs, as the server-side rule does', () => {
+    expect(notesFilename('blueprint', { slug: 'My Shop' })).toBe('my-shop.blueprint.json');
+    expect(notesFilename('blueprint', { slug: 'Shop_2' })).toBe('shop-2.blueprint.json');
+  });
+
+  it('falls back the same way when there is no slug', () => {
+    expect(notesFilename('blueprint', {})).toBe('project.blueprint.json');
+  });
+});

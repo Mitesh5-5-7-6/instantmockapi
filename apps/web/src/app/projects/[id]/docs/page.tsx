@@ -3,9 +3,10 @@
 /**
  * The Docs tab (Phase 4 §10, §17, §18).
  *
- * Two documents about one project: the Technical Notes a person reads, and the
- * AI-ready context a person pastes into an assistant. §18 asks that these
- * actions live in one place rather than being scattered, so both are here.
+ * Three views of one project: the Technical Notes a person reads, the AI-ready
+ * context a person pastes into an assistant, and the Blueprint a person shares
+ * or re-imports. §18 asks that these actions live in one place rather than
+ * being scattered, so all three are here rather than spread across tabs.
  *
  * ## Rendered, raw and downloaded are one document
  *
@@ -15,10 +16,10 @@
  * none of them can describe it differently — which is §9's whole argument,
  * applied one layer further out than §9 states it.
  *
- * ## Neither document is stored
+ * ## Nothing here is stored
  *
- * There is no artifact row, no version to pick and no Regenerate button,
- * because both are built on demand from the canonical definition. That is why
+ * There is no artifact row, no version to pick and no Regenerate button: all
+ * three are built on demand from the canonical definition. That is why
  * this is not part of the Files tab, which serves what a worker produced. The
  * practical consequence for a reader: these are never stale, and they describe
  * the *definition* — which is not necessarily what the hosted API is serving if
@@ -38,7 +39,13 @@ import {
   Tabs,
   TabPanel,
 } from '@instantmockapi/ui';
-import { downloadTextFile, useAiContext, useProject, useTechnicalNotes } from '../../../../lib/hooks';
+import {
+  downloadTextFile,
+  useAiContext,
+  useBlueprint,
+  useProject,
+  useTechnicalNotes,
+} from '../../../../lib/hooks';
 import {
   documentSections,
   notesFilename,
@@ -48,8 +55,19 @@ import { NotesView } from '../../../../components/project/notes-view';
 import { normalizeError } from '../../../../lib/errors';
 import { notifyFailure } from '../../../../lib/toast';
 
-type DocTab = 'notes' | 'ai';
+type DocTab = 'notes' | 'ai' | 'blueprint';
 type NotesMode = 'rendered' | 'markdown';
+
+/**
+ * A blueprint, as the bytes a user gets.
+ *
+ * Pretty-printed rather than the compact JSON the API sends, because a
+ * blueprint is a file people open, read and diff. The API's own
+ * `content-disposition` download is the compact form — same content, and both
+ * import identically, since indentation is not data.
+ */
+const formatBlueprint = (blueprint: Record<string, unknown>): string =>
+  `${JSON.stringify(blueprint, null, 2)}\n`;
 
 /**
  * Copy, with a spoken result.
@@ -93,12 +111,17 @@ export default function DocsPage() {
   // Idle until the tab is opened: a reader who only wants the notes should not
   // pay for a second document.
   const ai = useAiContext(id, tab === 'ai');
+  const blueprint = useBlueprint(id, tab === 'blueprint');
 
   const markdown = notes.data?.markdown ?? '';
   const blocks = useMemo(() => parseNotesDocument(markdown), [markdown]);
   const sections = useMemo(() => documentSections(blocks), [blocks]);
+  const blueprintJson = useMemo(
+    () => (blueprint.data === undefined ? '' : formatBlueprint(blueprint.data)),
+    [blueprint.data],
+  );
 
-  const filenameFor = (kind: 'notes' | 'ai') =>
+  const filenameFor = (kind: 'notes' | 'ai' | 'blueprint') =>
     notesFilename(kind, {
       slug: project.data?.slug ?? null,
       name: project.data?.name ?? null,
@@ -132,6 +155,7 @@ export default function DocsPage() {
         items={[
           { id: 'notes', label: 'Technical Notes' },
           { id: 'ai', label: 'AI Context' },
+          { id: 'blueprint', label: 'Blueprint' },
         ]}
       />
 
@@ -197,7 +221,7 @@ export default function DocsPage() {
             ) : null}
           </div>
         </TabPanel>
-      ) : (
+      ) : tab === 'ai' ? (
         <TabPanel id="ai">
           <div className="flex flex-col gap-4">
             <Note>
@@ -229,6 +253,43 @@ export default function DocsPage() {
             ) : null}
 
             {ai.data !== undefined ? <CodeBlock code={ai.data.context} maxHeight={640} /> : null}
+          </div>
+        </TabPanel>
+      ) : (
+        <TabPanel id="blueprint">
+          <div className="flex flex-col gap-4">
+            <Note>
+              A blueprint is everything needed to recreate this project — entities, fields,
+              relationships, authentication settings and generation options. It carries no keys, no
+              tokens and no hosted URL, so it is safe to share. Importing one creates a new project
+              with its own credentials.
+            </Note>
+
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <CopyButton text={blueprintJson} label="Copy JSON" />
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={blueprint.data === undefined}
+                onClick={() => downloadTextFile(filenameFor('blueprint'), blueprintJson)}
+              >
+                <Icon name="download" size={14} /> Download Blueprint
+              </Button>
+            </div>
+
+            {blueprint.isLoading ? (
+              <div className="h-64 animate-pulse rounded-md bg-muted" />
+            ) : null}
+
+            {blueprint.isError ? (
+              <ErrorState
+                title="Could not build the blueprint"
+                detail={normalizeError(blueprint.error).title}
+                onRetry={() => void blueprint.refetch()}
+              />
+            ) : null}
+
+            {blueprintJson !== '' ? <CodeBlock code={blueprintJson} maxHeight={640} /> : null}
           </div>
         </TabPanel>
       )}

@@ -159,9 +159,25 @@ export function sectionId(text: string): string {
  * an unusable set. The slug is already the project's own URL segment.
  */
 export function notesFilename(
-  kind: 'notes' | 'ai',
+  kind: 'notes' | 'ai' | 'blueprint',
   project: { slug?: string | null; name?: string | null },
 ): string {
   const stem = sectionId(project.slug ?? project.name ?? 'project');
-  return kind === 'notes' ? `${stem}-technical-notes.md` : `${stem}-ai-context.md`;
+  if (kind === 'notes') {
+    return `${stem}-technical-notes.md`;
+  }
+  if (kind === 'ai') {
+    return `${stem}-ai-context.md`;
+  }
+  /*
+   * The blueprint's name is `<stem>.blueprint.json` — §17's suffix.
+   *
+   * **Mirrors `blueprintFilename` in `packages/ips/src/blueprint.ts`**, which
+   * the API uses for the `content-disposition` header.
+   * `web-must-not-import-server` forbids importing it, and this app downloads
+   * from the parsed body (it pretty-prints the JSON for a human reader) so it
+   * needs the name rather than the header. Both slug the same way and both test
+   * suites pin the same literals; change one and change the other.
+   */
+  return `${stem}.blueprint.json`;
 }

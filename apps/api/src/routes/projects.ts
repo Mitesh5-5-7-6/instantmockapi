@@ -20,11 +20,10 @@ import {
   type InputSourceType,
   type ProjectKind,
 } from '@instantmockapi/shared';
-import { getPlanConfig, type EnvConfig } from '@instantmockapi/config';
+import type { EnvConfig } from '@instantmockapi/config';
 import {
   ApiLog,
   Project,
-  ensurePublicIdentity,
   hardDeleteProject,
   pinPublishedVersion,
   type IProject,
@@ -40,6 +39,7 @@ import { loadOwnedProject } from '../access.js';
 import { escapeRegExp, listEnvelope, parsePagination, parseSort } from '../pagination.js';
 import { toProjectDetail, toProjectSummary, toProjectSummaryWithCounts } from '../serializers.js';
 import { parseInputSource } from '../input-parsing.js';
+import { assertProjectQuota, createProjectRecord } from '../project-create.js';
 import { validateGenerationConfig } from '../generation-config.js';
 import { buildProjectMetrics } from '../project-metrics-service.js';
 import { recordVersion } from '../version-service.js';
@@ -209,64 +209,42 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
         });
       }
 
-      // Plan gate: max projects (0 = unlimited) → 403 PLAN_LIMIT_EXCEEDED
-      const planConfig = getPlanConfig(authUser?.plan ?? 'free');
-      if (planConfig.maxProjects > 0) {
-        const count = await Project.countDocuments({ ownerId: authUser?.sub });
-        if (count >= planConfig.maxProjects) {
-          throw new AppError({
-            code: 'PLAN_LIMIT_EXCEEDED',
-            message: `Your ${authUser?.plan ?? 'free'} plan allows at most ${planConfig.maxProjects} projects`,
-          });
-        }
-      }
+      await assertProjectQuota(authUser?.sub, authUser?.plan);
 
       const rawString =
         typeof body.inputSource.raw === 'string'
           ? body.inputSource.raw
           : JSON.stringify(body.inputSource.raw);
 
-      // Instantiate first so the generated _id can be stamped into the IPS.
-      // `kind` must be set before minting the public id — it selects the prefix.
-      const project = new Project({
+      /*
+       * The definition is parsed inside `createProjectRecord`, given the id of
+       * the not-yet-saved document — `parseInputSource` throws on an invalid
+       * payload, and running it there means the throw happens before the first
+       * write rather than after it.
+       *
+       * The rest of the sequence (stable ids from birth, addressing minted
+       * immediately, the two-write shape) lives in `project-create.ts` because
+       * blueprint import and Duplicate Project have to produce exactly the same
+       * kind of document.
+       */
+      const project = await createProjectRecord({
         ownerId: authUser?.sub,
-        name: body.name,
-        kind: body.kind ?? 'project',
-        slug: body.slug ?? null,
-        description: body.description ?? null,
-        status: 'draft',
-        inputSource: { type: body.inputSource.type, raw: rawString },
+        prepare: (projectId) => ({
+          name: body.name,
+          kind: body.kind ?? 'project',
+          slug: body.slug ?? null,
+          description: body.description ?? null,
+          inputSource: { type: body.inputSource.type, raw: rawString },
+          ips: parseInputSource(
+            projectId,
+            body.name,
+            body.inputSource.type,
+            rawString,
+            config,
+            body.kind ?? 'project',
+          ),
+        }),
       });
-      const projectId = String(project._id);
-
-      const ips = parseInputSource(
-        projectId,
-        body.name,
-        body.inputSource.type,
-        rawString,
-        config,
-        project.kind,
-      );
-      project.ips = { ...ips, projectId, version: 1 };
-      // Stable ids from birth, so the first edit is already diffable.
-      //
-      // Without this, a brand-new project's entities have no `ent_…` and the
-      // very first rename is *undetectable*: with no id on either side, "renamed
-      // Product to Item" and "deleted Product, added Item" are the same
-      // document. `POST /draft` backfills for projects that predate ids, but a
-      // client editing through `PATCH /projects/:id` never goes near it — and
-      // the delete-plus-add reading leaves every inbound relation dangling, so
-      // the rename was rejected outright.
-      ensureSchemaIds(project.ips);
-      project.generationConfig = ips.generationConfig;
-      project.currentVersion = 1;
-      await project.save();
-
-      // Addressable from creation, so the wizard can show the hosted URL before
-      // the first generation ever runs.
-      await ensurePublicIdentity(project);
-      project.ips = { ...project.ips, ...addressing(project) };
-      await project.save();
 
       return reply.status(201).send(toProjectDetail(project));
     },

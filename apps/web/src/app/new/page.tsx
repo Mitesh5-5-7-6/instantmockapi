@@ -12,7 +12,7 @@
  */
 
 import Link from 'next/link';
-import { Card } from '@instantmockapi/ui';
+import { Button, Card, Icon } from '@instantmockapi/ui';
 
 const CHOICES = [
   {
@@ -84,6 +84,33 @@ export default function NewPage() {
           </div>
         ))}
       </div>
+
+      {/*
+       * Importing is not a fourth kind.
+       *
+       * The three cards answer "what are you building", and that answer sets
+       * `kind` permanently. A blueprint has already answered it — the file
+       * decides the kind — so this is a different sort of action and sits below
+       * the choice rather than inside it.
+       */}
+      <Card className="ui-stack">
+        <div className="ui-stack" style={{ gap: 'var(--space-1)' }}>
+          <h2 style={{ margin: 0 }}>Already have a blueprint?</h2>
+          <span className="ui-meta">
+            A blueprint is the JSON file you can export from any project&rsquo;s Docs tab. It holds
+            the whole definition — entities, relationships, authentication and generation settings —
+            so importing one recreates the project in a couple of minutes. Useful when a hosted API
+            has expired, when moving a project between accounts, or when someone sends you theirs.
+          </span>
+        </div>
+        <div className="ui-row">
+          <Link href="/new/import" style={{ textDecoration: 'none' }}>
+            <Button variant="secondary">
+              <Icon name="cloud-upload" size={16} /> Import a blueprint
+            </Button>
+          </Link>
+        </div>
+      </Card>
     </div>
   );
 }

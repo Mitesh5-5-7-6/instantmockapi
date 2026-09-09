@@ -15,7 +15,10 @@ import {
   Artifact,
   AuthToken,
   Job,
+  MockAuthSecret,
+  MockSession,
   MockStore,
+  MockUser,
   Project,
   User,
   Version,
@@ -51,9 +54,29 @@ export async function stopTestDb(): Promise<void> {
 export async function clearDb(): Promise<void> {
   testStorage.clear();
   await Promise.all(
-    [User, AuthToken, Project, Version, Artifact, Job, MockStore, ApiLog].map((model) =>
-      model.deleteMany({}),
-    ),
+    /*
+     * Every per-project collection, including the three Phase 3 added.
+     *
+     * `MockUser`, `MockSession` and `MockAuthSecret` were missing, which made
+     * any test that created an end user or a session leak into the next one in
+     * the same file — and `MockSession.tokenHash` is uniquely indexed, so the
+     * second such test failed on a duplicate key rather than on its own
+     * assertion. Found by the Duplicate Project tests, which are the first here
+     * to seed a project's end users.
+     */
+    [
+      User,
+      AuthToken,
+      Project,
+      Version,
+      Artifact,
+      Job,
+      MockStore,
+      MockUser,
+      MockSession,
+      MockAuthSecret,
+      ApiLog,
+    ].map((model) => model.deleteMany({})),
   );
 }
 

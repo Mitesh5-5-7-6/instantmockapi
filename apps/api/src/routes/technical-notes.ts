@@ -32,7 +32,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { EnvConfig } from '@instantmockapi/config';
 import { publishedVersionOf, type IProject } from '@instantmockapi/db';
-import { normaliseSnapshot, type InternalProjectSchema } from '@instantmockapi/ips';
 import {
   buildDocumentationModel,
   renderAiContext,
@@ -40,37 +39,10 @@ import {
   type DocumentationMeta,
 } from '@instantmockapi/generator-docs';
 import { loadOwnedProject } from '../access.js';
+import { definitionOf } from '../project-definition.js';
 
 export interface TechnicalNotesRouteOptions {
   config: EnvConfig;
-}
-
-/**
- * The definition to document, with the project's addressing overlaid.
- *
- * The overlay follows `apps/workers/src/processor.ts` — *addressing comes from
- * the live project document, never from a snapshot*. `publicId` and `slug` are
- * versionless properties of the project, so a slug edited after a snapshot was
- * taken must not make a document advertise the old path.
- *
- * `normaliseSnapshot` does the other half: it overlays `generationConfig` over
- * the copy embedded in `ips` (which `generation-service` can leave stale) and
- * materializes relations, so derived identity and foreign-key fields are
- * present. Both halves are the same normalisation the compare page performs,
- * reused rather than restated.
- */
-function definitionOf(project: IProject): InternalProjectSchema {
-  const normalised = normaliseSnapshot({
-    version: project.currentVersion,
-    ips: project.ips as InternalProjectSchema,
-    config: project.generationConfig,
-  });
-  return {
-    ...normalised,
-    kind: project.kind ?? 'project',
-    ...(project.publicId ? { publicId: project.publicId } : {}),
-    ...(project.slug ? { slug: project.slug } : {}),
-  };
 }
 
 /**

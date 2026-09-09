@@ -917,3 +917,55 @@ export function useAiContext(projectId: string | null, wanted: boolean) {
     enabled: projectId !== null && wanted,
   });
 }
+
+/**
+ * The project's blueprint (Phase 4 §17).
+ *
+ * Idle until asked for, like the AI context: it is a whole definition and most
+ * visits to the tab do not want one.
+ *
+ * The response body *is* the file — the API returns the blueprint bare rather
+ * than wrapped — so what gets downloaded is what the API returned, and a client
+ * that unwrapped it wrongly could not produce a file the importer rejects.
+ */
+export function useBlueprint(projectId: string | null, wanted: boolean) {
+  return useQuery({
+    queryKey: ['blueprint', projectId],
+    queryFn: () => apiFetch<Record<string, unknown>>(`/v1/projects/${projectId}/blueprint`),
+    enabled: projectId !== null && wanted,
+  });
+}
+
+/**
+ * Import a blueprint as a new project (Phase 4 §15).
+ *
+ * A create, so it invalidates the project list exactly as `useCreateProject`
+ * does. It does not generate: that is a second call, which is also how the
+ * wizard works — create, review, then Generate.
+ */
+export function useImportBlueprint() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { blueprint: unknown; name?: string; description?: string }) =>
+      apiFetch<ProjectDetail>('/v1/projects/import', { method: 'POST', body: input }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
+  });
+}
+
+/**
+ * Duplicate a project through the blueprint pathway (Phase 4 §19).
+ *
+ * A create, so the project list is invalidated. Like import, it does not
+ * generate — the copy is a draft and the caller decides when to spend the work.
+ */
+export function useDuplicateProject(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { name?: string; description?: string } = {}) =>
+      apiFetch<ProjectDetail>(`/v1/projects/${projectId}/duplicate`, {
+        method: 'POST',
+        body: input,
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
+  });
+}
