@@ -21,6 +21,28 @@ export interface EnvConfig {
   /** MongoDB connection string */
   readonly mongoUri: string;
 
+  /**
+   * Ceiling on the MongoDB connection pool, **per process** (Phase 6 §11).
+   *
+   * Explicit because the driver's default is 100, and the limit that matters is
+   * the cluster's, not the instance's: three API replicas plus a worker at the
+   * default would ask Atlas for 400 connections, and a shared tier caps at 500.
+   * A mock-API platform's queries are short and indexed, so a small pool is not
+   * a throughput constraint — waiting on a pooled socket costs less than the
+   * cluster refusing the connection.
+   */
+  readonly dbMaxPoolSize: number;
+
+  /**
+   * Floor on the pool. Zero on purpose.
+   *
+   * A non-zero floor makes an idle instance hold sockets open, which is exactly
+   * wrong on a platform that sleeps instances: the connections outlive the
+   * usefulness of the instance holding them, and a woken instance re-opens
+   * anyway. Cold start pays for the first connection either way.
+   */
+  readonly dbMinPoolSize: number;
+
   /** Redis connection string */
   readonly redisUrl: string;
 
@@ -219,6 +241,10 @@ export function loadEnvConfig(): EnvConfig {
     mockRuntimePort: envInt('MOCK_RUNTIME_PORT', 4001),
     webPort,
     mongoUri: envStr('MONGO_URI', 'mongodb://localhost:27017/instantmockapi'),
+    // 10, not the driver's 100 — see the field docs. Raise per service when a
+    // measured queue on the pool justifies it, which is §13's rule.
+    dbMaxPoolSize: envInt('DB_MAX_POOL_SIZE', 10),
+    dbMinPoolSize: envInt('DB_MIN_POOL_SIZE', 0),
     redisUrl: envStr('REDIS_URL', 'redis://localhost:6379'),
     redisEnabled: resolveRedisEnabled(nodeEnv),
     cacheL1MaxEntries: envInt('CACHE_L1_MAX_ENTRIES', 500),

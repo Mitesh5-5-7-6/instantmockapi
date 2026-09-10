@@ -6,4 +6,4 @@
  * RUN_WORKER_IN_PROCESS=true) must import through here instead.
  */
 
-export { processGenerationJob, type ProcessorDeps } from './processor.js';
+export { processGenerationJob, settleExhaustedJob, type ProcessorDeps } from './processor.js';

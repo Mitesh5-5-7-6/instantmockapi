@@ -124,3 +124,9 @@ use it. A filename is not a URL.
 Authentication is Phase 3 and must consume this model rather than contaminate
 it. Versioning UI, visual diff and rollback are Phase 2. Neither should require
 changing anything above.
+
+**Infrastructure is a different axis entirely** — which service runs where, what
+is in Redis versus MongoDB, why a request is sometimes slow. That lives in
+`INFRASTRUCTURE.md`. The two documents meet at one point and it is worth naming:
+the deployment boundary described above is what `publishedVersion` protects, and
+the hosted runtime described there is what reads it.

@@ -5,6 +5,20 @@ import { loadEnvConfig } from '@instantmockapi/config';
 
 let isConnected = false;
 
+/**
+ * The in-flight connect, so concurrent first callers share one attempt.
+ *
+ * `isConnected` alone is not enough (Phase 6 §11). It only flips *after*
+ * `mongoose.connect` resolves, so two callers racing on a cold start both read
+ * `false` and both enter the retry loop — and with the loop's 15 attempts that
+ * is not a momentary overlap but two independent connect sequences, which is
+ * precisely the "connection storm when multiple requests arrive after a cold
+ * start" §11 warns about.
+ *
+ * Cleared on failure, so a failed boot does not poison later attempts.
+ */
+let connecting: Promise<typeof mongoose> | null = null;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -37,7 +51,18 @@ export async function connectDB(customUri?: string): Promise<typeof mongoose> {
     logger.debug('Reusing active MongoDB connection');
     return mongoose;
   }
+  if (connecting) {
+    logger.debug('Joining in-flight MongoDB connection');
+    return connecting;
+  }
 
+  connecting = openConnection(customUri).finally(() => {
+    connecting = null;
+  });
+  return connecting;
+}
+
+async function openConnection(customUri?: string): Promise<typeof mongoose> {
   applyDnsOverride();
 
   const env = loadEnvConfig();
@@ -70,7 +95,20 @@ export async function connectDB(customUri?: string): Promise<typeof mongoose> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      await mongoose.connect(uri, { serverSelectionTimeoutMS: 8000 });
+      await mongoose.connect(uri, {
+        serverSelectionTimeoutMS: 8000,
+        /*
+         * Pool bounds, explicit (Phase 6 §11).
+         *
+         * The driver defaults `maxPoolSize` to 100 per process, and the limit
+         * that binds is the cluster's: several API replicas plus a worker at
+         * the default would ask Atlas for more connections than a shared tier
+         * allows. `minPoolSize: 0` keeps a sleeping instance from holding
+         * sockets it cannot use.
+         */
+        maxPoolSize: env.dbMaxPoolSize,
+        minPoolSize: env.dbMinPoolSize,
+      });
       isConnected = true;
       return mongoose;
     } catch (error) {

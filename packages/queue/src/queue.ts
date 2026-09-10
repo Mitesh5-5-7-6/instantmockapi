@@ -1,7 +1,7 @@
 import { Queue, QueueOptions, Job, Worker, type WorkerOptions } from 'bullmq';
 import Redis from 'ioredis';
 import crypto from 'crypto';
-import { logger } from '@instantmockapi/shared';
+import { getErrorMessage, logger } from '@instantmockapi/shared';
 import { loadEnvConfig } from '@instantmockapi/config';
 import type { GenerationConfig } from '@instantmockapi/ips';
 
@@ -180,9 +180,31 @@ export async function enqueueGenerationJob(
  * `apps/workers` supplies the handler; concurrency is the per-replica infra
  * limit (doc 10 §5), independent of plan concurrency.
  */
+export interface GenerationWorkerOptions {
+  concurrency?: number;
+  /**
+   * Called once a job has failed its **final** attempt (Phase 6 §8).
+   *
+   * BullMQ's retry policy and the Mongo `jobs` document are two separate
+   * records of the same job, and only the queue knows when the retries are
+   * spent. Without this hook a handler that throws leaves the Mongo document on
+   * `running` forever: the settle path inside the handler never runs, so
+   * `isTerminal` never fires and the client's progress stream waits out its
+   * five-minute cap on a job that is not coming back.
+   *
+   * A callback rather than a direct write, so this package stays free of
+   * `@instantmockapi/db` — the queue owns "when the attempts are spent", the
+   * worker app owns "what a failed job looks like in Mongo".
+   *
+   * Only on the final attempt: settling earlier would show a user a failure
+   * that the next attempt may well fix.
+   */
+  onExhausted?: (payload: GenerationJobPayload, error: Error) => Promise<void>;
+}
+
 export function createGenerationWorker(
   handler: (payload: GenerationJobPayload) => Promise<void>,
-  options: { concurrency?: number } = {},
+  options: GenerationWorkerOptions = {},
 ): Worker<GenerationJobPayload> {
   const config = loadEnvConfig();
 
@@ -218,6 +240,31 @@ export function createGenerationWorker(
 
   worker.on('failed', (job, error) => {
     logger.error('Generation job failed', { jobId: job?.id, error: error.message });
+    if (!job) {
+      return;
+    }
+    /*
+     * `attemptsMade` is already incremented for the attempt that just failed,
+     * so equality means the last one is spent. Defaulting `attempts` to 1 makes
+     * a job queued without a retry policy exhausted on its first failure, which
+     * is the honest reading.
+     */
+    const maxAttempts = job.opts.attempts ?? 1;
+    if (job.attemptsMade < maxAttempts) {
+      return;
+    }
+    const settle = options.onExhausted;
+    if (!settle) {
+      return;
+    }
+    // Detached: this runs inside an event handler, so a rejection here must not
+    // become an unhandled rejection that takes the worker process down.
+    void settle(job.data, error).catch((cause: unknown) => {
+      logger.error('Failed to record an exhausted generation job', {
+        jobId: job.id,
+        error: getErrorMessage(cause),
+      });
+    });
   });
 
   return worker;

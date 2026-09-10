@@ -8,6 +8,7 @@ import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import {
+  createRequestObserver,
   getErrorMessage,
   logger,
   AppError,
@@ -55,6 +56,31 @@ export async function buildMockRuntime(options: BuildRuntimeOptions): Promise<Fa
      * caller choose the address that gets recorded and rate-limited.
      */
     trustProxy: 1,
+  });
+
+  /**
+   * One structured line per request (Phase 6 §12).
+   *
+   * The same hook the management API registers, and it matters more here: a
+   * hosted mock URL is what a developer's own application calls, so cold-start
+   * latency shows up in *their* app as an intermittently slow dependency. Being
+   * able to say "that one was a wake-up, the rest were 8ms" is the difference
+   * between a known platform characteristic and an unexplained fault.
+   *
+   * `service: 'mock-runtime'` so one log stream can carry both apps. The route
+   * pattern rather than the path keeps public-id and slug values out of the log
+   * and keeps per-endpoint counts groupable.
+   */
+  const observeRequest = createRequestObserver({ service: 'mock-runtime' });
+  app.addHook('onResponse', (request, reply, done) => {
+    observeRequest({
+      method: request.method,
+      route: request.routeOptions.url ?? '(unrouted)',
+      status: reply.statusCode,
+      requestId: request.id,
+      durationMs: reply.elapsedTime,
+    });
+    done();
   });
 
   app.setErrorHandler((error: FastifyError, request, reply) => {

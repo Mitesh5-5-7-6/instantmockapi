@@ -6,7 +6,7 @@ import { loadEnvConfig } from '@instantmockapi/config';
 import { connectDB, disconnectDB } from '@instantmockapi/db';
 import { closeQueue, createGenerationWorker } from '@instantmockapi/queue';
 import { createStorage } from '@instantmockapi/storage';
-import { processGenerationJob } from '@instantmockapi/workers';
+import { processGenerationJob, settleExhaustedJob } from '@instantmockapi/workers';
 import { buildServer } from './server.js';
 
 // Single-service deployments (free PaaS tiers) run the generator DAG in this
@@ -30,6 +30,7 @@ async function main(): Promise<void> {
   const worker = RUN_WORKER_IN_PROCESS
     ? createGenerationWorker((payload) => processGenerationJob(payload, { storage }), {
         concurrency: Number.isNaN(EMBEDDED_CONCURRENCY) ? 1 : EMBEDDED_CONCURRENCY,
+        onExhausted: settleExhaustedJob,
       })
     : null;
   if (worker) {
