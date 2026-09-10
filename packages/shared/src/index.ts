@@ -11,6 +11,12 @@ export {
 export { type Result, type Ok, type Err, ok, err, unwrap } from './result.js';
 export { Logger, logger, type LogLevel } from './logger.js';
 export {
+  createRequestObserver,
+  type RequestLogEntry,
+  type RequestObserver,
+  type RequestObserverOptions,
+} from './request-log.js';
+export {
   // Project
   PROJECT_STATUSES,
   type ProjectStatus,

@@ -30,7 +30,20 @@ const mockStoreSchema = new Schema<IMockStore>(
   },
 );
 
-// Indexes
-mockStoreSchema.index({ projectId: 1, entity: 1 });
+/**
+ * One record set per `(project, entity)` — **unique**, not merely indexed.
+ *
+ * The seeder upserts on exactly this pair (`apps/workers/src/processor.ts`,
+ * `findOneAndUpdate(..., { upsert: true })`), and an upsert is only atomic
+ * against a unique index. Without one, two concurrent seeds of the same entity
+ * both miss, both insert, and the collection ends up with two record sets for
+ * one entity — after which the hosted runtime's `findOne` serves whichever the
+ * driver returns first, so the API answers with records nobody generated last.
+ *
+ * That concurrency is reachable today, not hypothetical: the worker runs
+ * `concurrency: 2`, and `RUN_WORKER_IN_PROCESS` makes a scaled-out API a
+ * multi-worker deployment (Phase 6 §8, §10).
+ */
+mockStoreSchema.index({ projectId: 1, entity: 1 }, { unique: true });
 
 export const MockStore = model<IMockStore>('MockStore', mockStoreSchema);

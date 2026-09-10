@@ -18,7 +18,7 @@ import type { GenerationJobPayload } from '@instantmockapi/queue';
 import { createMemoryStorage, decodeBundle } from '@instantmockapi/storage';
 import type { InternalProjectSchema } from '@instantmockapi/ips';
 import type { ArtifactType } from '@instantmockapi/shared';
-import { processGenerationJob, type ProcessorDeps } from './processor';
+import { processGenerationJob, settleExhaustedJob, type ProcessorDeps } from './processor';
 import { DEFAULT_PRODUCERS, workerForArtifact, type ArtifactProducer } from './artifacts.js';
 
 let mongod: MongoMemoryServer;
@@ -488,5 +488,203 @@ describe('dependency gating', () => {
     const updated = await Project.findById(project._id);
     expect(updated?.status).toBe('draft');
     expect(updated?.hosted.url).toBeNull();
+  });
+});
+
+describe('Phase 6 §8: safe under multiple workers', () => {
+  /**
+   * The published pointer is only moved if it is still where the decision was
+   * made against.
+   *
+   * `evaluateAutoPublish` reads `publishedVersion` at the top of the job and the
+   * write happens minutes later, after every artifact has been generated. In
+   * between, another writer — the publish route, or a second worker — can move
+   * the pointer. An unconditional write applies a decision that was true when it
+   * was taken and is not any more.
+   *
+   * That concurrency is reachable today rather than hypothetical: the worker
+   * runs `concurrency: 2`, and `RUN_WORKER_IN_PROCESS` makes a scaled-out API a
+   * multi-worker deployment. The interactive publish route already guards the
+   * identical write with a compare-and-swap; this is the worker catching up.
+   *
+   * Simulated by moving the pointer *during* the job, which is exactly what a
+   * concurrent publish does — the job holds a stale in-memory copy either way.
+   */
+  it('skips the auto-publish when the pointer moved during generation', async () => {
+    const { payload, project } = await stageJob(FULL_ARTIFACTS);
+
+    /*
+     * A concurrent publish lands while this job is generating. `hosted.url` is
+     * what makes it a real deployment, so after this the project is live on v7
+     * and the job's own decision — taken against "nothing published" — is
+     * stale.
+     */
+    const producers: Partial<Record<ArtifactType, ArtifactProducer>> = {
+      json_schema: async (ctx) => {
+        await Project.updateOne(
+          { _id: project._id },
+          {
+            $set: {
+              publishedVersion: 7,
+              status: 'active',
+              'hosted.url': 'https://api.instantmockapi.dev/p/prj_other00000/shop',
+            },
+          },
+        );
+        return DEFAULT_PRODUCERS.json_schema!(ctx);
+      },
+    };
+
+    await processGenerationJob(payload, deps({ producers }));
+
+    const updated = await Project.findById(project._id);
+    // The pointer the concurrent writer set survives; this job did not stamp
+    // its own version over it.
+    expect(updated?.publishedVersion).toBe(7);
+    expect(updated?.hosted.url).toBe('https://api.instantmockapi.dev/p/prj_other00000/shop');
+    // And no publish event was recorded for the version that lost the race.
+    const version = await Version.findOne({ projectId: project._id, version: payload.version });
+    expect(version?.publishedAt ?? null).toBeNull();
+  });
+
+  /**
+   * The counterpart: with nothing racing it, the first version still publishes.
+   *
+   * Without this, the test above would be satisfied by a worker that had simply
+   * stopped publishing altogether — which is the failure mode a
+   * compare-and-swap invites when its predicate is wrong.
+   */
+  it('still publishes when the pointer is where the decision was made', async () => {
+    const { payload, project } = await stageJob(FULL_ARTIFACTS);
+
+    await processGenerationJob(payload, deps());
+
+    const updated = await Project.findById(project._id);
+    expect(updated?.publishedVersion).toBe(payload.version);
+    expect(updated?.hosted.url).toBeTruthy();
+    expect(updated?.status).toBe('active');
+    const version = await Version.findOne({ projectId: project._id, version: payload.version });
+    expect(version?.publishedAt).toBeTruthy();
+  });
+
+  /**
+   * One record set per `(project, entity)`, enforced by the index.
+   *
+   * The seeder upserts on that pair, and an upsert is only atomic against a
+   * unique index. Without one, two concurrent seeds both miss and both insert —
+   * and the hosted runtime's `findOne` then serves whichever document the
+   * driver happens to return, so the API answers with records nobody generated
+   * last.
+   */
+  it('cannot hold two record sets for one entity', async () => {
+    const { project } = await stageJob(FULL_ARTIFACTS);
+
+    await MockStore.create({
+      projectId: project._id,
+      entity: 'Customer',
+      records: [{ id: 'first' }],
+    });
+
+    await expect(
+      MockStore.create({
+        projectId: project._id,
+        entity: 'Customer',
+        records: [{ id: 'second' }],
+      }),
+    ).rejects.toThrow(/duplicate key/i);
+
+    expect(await MockStore.countDocuments({ projectId: project._id, entity: 'Customer' })).toBe(1);
+  });
+
+  /** The same pair is free in another project — the index is scoped, not global. */
+  it('allows the same entity name in a different project', async () => {
+    const first = await stageJob(FULL_ARTIFACTS);
+    const second = await stageJob(FULL_ARTIFACTS);
+
+    await MockStore.create({ projectId: first.project._id, entity: 'Customer', records: [] });
+    await MockStore.create({ projectId: second.project._id, entity: 'Customer', records: [] });
+
+    expect(await MockStore.countDocuments({ entity: 'Customer' })).toBe(2);
+  });
+});
+
+describe('Phase 6 §8: a job whose retries are spent reaches a terminal state', () => {
+  /**
+   * The failure this closes is a *hanging* job rather than a wrong one.
+   *
+   * Per-artifact failures settle themselves — `runArtifactTask` never throws by
+   * design. What was unhandled is the outer work: loading the snapshot, seeding,
+   * bundling, settling. A throw there left the Mongo document on `running`
+   * forever, so `isTerminal` in the jobs route never fired and the client's
+   * progress stream waited out its five-minute cap on a job that was never
+   * coming back.
+   *
+   * `settleExhaustedJob` is what the queue calls once BullMQ's attempts are
+   * spent, so this tests it directly — the queue's part (counting attempts) is
+   * BullMQ's own behaviour.
+   */
+  it('settles a job that never finished', async () => {
+    const { payload } = await stageJob(FULL_ARTIFACTS);
+
+    await settleExhaustedJob(payload, new Error('Mongo went away mid-generation'));
+
+    const job = await Job.findById(payload.jobId);
+    expect(job?.status).toBe('failed_partial');
+    expect(job?.completedAt).toBeTruthy();
+    for (const worker of job?.workers ?? []) {
+      expect(worker.status).toBe('failed');
+      expect(worker.error).toContain('Mongo went away');
+    }
+  });
+
+  /**
+   * A job that already succeeded is never walked back.
+   *
+   * BullMQ retries, so the last attempt can fail *after* an earlier one settled
+   * the document — or the handler can settle and then throw on the way out.
+   * Overwriting a completed job with a failure would report a generation that
+   * actually worked as broken.
+   */
+  it('leaves a completed job alone', async () => {
+    const { payload } = await stageJob(FULL_ARTIFACTS);
+    await processGenerationJob(payload, deps());
+    const settled = await Job.findById(payload.jobId);
+    expect(settled?.status).toBe('completed');
+
+    await settleExhaustedJob(payload, new Error('a later attempt failed'));
+
+    const after = await Job.findById(payload.jobId);
+    expect(after?.status).toBe('completed');
+  });
+
+  /**
+   * Artifacts that did finish keep their result, so the settled document is an
+   * honest account of what was produced rather than a blanket failure.
+   */
+  it('keeps the outcome of workers that already finished', async () => {
+    const { payload } = await stageJob(FULL_ARTIFACTS);
+    await Job.updateOne(
+      { _id: payload.jobId, 'workers.artifactType': 'json_schema' },
+      { $set: { 'workers.$.status': 'completed' } },
+    );
+
+    await settleExhaustedJob(payload, new Error('failed after the first artifact'));
+
+    const job = await Job.findById(payload.jobId);
+    const byType = new Map((job?.workers ?? []).map((w) => [w.artifactType, w]));
+    expect(byType.get('json_schema')?.status).toBe('completed');
+    expect(byType.get('json_schema')?.error ?? null).toBeNull();
+    expect(byType.get('zod')?.status).toBe('failed');
+  });
+
+  it('does nothing when the payload carries no job id', async () => {
+    const { payload } = await stageJob(FULL_ARTIFACTS);
+    const before = await Job.findById(payload.jobId);
+
+    const { jobId: _jobId, ...withoutJobId } = payload;
+    await settleExhaustedJob(withoutJobId as GenerationJobPayload, new Error('nowhere to record'));
+
+    const after = await Job.findById(payload.jobId);
+    expect(after?.status).toBe(before?.status);
   });
 });

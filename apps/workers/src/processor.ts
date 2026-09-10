@@ -248,6 +248,58 @@ async function collectBundle(
   return { files, included: included.sort() };
 }
 
+/**
+ * Record a job whose retries are spent (Phase 6 §8).
+ *
+ * Wired to `createGenerationWorker`'s `onExhausted`. Everything inside
+ * `processGenerationJob` that fails *per artifact* already settles itself —
+ * `runArtifactTask` never throws by design, so one bad artifact does not fail
+ * the batch. What is left is the outer work: loading the snapshot, seeding mock
+ * stores, collecting the bundle, settling. A throw there used to leave the Mongo
+ * document on `running` permanently, because the settle path is the thing that
+ * did not run.
+ *
+ * The consequence was not a wrong status but a hanging one: `isTerminal` in the
+ * jobs route never fires, so the client's SSE stream waits out its five-minute
+ * cap and the UI shows a job still in progress that no worker will ever touch
+ * again.
+ *
+ * `failed_partial` rather than a hard `failed` because `IJob['status']` has no
+ * such value — the four states are `queued | running | completed |
+ * failed_partial` — and inventing a fifth would touch every consumer of the
+ * enum. The `error` on each worker entry is what says it failed outright.
+ */
+export async function settleExhaustedJob(
+  payload: GenerationJobPayload,
+  error: Error,
+): Promise<void> {
+  if (!payload.jobId) {
+    return;
+  }
+  logger
+    .child({ projectId: payload.projectId, version: payload.version })
+    .error('Generation job exhausted its retries; settling as failed', { error: error.message });
+  await Job.updateOne(
+    // `status: { $ne: 'completed' }` so a job that succeeded on a later attempt
+    // — or was settled by the handler before the throw — is never walked back.
+    { _id: payload.jobId, status: { $ne: 'completed' } },
+    {
+      $set: {
+        status: 'failed_partial',
+        completedAt: new Date(),
+        'workers.$[pending].status': 'failed',
+        'workers.$[pending].error': error.message,
+      },
+    },
+    {
+      // Only the entries that never reached a terminal state. A worker that
+      // completed before the outer throw keeps its result, which is what makes
+      // the settled document an honest account of what was produced.
+      arrayFilters: [{ 'pending.status': { $nin: ['completed', 'failed'] } }],
+    },
+  );
+}
+
 export async function processGenerationJob(
   payload: GenerationJobPayload,
   options: ProcessorDeps,
@@ -445,6 +497,18 @@ async function settle(
     staleDataRisk: decision.readiness.staleDataRisk,
   });
 
+  /*
+   * The non-publish changes go first, then the publish under a compare-and-swap.
+   *
+   * The order is load-bearing. `publishFields` sets `status: 'active'` and the
+   * walk-back above may have just set `'draft'`, so whichever writes last wins
+   * — and it has to be the publish. Saving first also means a *lost* swap
+   * leaves the project exactly as an unpublished generation should: status
+   * walked back, addressing minted, pointer untouched.
+   */
+  const pointerAsRead = project.publishedVersion ?? null;
+  await project.save();
+
   if (decision.promote) {
     // Generation does NOT publish (Phase 2 §1). The single exception is a
     // project with nothing live: onboarding must end on a working URL, and
@@ -454,21 +518,53 @@ async function settle(
     // The invariant this preserves either way: a failed generation can never
     // destroy or temporarily disable the currently live version.
     const owner = await User.findById(project.ownerId);
-    project.set(
-      publishFields(project, payload.version, {
-        baseUrl: HOSTED_BASE_URL,
-        plan: owner?.plan ?? 'free',
-      }),
+
+    /*
+     * Compare-and-swap on the pointer, mirroring the publish route.
+     *
+     * `evaluateAutoPublish` decided from `publishedVersion` as it was read at
+     * the top of this function, and an unconditional write applies that
+     * decision however stale it has become. Two workers settling out of order
+     * could each pass the policy's never-move-backwards guard against their own
+     * stale read, and the later write would win regardless of which version it
+     * named — so the pointer could end up on a version neither of them
+     * validated as ready.
+     *
+     * `apps/api/src/routes/versions.ts` already guards the identical write and
+     * says why; the worker did not, and that asymmetry is what Phase 6 §8's
+     * "supports multiple workers" closes. A filter value of `null` matches a
+     * missing field too, which is the common first-publish case.
+     */
+    const promoted = await Project.findOneAndUpdate(
+      { _id: project._id, publishedVersion: pointerAsRead },
+      {
+        $set: publishFields(project, payload.version, {
+          baseUrl: HOSTED_BASE_URL,
+          plan: owner?.plan ?? 'free',
+        }),
+      },
+      { new: true },
     );
-    // The publish event, which nothing else records: "was live and is not any
-    // more" leaves no trace in the artifact rows, so the history list and the
-    // derived SUPERSEDED status both need this stamped.
-    await Version.updateOne(
-      { projectId: project._id, version: payload.version, publishedAt: null },
-      { $set: { publishedAt: new Date() } },
-    );
+
+    if (!promoted) {
+      // Not an error: another writer published while this job was generating,
+      // and its decision was made against artifact rows this one cannot see.
+      // Leaving the pointer alone is the safe outcome, and the log line is what
+      // makes an unexpectedly-unpublished version explainable.
+      log.warn('Skipped auto-publish: the published pointer moved during generation', {
+        version: payload.version,
+        pointerAsRead,
+      });
+    } else {
+      // The publish event, which nothing else records: "was live and is not any
+      // more" leaves no trace in the artifact rows, so the history list and the
+      // derived SUPERSEDED status both need this stamped.
+      await Version.updateOne(
+        { projectId: project._id, version: payload.version, publishedAt: null },
+        { $set: { publishedAt: new Date() } },
+      );
+    }
   }
-  await project.save();
 
   log.info('Generation job settled', {
     jobStatus,

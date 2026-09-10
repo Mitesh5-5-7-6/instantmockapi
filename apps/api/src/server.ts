@@ -11,7 +11,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
-import { REQUEST_ID_PATTERN } from '@instantmockapi/shared';
+import { REQUEST_ID_PATTERN, createRequestObserver } from '@instantmockapi/shared';
 import { loadEnvConfig, assertProductionSecrets, type EnvConfig } from '@instantmockapi/config';
 import { authPlugin } from '@instantmockapi/auth';
 import { createStorage, type StorageClient } from '@instantmockapi/storage';
@@ -106,6 +106,36 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   app.addHook('onSend', (request, reply, payload, done) => {
     void reply.header('x-request-id', request.id);
     done(null, payload);
+  });
+
+  /**
+   * One structured line per request (Phase 6 §12).
+   *
+   * `logger: false` above is deliberate — Fastify's own logger is pino, and the
+   * platform already has a structured logger whose output every other component
+   * emits. Two log formats in one stream is worse than one, so the hook feeds
+   * `packages/shared`'s logger instead.
+   *
+   * The field that matters is `coldStart`. Cold-start latency and a slow query
+   * look identical from outside, and no measurement of a single request can
+   * tell them apart — only "had this instance served anything yet" can.
+   *
+   * `reply.elapsedTime` is Fastify's own measurement, so nothing here times
+   * anything by hand. `routeOptions.url` is the *pattern*: a concrete path would
+   * put project ids in the log and fragment the per-endpoint view. The fallback
+   * is a literal, not `request.url`, so a 404 on an unrouted path cannot smuggle
+   * a caller-controlled string into the log.
+   */
+  const observeRequest = createRequestObserver({ service: 'api' });
+  app.addHook('onResponse', (request, reply, done) => {
+    observeRequest({
+      method: request.method,
+      route: request.routeOptions.url ?? '(unrouted)',
+      status: reply.statusCode,
+      requestId: request.id,
+      durationMs: reply.elapsedTime,
+    });
+    done();
   });
 
   registerErrorHandling(app);
