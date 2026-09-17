@@ -186,9 +186,24 @@ export function evaluatePromotion(params: {
  * Whether a settling generation may publish itself.
  *
  * Phase 2 §1: publishing is an explicit user action, and generation must not do
- * it. There is exactly one exception — a project with **nothing live**.
- * Onboarding has to end on a working URL, and there is no live runtime to
- * disturb, so the "explicit" requirement is protecting nobody in that case.
+ * it. There are exactly two exceptions.
+ *
+ * **Nothing is live.** Onboarding has to end on a working URL, and there is no
+ * live runtime to disturb, so the "explicit" requirement is protecting nobody.
+ * Not opt-in, because a project with no hosted URL has nobody to protect.
+ *
+ * **The project asked for it** — `autoPublish`. Off by default, and the default
+ * is the whole point: the explicit step exists so that a change which breaks
+ * callers reaches them at a moment their author chose. A project whose only
+ * caller is its author has no such moment to protect, and for them the step is
+ * friction. The setting is how a user says which of those they are; the code
+ * does not try to guess from the change's risk.
+ *
+ * Note what the second exception does **not** relax: `evaluatePromotion` still
+ * refuses an unready candidate and still refuses to move backwards. Auto-publish
+ * decides *whether a human is asked*, never *whether the version can serve*. A
+ * project with the flag on and a failed `hosted_api` stays on its old version,
+ * exactly as it would with the flag off.
  *
  * ## Two things this deliberately does not do
  *
@@ -214,9 +229,16 @@ export function evaluateAutoPublish(params: {
   published: number | null | undefined;
   /** Whether a version is actually being served. See `hasLiveDeployment`. */
   live: boolean;
+  /**
+   * The project's opt-in to publishing every ready version.
+   *
+   * Optional and read as `false`, because every project written before the
+   * setting existed waits for the explicit step and must keep waiting.
+   */
+  autoPublish?: boolean;
   outcomes: readonly ArtifactOutcome[];
 }): PromotionDecision {
-  if (params.live) {
+  if (params.live && params.autoPublish !== true) {
     const readiness = evaluateRuntimeReadiness(params.outcomes);
     return {
       promote: false,
@@ -225,6 +247,21 @@ export function evaluateAutoPublish(params: {
         : `v${params.candidate} is not runtime-ready (${readiness.blocking.join(', ')} incomplete)`,
       readiness,
     };
+  }
+
+  if (params.live) {
+    /*
+     * Auto-publish over a live project takes the ORDINARY policy, `published`
+     * forwarded rather than nulled.
+     *
+     * The null below is a correction for a pointer that is not real — there is
+     * nothing being served, so `publishedVersion` is a leftover stamp. Here
+     * something *is* being served and the pointer means what it says, so the
+     * never-move-backwards guard is exactly the protection this path needs: a
+     * partial regenerate of an older version settling late must not drag a live
+     * project backwards just because its owner opted into automation.
+     */
+    return evaluatePromotion(params);
   }
 
   /*

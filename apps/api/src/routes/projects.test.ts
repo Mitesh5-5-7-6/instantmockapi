@@ -233,6 +233,39 @@ describe('PATCH /v1/projects/:id', () => {
     expect(res.json().currentVersion).toBe(1);
   });
 
+  it('defaults autoPublish off, so a new project keeps the explicit Publish step', async () => {
+    const created = await createProjectViaApi(app, session.accessToken);
+    expect(created.json().autoPublish).toBe(false);
+  });
+
+  it('toggles autoPublish WITHOUT bumping the version', async () => {
+    // The whole reason it lives on the Project rather than in
+    // `generationConfig`: it changes who is asked to publish, not what the API
+    // serves, so bumping the version would queue a pointless regeneration and
+    // put a non-change in the diff.
+    const created = await createProjectViaApi(app, session.accessToken);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/projects/${created.json().id}`,
+      headers: authHeader(session.accessToken),
+      payload: { autoPublish: true },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().autoPublish).toBe(true);
+    expect(res.json().currentVersion).toBe(created.json().currentVersion);
+  });
+
+  it('rejects a non-boolean autoPublish', async () => {
+    const created = await createProjectViaApi(app, session.accessToken);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/projects/${created.json().id}`,
+      headers: authHeader(session.accessToken),
+      payload: { autoPublish: 'yes' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
   it('editing the generation config bumps the version and syncs the IPS', async () => {
     const created = await createProjectViaApi(app, session.accessToken);
     const res = await app.inject({

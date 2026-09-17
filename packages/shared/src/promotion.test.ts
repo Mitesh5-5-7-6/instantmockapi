@@ -459,3 +459,90 @@ describe('versionStatus', () => {
     }
   });
 });
+
+/**
+ * The opt-in second exception.
+ *
+ * The default is what protects a live API: a version stops at READY and waits
+ * for a human. A project whose only caller is its author has nobody to protect,
+ * and these pin that the opt-in relaxes *who is asked* and nothing else.
+ */
+describe('evaluateAutoPublish — the autoPublish opt-in', () => {
+  it('publishes over a live version when the project opted in', () => {
+    const decision = evaluateAutoPublish({
+      candidate: 2,
+      published: 1,
+      live: true,
+      autoPublish: true,
+      outcomes: ALL_GOOD,
+    });
+    expect(decision.promote).toBe(true);
+  });
+
+  it('still refuses an unready version — readiness is not a preference', () => {
+    // The whole point of the split: the flag decides whether a human is asked,
+    // never whether the version can serve traffic.
+    const decision = evaluateAutoPublish({
+      candidate: 2,
+      published: 1,
+      live: true,
+      autoPublish: true,
+      outcomes: [outcome('hosted_api', 'failed'), outcome('mock_data')],
+    });
+    expect(decision.promote).toBe(false);
+    expect(decision.reason).toContain('not runtime-ready');
+  });
+
+  it('still refuses to move a live project backwards', () => {
+    // A partial regenerate of an older version settling late. Opting into
+    // automation is not opting into being dragged back onto v1.
+    const decision = evaluateAutoPublish({
+      candidate: 1,
+      published: 3,
+      live: true,
+      autoPublish: true,
+      outcomes: ALL_GOOD,
+    });
+    expect(decision.promote).toBe(false);
+    expect(decision.reason).toContain('not newer than the live v3');
+  });
+
+  it('is off when absent, so a project written before it existed still waits', () => {
+    const decision = evaluateAutoPublish({
+      candidate: 2,
+      published: 1,
+      live: true,
+      outcomes: ALL_GOOD,
+    });
+    expect(decision.promote).toBe(false);
+    expect(decision.reason).toContain('publishing is explicit');
+  });
+
+  it('is off when explicitly false', () => {
+    const decision = evaluateAutoPublish({
+      candidate: 2,
+      published: 1,
+      live: true,
+      autoPublish: false,
+      outcomes: ALL_GOOD,
+    });
+    expect(decision.promote).toBe(false);
+    expect(decision.reason).toContain('publishing is explicit');
+  });
+
+  it('does not change the nothing-live case, flag on or off', () => {
+    // The pinned-pointer correction below still has to apply: `published: 2`
+    // with nothing live is a speculative stamp, not a real pointer, so v2
+    // publishes as v2 rather than being refused for not being newer.
+    for (const autoPublish of [true, false, undefined]) {
+      const decision = evaluateAutoPublish({
+        candidate: 2,
+        published: 2,
+        live: false,
+        ...(autoPublish === undefined ? {} : { autoPublish }),
+        outcomes: ALL_GOOD,
+      });
+      expect(decision.promote).toBe(true);
+    }
+  });
+});

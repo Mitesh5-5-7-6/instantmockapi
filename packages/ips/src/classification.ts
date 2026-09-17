@@ -50,6 +50,7 @@ import {
   type SchemaChange,
   type ValidationKey,
 } from './changes.js';
+import { resolveUnknownFields, unknownFieldsDirection } from './unknown-fields.js';
 
 export const CHANGE_IMPACTS = ['NON_BREAKING', 'POTENTIALLY_BREAKING', 'BREAKING'] as const;
 
@@ -196,6 +197,30 @@ function featuresImpact(change: SchemaChange): ChangeImpact {
 }
 
 /**
+ * Impact of an unknown-field policy move.
+ *
+ * Reads `unknownFieldsDirection` rather than re-deriving the direction from
+ * `before`/`after`, the same single-reader rule `validationDirection` and
+ * `authDirection` follow: the risk in `changes.ts` and this impact must not be
+ * two independent opinions about which way the setting moved.
+ */
+function unknownFieldsImpact(change: SchemaChange): ChangeImpact {
+  switch (
+    unknownFieldsDirection(resolveUnknownFields(change.before), resolveUnknownFields(change.after))
+  ) {
+    case 'narrowing':
+      // Every request carrying an extra key now 422s.
+      return 'BREAKING';
+    case 'lossy':
+      // Only clients that were reading back an undeclared key are affected —
+      // and they get silence rather than an error.
+      return 'POTENTIALLY_BREAKING';
+    default:
+      return 'NON_BREAKING';
+  }
+}
+
+/**
  * Project the five-value risk onto the three-value impact.
  *
  * Used only where `changes.ts` has *already* weighed the direction of the
@@ -281,6 +306,7 @@ const IMPACT_RULES: Record<ChangeKind, Rule> = {
   /* ── project config ── */
   METHODS_CHANGED: methodsImpact,
   QUERY_FEATURES_CHANGED: featuresImpact,
+  UNKNOWN_FIELDS_CHANGED: unknownFieldsImpact,
   // Reseeds the store. No shape moves and no route moves.
   MOCK_RECORDS_CHANGED: 'NON_BREAKING',
   // Which files a developer can download. The hosted API is untouched.
@@ -346,6 +372,7 @@ const TYPE_RULES: Record<ChangeKind, ChangeType> = {
 
   METHODS_CHANGED: 'MODIFIED',
   QUERY_FEATURES_CHANGED: 'MODIFIED',
+  UNKNOWN_FIELDS_CHANGED: 'MODIFIED',
   MOCK_RECORDS_CHANGED: 'MODIFIED',
   GENERATORS_CHANGED: 'MODIFIED',
 

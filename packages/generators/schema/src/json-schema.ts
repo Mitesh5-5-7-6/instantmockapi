@@ -4,11 +4,42 @@
  * Translates IPS entities, nested types, and validation rules into standard JSON Schema draft 2020-12 (doc 04 §F5, doc 09 §4).
  */
 
-import type { InternalProjectSchema, Entity, Field } from '@instantmockapi/ips';
+import {
+  unknownFieldPolicy,
+  type InternalProjectSchema,
+  type Entity,
+  type Field,
+  type UnknownFieldPolicy,
+} from '@instantmockapi/ips';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface JSONSchemaNode {
   [key: string]: any;
+}
+
+/**
+ * `additionalProperties` for the project's unknown-field policy.
+ *
+ * Only two of the three policies have an honest answer here, which is why this
+ * returns `null` for the third:
+ *
+ * - `reject` — `false`. A body with an extra key really is invalid.
+ * - `allow` — `true`. Stated rather than left to the default, so a reader can
+ *   see the API was *asked* to keep extra keys and is not merely unopinionated.
+ * - `strip` — nothing. The key is neither invalid (the request succeeds) nor
+ *   retained (the stored record drops it), and JSON Schema has no way to say
+ *   "accepted and discarded". Emitting `false` would document a 422 that never
+ *   happens.
+ */
+function additionalProperties(policy: UnknownFieldPolicy): boolean | null {
+  switch (policy) {
+    case 'reject':
+      return false;
+    case 'allow':
+      return true;
+    default:
+      return null;
+  }
 }
 
 /**
@@ -18,20 +49,22 @@ interface JSONSchemaNode {
 export function generateJSONSchema(ips: InternalProjectSchema): Record<string, string> {
   const result: Record<string, string> = {};
 
+  const policy = unknownFieldPolicy(ips.generationConfig);
+
   for (const entity of ips.entities) {
-    const schema = generateSchemaForEntity(entity);
+    const schema = generateSchemaForEntity(entity, policy);
     result[`${entity.name.toLowerCase()}.schema.json`] = JSON.stringify(schema, null, 2);
   }
 
   return result;
 }
 
-function generateSchemaForEntity(entity: Entity): JSONSchemaNode {
+function generateSchemaForEntity(entity: Entity, policy: UnknownFieldPolicy): JSONSchemaNode {
   const properties: JSONSchemaNode = {};
   const required: string[] = [];
 
   for (const field of entity.fields) {
-    properties[field.name] = renderFieldSchema(field);
+    properties[field.name] = renderFieldSchema(field, policy);
     if (field.required) {
       required.push(field.name);
     }
@@ -46,10 +79,14 @@ function generateSchemaForEntity(entity: Entity): JSONSchemaNode {
   if (required.length > 0) {
     schema['required'] = required;
   }
+  const extras = additionalProperties(policy);
+  if (extras !== null) {
+    schema['additionalProperties'] = extras;
+  }
   return schema;
 }
 
-function renderFieldSchema(field: Field): JSONSchemaNode {
+function renderFieldSchema(field: Field, policy: UnknownFieldPolicy): JSONSchemaNode {
   const rules = field.validation;
   const s: JSONSchemaNode = {};
 
@@ -121,7 +158,7 @@ function renderFieldSchema(field: Field): JSONSchemaNode {
       const required: string[] = [];
 
       for (const child of field.children) {
-        properties[child.name] = renderFieldSchema(child);
+        properties[child.name] = renderFieldSchema(child, policy);
         if (child.required) {
           required.push(child.name);
         }
@@ -131,13 +168,20 @@ function renderFieldSchema(field: Field): JSONSchemaNode {
       if (required.length > 0) {
         s['required'] = required;
       }
+      // Nested objects carry the same rule as the root: the runtime walks the
+      // whole tree when it looks for undeclared keys, so a schema that stopped
+      // at the top level would describe a laxer API than the one running.
+      const nestedExtras = additionalProperties(policy);
+      if (nestedExtras !== null) {
+        s['additionalProperties'] = nestedExtras;
+      }
       break;
     }
 
     case 'array':
       s['type'] = 'array';
       if (field.children.length > 0) {
-        s['items'] = renderFieldSchema(field.children[0]!);
+        s['items'] = renderFieldSchema(field.children[0]!, policy);
       } else {
         s['items'] = {};
       }

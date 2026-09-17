@@ -99,6 +99,13 @@ export function toProjectDetail(project: IProject) {
     ...toProjectSummary(project),
     ips: project.ips,
     generationConfig: project.generationConfig,
+    /*
+     * Serialized beside `generationConfig` but read from the Project, not from
+     * inside it — this is a workflow preference, not part of the versioned
+     * definition. Normalized to a boolean here so a client never has to decide
+     * what `undefined` meant; it means off.
+     */
+    autoPublish: project.autoPublish === true,
   };
 }
 

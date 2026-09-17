@@ -24,6 +24,32 @@ export type QueryFeature = (typeof QUERY_FEATURES)[number];
 export type QueryFeatures = Record<QueryFeature, boolean>;
 
 /**
+ * What a write does with a body key the schema never declared.
+ *
+ * - `allow` — store it and echo it back. Schemaless-store behaviour, and what
+ *   every project generated before this setting existed does.
+ * - `strip` — accept the request, drop the key before storing. Plain
+ *   `z.object()` / `yup.object()` semantics.
+ * - `reject` — 422 naming the offending key. `z.object().strict()` semantics.
+ *
+ * Here rather than in `unknown-fields.ts` for the same reason as `QUERY_FEATURES`
+ * above: `GenerationConfig` carries the setting, so the vocabulary is part of the
+ * IPS document shape and must not make types.ts import the module that reads it.
+ */
+export const UNKNOWN_FIELD_POLICIES = ['allow', 'strip', 'reject'] as const;
+
+export type UnknownFieldPolicy = (typeof UNKNOWN_FIELD_POLICIES)[number];
+
+/**
+ * The policy an absent setting resolves to.
+ *
+ * `allow` is not a preference — it is the behaviour every already-published
+ * project has, and changing what missing means would silently narrow live APIs
+ * on their next regeneration.
+ */
+export const DEFAULT_UNKNOWN_FIELDS: UnknownFieldPolicy = 'allow';
+
+/**
  * Valid primitive and nested field types in the IPS.
  * Matches doc 04 §F3 list.
  */
@@ -318,6 +344,18 @@ export interface GenerationConfig {
    * rather than `undefined`.
    */
   features?: QueryFeatures;
+  /**
+   * What writes do with body keys the schema never declared.
+   *
+   * Project-wide rather than per-entity: it is a statement about how strict the
+   * API is, and an API that rejects an extra key on one entity while storing it
+   * on another is a bug report waiting to happen.
+   *
+   * Optional because every document written before the setting existed has none
+   * — read it through `unknownFieldPolicy`, never raw, so those resolve to
+   * `allow` (their current behaviour) rather than `undefined`.
+   */
+  unknownFields?: UnknownFieldPolicy;
 }
 
 /**

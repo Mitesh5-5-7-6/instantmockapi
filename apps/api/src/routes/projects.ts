@@ -345,6 +345,7 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
             description: { type: 'string', maxLength: 500 },
             ips: { type: 'object' },
             generationConfig: { type: 'object' },
+            autoPublish: { type: 'boolean' },
           },
         },
       },
@@ -357,6 +358,7 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
         description?: string;
         ips?: Record<string, unknown>;
         generationConfig?: Record<string, unknown>;
+        autoPublish?: boolean;
       };
       const project = await loadOwnedProject(id, request.authUser?.sub ?? '');
 
@@ -366,6 +368,23 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
 
       if (body.description !== undefined) {
         project.description = body.description;
+      }
+
+      /*
+       * Deliberately NOT setting `schemaChanged`.
+       *
+       * This changes when a human is asked to publish, never what the API
+       * serves, so it must not bump the version or queue a regeneration. It is
+       * addressing-class, like `name` and `slug`, despite reading like a
+       * generation setting — which is why it lives on the Project rather than
+       * in the versioned `generationConfig`.
+       *
+       * Switching it on does not publish anything either. It takes effect at
+       * the *next* generation; a version already sitting at READY still needs
+       * its Publish button, because nothing is going to settle for it.
+       */
+      if (body.autoPublish !== undefined) {
+        project.autoPublish = body.autoPublish;
       }
 
       if (body.slug !== undefined && body.slug !== project.slug) {

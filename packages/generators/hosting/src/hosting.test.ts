@@ -369,3 +369,27 @@ describe('authentication (Phase 3)', () => {
     expect(serialised).not.toMatch(/secret|signingKey|jwtSecret|passwordHash/i);
   });
 });
+
+describe('unknown-field policy', () => {
+  const withPolicy = (unknownFields?: 'allow' | 'strip' | 'reject'): HostingConfig =>
+    JSON.parse(
+      generateHostingConfig({
+        ...goldenFixtureIPS,
+        generationConfig: {
+          ...goldenFixtureIPS.generationConfig,
+          ...(unknownFields ? { unknownFields } : {}),
+        },
+      } as InternalProjectSchema)['hosting.config.json']!,
+    );
+
+  it('copies the project policy into the config the runtime reads', () => {
+    expect(withPolicy('reject').unknownFields).toBe('reject');
+    expect(withPolicy('strip').unknownFields).toBe('strip');
+  });
+
+  it('resolves an absent policy to allow rather than omitting it', () => {
+    // The runtime defaults it too, but stamping it here means a config on disk
+    // states what the API does instead of leaving it to be inferred.
+    expect(withPolicy().unknownFields).toBe('allow');
+  });
+});

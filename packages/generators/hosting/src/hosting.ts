@@ -22,11 +22,13 @@ import {
   isCollectionRelation,
   projectAuth,
   queryFeatures,
+  unknownFieldPolicy,
   type Entity,
   type Field,
   type InternalProjectSchema,
   type EntityQueryFields,
   type QueryFeatures,
+  type UnknownFieldPolicy,
   type Relation,
   type RelationKind,
 } from '@instantmockapi/ips';
@@ -123,6 +125,15 @@ export interface HostingConfig {
    */
   features?: QueryFeatures;
   /**
+   * What writes do with body keys no field declares.
+   *
+   * Absent on every config generated before the setting existed, which
+   * `resolveUnknownFields` reads as `allow` — those APIs are live and storing
+   * extra keys today, and a regeneration must not quietly start rejecting
+   * requests that worked this morning.
+   */
+  unknownFields?: UnknownFieldPolicy;
+  /**
    * The generated API's authentication (Phase 3 §15).
    *
    * Absent on every config generated before Phase 3, which the runtime reads as
@@ -218,6 +229,7 @@ export function generateHostingConfig(ips: InternalProjectSchema): Record<string
     projectId: ips.projectId,
     version: ips.version,
     features: queryFeatures(ips.generationConfig),
+    unknownFields: unknownFieldPolicy(ips.generationConfig),
     ...(authEnabled(auth)
       ? {
           auth: {

@@ -14,6 +14,7 @@ import {
   entityQueryFields,
   projectAuth,
   queryFeatures,
+  unknownFieldPolicy,
   type Entity,
   type InternalProjectSchema,
   type QueryFeatures,
@@ -229,10 +230,13 @@ export function generateOpenAPI(
    */
   const auth = projectAuth(ips);
   const authOn = authEnabled(auth);
+  // Read once and passed down, so every schema in the document states the same
+  // rule about undeclared keys.
+  const unknownFields = unknownFieldPolicy(ips.generationConfig);
   const secured = authOn ? protectedSecurity(auth) : [];
 
   for (const entity of ips.entities) {
-    const schema = entitySchema(entity);
+    const schema = entitySchema(entity, unknownFields);
     const entityProtected = authOn && entityAuth(auth, entity) === 'PROTECTED';
     /*
      * §19 asks that PUBLIC/PROTECTED be *clearly shown* per entity, so the note

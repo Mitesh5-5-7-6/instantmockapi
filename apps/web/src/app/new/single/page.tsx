@@ -85,6 +85,9 @@ const DEFAULT_CONFIG: GenerationConfig = {
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   mockRecords: 20,
   features: ALL_FEATURES,
+  // Lenient to start with, the opposite of the features above: a project being
+  // sketched should not 422 a field the developer has not declared yet.
+  unknownFields: 'allow',
 };
 
 export default function NewSingleApiPage() {

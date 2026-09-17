@@ -47,7 +47,7 @@ import {
   type IdentityRule,
   type MockRecord,
 } from './store.js';
-import { validateRecord } from './validate.js';
+import { stripUnknownFields, unknownFieldErrors, validateRecord } from './validate.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -177,6 +177,10 @@ function sendIndex(reply: FastifyReply, ctx: HostedContext, env: EnvConfig): Fas
       version: ctx.version,
       canonicalUrl: base,
       features: enabledQueryFeatures(ctx.features),
+      // What a write does with a key no entity declares. Advertised because a
+      // caller cannot discover it any other way short of sending one and
+      // comparing the echo — which is exactly how it was found to be undocumented.
+      unknownFields: ctx.unknownFields,
       entities: [...ctx.entities.values()].map((entity) => ({
         name: entity.name,
         path: entity.path,
@@ -423,6 +427,33 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
     return reply.send(expanded);
   };
 
+  /**
+   * The body a write should act on: validated, then put through the project's
+   * unknown-field policy.
+   *
+   * One helper for all three write verbs rather than three copies, because the
+   * failure mode of copies here is an API that rejects an undeclared key on POST
+   * and stores it on PATCH — the inconsistency the project-wide setting exists
+   * to rule out.
+   */
+  const acceptedBody = (
+    request: FastifyRequest,
+    ctx: HostedContext,
+    entity: HostedEntityConfig,
+    options: { partial?: boolean } = {},
+  ): MockRecord => {
+    const body = (request.body ?? {}) as MockRecord;
+
+    const errors = [
+      ...validateRecord(entity.fields, body, options),
+      ...unknownFieldErrors(entity.fields, body, ctx.unknownFields),
+    ];
+    if (errors.length > 0) {
+      throw invalidWrite(errors);
+    }
+    return stripUnknownFields(entity.fields, body, ctx.unknownFields);
+  };
+
   // POST create — validated against the generated rules
   const createRecord = async (
     request: FastifyRequest,
@@ -430,12 +461,7 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
     ctx: HostedContext,
     entity: HostedEntityConfig,
   ): Promise<FastifyReply> => {
-    const body = (request.body ?? {}) as MockRecord;
-
-    const errors = validateRecord(entity.fields, body);
-    if (errors.length > 0) {
-      throw invalidWrite(errors);
-    }
+    const body = acceptedBody(request, ctx, entity);
 
     const records = await readRecords(ctx, entity.path, deps.cache, env);
     if (records.length >= env.maxMockRecords) {
@@ -472,12 +498,7 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
     entity: HostedEntityConfig,
     id: string,
   ): Promise<FastifyReply> => {
-    const body = (request.body ?? {}) as MockRecord;
-
-    const errors = validateRecord(entity.fields, body);
-    if (errors.length > 0) {
-      throw invalidWrite(errors);
-    }
+    const body = acceptedBody(request, ctx, entity);
 
     const identity = identityOf(entity);
     const records = await readRecords(ctx, entity.path, deps.cache, env);
@@ -501,12 +522,7 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
     entity: HostedEntityConfig,
     id: string,
   ): Promise<FastifyReply> => {
-    const body = (request.body ?? {}) as MockRecord;
-
-    const errors = validateRecord(entity.fields, body, { partial: true });
-    if (errors.length > 0) {
-      throw invalidWrite(errors);
-    }
+    const body = acceptedBody(request, ctx, entity, { partial: true });
 
     const identity = identityOf(entity);
     const records = await readRecords(ctx, entity.path, deps.cache, env);
@@ -515,6 +531,14 @@ export function registerHostedRoutes(app: FastifyInstance, deps: RuntimeDeps): v
       throw notFound('Record not found');
     }
 
+    /*
+     * The stored record is merged as-is, not re-stripped.
+     *
+     * A record written while the policy was `allow` can already hold undeclared
+     * keys, and a later PATCH is not the place to delete data the caller never
+     * mentioned. `strip` is a rule about what a write *adds*; the way to clear
+     * what is already there is a PUT, which replaces the record outright.
+     */
     const merged: MockRecord = { ...records[index], ...body, [identity.field]: id };
     const next = [...records];
     next[index] = merged;

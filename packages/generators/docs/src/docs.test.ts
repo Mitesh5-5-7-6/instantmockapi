@@ -340,3 +340,34 @@ describe('routing identity comes from the shared slug', () => {
     }
   });
 });
+
+describe('OpenAPI — unknown-field policy', () => {
+  const specWith = (unknownFields?: 'allow' | 'strip' | 'reject') =>
+    JSON.parse(
+      generateOpenAPI(
+        {
+          ...goldenFixtureIPS,
+          generationConfig: { ...goldenFixtureIPS.generationConfig, ...(unknownFields ? { unknownFields } : {}) },
+        },
+        examples,
+      )['openapi.json'] ?? '{}',
+    );
+
+  const blogPost = (spec: Record<string, any>) =>
+    spec.components.schemas.BlogPost as Record<string, unknown>;
+
+  it('closes every entity schema for reject', () => {
+    expect(blogPost(specWith('reject')).additionalProperties).toBe(false);
+  });
+
+  it('states it open for allow, and stays silent for strip', () => {
+    // The documented rule has to match Worker A's JSON Schema exactly, or a
+    // reader comparing the two finds them disagreeing about the same API.
+    expect(blogPost(specWith('allow')).additionalProperties).toBe(true);
+    expect(blogPost(specWith('strip')).additionalProperties).toBeUndefined();
+  });
+
+  it('reads an absent policy as allow', () => {
+    expect(blogPost(specWith()).additionalProperties).toBe(true);
+  });
+});

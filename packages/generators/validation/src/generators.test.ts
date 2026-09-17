@@ -312,3 +312,94 @@ describe('Yup Generator — Golden-File Tests', () => {
     });
   });
 });
+
+/**
+ * The unknown-field policy, as the two validator generators encode it.
+ *
+ * This is the half of the fix that lives outside the runtime: before it, a
+ * hosted API stored an undeclared key while the Zod it handed you dropped it.
+ * The generated schema now says whichever of the three the project chose.
+ */
+describe('unknown-field policy', () => {
+  const ipsWith = (unknownFields?: 'allow' | 'strip' | 'reject'): InternalProjectSchema =>
+    ({
+      projectId: 'proj_policy',
+      version: 1,
+      entities: [
+        {
+          name: 'Current',
+          fields: [
+            {
+              name: 'title',
+              type: 'string',
+              required: true,
+              default: null,
+              validation: {},
+              meta: {},
+              children: [],
+            },
+            {
+              name: 'detail',
+              type: 'object',
+              required: false,
+              default: null,
+              validation: {},
+              meta: {},
+              children: [
+                {
+                  name: 'note',
+                  type: 'string',
+                  required: false,
+                  default: null,
+                  validation: {},
+                  meta: {},
+                  children: [],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        validators: ['zod', 'yup'],
+        types: [],
+        methods: ['POST'],
+        mockRecords: 1,
+        ...(unknownFields ? { unknownFields } : {}),
+      },
+    }) as InternalProjectSchema;
+
+  it('emits passthrough Zod for allow, on nested objects too', () => {
+    const code = generateZod(ipsWith('allow'))['current.zod.ts']!;
+    // Two objects in this entity, and both must say it: a strict root over a
+    // lenient child would accept an undeclared key one level down.
+    expect(code.match(/\.passthrough\(\)/g)).toHaveLength(2);
+    expect(code).not.toContain('.strict()');
+  });
+
+  it('emits strict Zod for reject', () => {
+    const code = generateZod(ipsWith('reject'))['current.zod.ts']!;
+    expect(code.match(/\.strict\(\)/g)).toHaveLength(2);
+  });
+
+  it('emits plain z.object for strip — already Zod default', () => {
+    const code = generateZod(ipsWith('strip'))['current.zod.ts']!;
+    expect(code).not.toContain('.passthrough()');
+    expect(code).not.toContain('.strict()');
+  });
+
+  it('defaults an absent policy to passthrough, matching a pre-setting API', () => {
+    // The compatibility case. A project generated before the setting existed
+    // stores undeclared keys, so its regenerated Zod must keep them too.
+    expect(generateZod(ipsWith())['current.zod.ts']).toContain('.passthrough()');
+  });
+
+  it('emits noUnknown for Yup strip and adds strict for reject', () => {
+    // `.noUnknown()` alone only strips in Yup — the test it adds passes once the
+    // keys are gone. `.strict(true)` is what turns it into an error.
+    expect(generateYup(ipsWith('strip'))['current.yup.ts']).toContain('.noUnknown()');
+    expect(generateYup(ipsWith('strip'))['current.yup.ts']).not.toContain('.strict(true)');
+    expect(generateYup(ipsWith('reject'))['current.yup.ts']).toContain('.noUnknown().strict(true)');
+    expect(generateYup(ipsWith('allow'))['current.yup.ts']).not.toContain('.noUnknown()');
+  });
+});

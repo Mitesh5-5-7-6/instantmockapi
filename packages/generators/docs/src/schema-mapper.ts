@@ -5,19 +5,41 @@
  * type array, since 3.1 removes the `nullable` keyword).
  */
 
-import type { Entity, Field } from '@instantmockapi/ips';
+import { DEFAULT_UNKNOWN_FIELDS, type Entity, type Field, type UnknownFieldPolicy } from '@instantmockapi/ips';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export interface OpenAPISchemaNode {
   [key: string]: any;
 }
 
-export function entitySchema(entity: Entity): OpenAPISchemaNode {
+/**
+ * `additionalProperties` for the project's unknown-field policy.
+ *
+ * Same three-way split, and the same `null` for `strip`, as Worker A's JSON
+ * Schema generator — the two describe the same API and a reader comparing the
+ * OpenAPI document against the downloaded schema must not find them disagreeing
+ * about whether an extra key is an error.
+ */
+function additionalProperties(policy: UnknownFieldPolicy): boolean | null {
+  switch (policy) {
+    case 'reject':
+      return false;
+    case 'allow':
+      return true;
+    default:
+      return null;
+  }
+}
+
+export function entitySchema(
+  entity: Entity,
+  policy: UnknownFieldPolicy = DEFAULT_UNKNOWN_FIELDS,
+): OpenAPISchemaNode {
   const properties: OpenAPISchemaNode = {};
   const required: string[] = [];
 
   for (const field of entity.fields) {
-    properties[field.name] = fieldSchema(field);
+    properties[field.name] = fieldSchema(field, policy);
     if (field.required) {
       required.push(field.name);
     }
@@ -27,10 +49,14 @@ export function entitySchema(entity: Entity): OpenAPISchemaNode {
   if (required.length > 0) {
     schema['required'] = required;
   }
+  const extras = additionalProperties(policy);
+  if (extras !== null) {
+    schema['additionalProperties'] = extras;
+  }
   return schema;
 }
 
-function fieldSchema(field: Field): OpenAPISchemaNode {
+function fieldSchema(field: Field, policy: UnknownFieldPolicy): OpenAPISchemaNode {
   const rules = field.validation;
   const s: OpenAPISchemaNode = {};
 
@@ -96,7 +122,7 @@ function fieldSchema(field: Field): OpenAPISchemaNode {
       const properties: OpenAPISchemaNode = {};
       const required: string[] = [];
       for (const child of field.children) {
-        properties[child.name] = fieldSchema(child);
+        properties[child.name] = fieldSchema(child, policy);
         if (child.required) {
           required.push(child.name);
         }
@@ -105,12 +131,17 @@ function fieldSchema(field: Field): OpenAPISchemaNode {
       if (required.length > 0) {
         s['required'] = required;
       }
+      // Nested objects inherit the rule, matching the runtime's full-tree walk.
+      const nestedExtras = additionalProperties(policy);
+      if (nestedExtras !== null) {
+        s['additionalProperties'] = nestedExtras;
+      }
       break;
     }
 
     case 'array':
       s['type'] = 'array';
-      s['items'] = field.children.length > 0 ? fieldSchema(field.children[0]!) : {};
+      s['items'] = field.children.length > 0 ? fieldSchema(field.children[0]!, policy) : {};
       if (rules.arrayLength) {
         if (rules.arrayLength.min !== undefined) s['minItems'] = rules.arrayLength.min;
         if (rules.arrayLength.max !== undefined) s['maxItems'] = rules.arrayLength.max;

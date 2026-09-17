@@ -213,6 +213,7 @@ function changeCandidates(change: SchemaChange): { ids: string[]; identified: bo
   const projectLevel =
     change.kind === 'METHODS_CHANGED' ||
     change.kind === 'QUERY_FEATURES_CHANGED' ||
+    change.kind === 'UNKNOWN_FIELDS_CHANGED' ||
     change.kind === 'GENERATORS_CHANGED' ||
     change.kind === 'MOCK_RECORDS_CHANGED' ||
     /*
@@ -324,6 +325,30 @@ export function analyseImpact(
         artifacts.add('hosted_api');
         artifacts.add('openapi');
         artifacts.add('postman');
+        artifacts.add('export_zip');
+      }
+      if (change.kind === 'UNKNOWN_FIELDS_CHANGED') {
+        /*
+         * The one project-level change that reaches the *shape* artifacts.
+         *
+         * Every schema this project hands out states whether an undeclared key
+         * is allowed — `z.object()` vs `.strict()`, `additionalProperties` —
+         * so leaving them stale is exactly the mismatch this setting exists to
+         * remove. `postman` is absent for the opposite reason: a saved request
+         * restates no such rule, so regenerating it would produce a byte-
+         * identical collection. `mock_data` too — seeds only ever contain
+         * declared fields, so no policy can change them.
+         *
+         * `typescript` is absent by a judgement rather than by necessity: the
+         * honest type for `allow` carries an index signature, and an index
+         * signature turns every typo into a valid property. Interfaces stay
+         * closed; the runtime's leniency is documented, not typed.
+         */
+        artifacts.add('hosted_api');
+        artifacts.add('openapi');
+        artifacts.add('json_schema');
+        artifacts.add('zod');
+        artifacts.add('yup');
         artifacts.add('export_zip');
       }
       if (change.kind === 'MOCK_RECORDS_CHANGED') {

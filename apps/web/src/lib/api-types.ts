@@ -68,7 +68,17 @@ export interface GenerationConfig {
    * a full replacement, so omitting it switches every feature off.
    */
   features?: QueryFeatures;
+  /**
+   * What a write does with a body key no field declares.
+   *
+   * Optional for the opposite reason to `features` above, and it resolves the
+   * opposite way: omitting it leaves the API at `allow`, its behaviour before
+   * the setting existed, rather than switching anything off.
+   */
+  unknownFields?: UnknownFieldPolicy;
 }
+
+export type UnknownFieldPolicy = 'allow' | 'strip' | 'reject';
 
 export interface ProjectSummary {
   id: string;
@@ -149,6 +159,14 @@ export interface ProjectListRow extends ProjectSummary {
 export interface ProjectDetail extends ProjectSummary {
   ips: unknown;
   generationConfig: GenerationConfig;
+  /**
+   * Whether a successful generation publishes itself.
+   *
+   * Outside `generationConfig` on purpose: it changes when the user is asked to
+   * publish, not what the hosted API does, so it is never diffed and never
+   * bumps a version. Always a boolean on the wire — the API normalizes it.
+   */
+  autoPublish: boolean;
 }
 
 /* ── Authentication for the generated API (Phase 3) ────────────────────────
