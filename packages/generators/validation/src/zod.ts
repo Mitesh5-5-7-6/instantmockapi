@@ -4,7 +4,35 @@
  * Translates IPS entities, nested types, and validation rules into executable Zod code (doc 04 §F5, doc 09 §4).
  */
 
-import type { InternalProjectSchema, Entity, Field } from '@instantmockapi/ips';
+import {
+  unknownFieldPolicy,
+  type InternalProjectSchema,
+  type Entity,
+  type Field,
+  type UnknownFieldPolicy,
+} from '@instantmockapi/ips';
+
+/**
+ * The Zod suffix that encodes the project's unknown-field policy.
+ *
+ * Emitted on every object literal, nested ones included, because Zod applies
+ * strictness per object and a strict root over a lenient child would accept an
+ * undeclared key one level down — which is precisely the sort of near-miss the
+ * setting exists to eliminate.
+ *
+ * `strip` emits nothing: it is already `z.object()`'s default, and spelling it
+ * out as `.strip()` would suggest the other two are the deviations.
+ */
+function objectSuffix(policy: UnknownFieldPolicy): string {
+  switch (policy) {
+    case 'allow':
+      return '.passthrough()';
+    case 'reject':
+      return '.strict()';
+    default:
+      return '';
+  }
+}
 
 /**
  * Generates executable Zod TypeScript code from an IPS schema.
@@ -13,27 +41,29 @@ import type { InternalProjectSchema, Entity, Field } from '@instantmockapi/ips';
 export function generateZod(ips: InternalProjectSchema): Record<string, string> {
   const result: Record<string, string> = {};
 
+  const policy = unknownFieldPolicy(ips.generationConfig);
+
   for (const entity of ips.entities) {
-    const code = generateZodForEntity(entity);
+    const code = generateZodForEntity(entity, policy);
     result[`${entity.name.toLowerCase()}.zod.ts`] = code;
   }
 
   return result;
 }
 
-function generateZodForEntity(entity: Entity): string {
+function generateZodForEntity(entity: Entity, policy: UnknownFieldPolicy): string {
   const lines: string[] = [];
   lines.push("import { z } from 'zod';");
   lines.push('');
 
   // Recursive field generation starts
   const renderedFields = entity.fields.map((field) => {
-    return `  ${field.name}: ${renderField(field, 1)}`;
+    return `  ${field.name}: ${renderField(field, 1, policy)}`;
   });
 
   lines.push(`export const ${entity.name}Schema = z.object({`);
   lines.push(renderedFields.join(',\n'));
-  lines.push('});');
+  lines.push(`})${objectSuffix(policy)};`);
   lines.push('');
   lines.push(`export type ${entity.name} = z.infer<typeof ${entity.name}Schema>;`);
   lines.push('');
@@ -41,7 +71,7 @@ function generateZodForEntity(entity: Entity): string {
   return lines.join('\n');
 }
 
-function renderField(field: Field, indent: number): string {
+function renderField(field: Field, indent: number, policy: UnknownFieldPolicy): string {
   const rules = field.validation;
   const msgOpt = rules.message ? `, { message: ${JSON.stringify(rules.message)} }` : '';
   const noMsgOpt = rules.message ? `{ message: ${JSON.stringify(rules.message)} }` : '';
@@ -106,16 +136,16 @@ function renderField(field: Field, indent: number): string {
     case 'object': {
       const objIndent = '  '.repeat(indent);
       const innerFields = field.children.map((child) => {
-        return `${objIndent}  ${child.name}: ${renderField(child, indent + 1)}`;
+        return `${objIndent}  ${child.name}: ${renderField(child, indent + 1, policy)}`;
       });
-      base = `z.object({\n${innerFields.join(',\n')}\n${objIndent}})`;
+      base = `z.object({\n${innerFields.join(',\n')}\n${objIndent}})${objectSuffix(policy)}`;
       break;
     }
     case 'array':
       if (field.children.length > 0) {
         const itemField = field.children[0]!;
         // Handle array of objects or primitives
-        const renderedItem = renderField(itemField, indent + 1);
+        const renderedItem = renderField(itemField, indent + 1, policy);
         base = `z.array(${renderedItem})`;
       } else {
         base = 'z.array(z.unknown())';

@@ -19,6 +19,7 @@ import {
   materializeRelations,
   type InternalProjectSchema,
   type QueryFeatures,
+  type UnknownFieldPolicy,
 } from '@instantmockapi/ips';
 import type { HttpMethod } from '@instantmockapi/shared';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
@@ -54,6 +55,7 @@ function makeIps(
   methods: HttpMethod[],
   features?: QueryFeatures,
   searchableField?: string,
+  unknownFields?: UnknownFieldPolicy,
 ): InternalProjectSchema {
   return {
     projectId,
@@ -109,6 +111,9 @@ function makeIps(
       // Left off entirely when not asked for, so the default staging path keeps
       // exercising a config that predates the query layer.
       ...(features ? { features } : {}),
+      // Same reasoning as `features`: omitted by default, so the ordinary
+      // staging path exercises a config from before the setting existed.
+      ...(unknownFields ? { unknownFields } : {}),
     },
   };
 }
@@ -126,6 +131,8 @@ async function stageHostedProject(options: {
   features?: QueryFeatures;
   /** Field to mark `meta.searchable`, narrowing the search whitelist. */
   searchableField?: string;
+  /** Undeclared-key policy; omitted to stage a config from before it existed. */
+  unknownFields?: UnknownFieldPolicy;
 }): Promise<string> {
   const {
     methods = ['GET', 'POST', 'PUT', 'PATCH'],
@@ -152,7 +159,13 @@ async function stageHostedProject(options: {
     currentVersion: 1,
     hosted: { url: 'https://api.instantmockapi.dev/p/x', expiresAt },
   });
-  const ips = makeIps(String(project._id), methods, options.features, options.searchableField);
+  const ips = makeIps(
+    String(project._id),
+    methods,
+    options.features,
+    options.searchableField,
+    options.unknownFields,
+  );
   project.ips = ips;
   project.generationConfig = ips.generationConfig;
   await project.save();

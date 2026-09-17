@@ -57,6 +57,11 @@ import type {
   ValidationRules,
 } from './types.js';
 import { entityAuth, projectAuth } from './auth.js';
+import {
+  describeUnknownFields,
+  unknownFieldPolicy,
+  unknownFieldsDirection,
+} from './unknown-fields.js';
 import type { GenerationConfig } from './types.js';
 
 export const CHANGE_KINDS = [
@@ -87,6 +92,7 @@ export const CHANGE_KINDS = [
   'RELATION_REQUIRED_CHANGED',
   'METHODS_CHANGED',
   'QUERY_FEATURES_CHANGED',
+  'UNKNOWN_FIELDS_CHANGED',
   'MOCK_RECORDS_CHANGED',
   'GENERATORS_CHANGED',
   /* Authentication (Phase 3 §17). Six kinds rather than one
@@ -1041,6 +1047,32 @@ function diffConfig(before: GenerationConfig, after: GenerationConfig): SchemaCh
       before: before.features ?? null,
       after: after.features ?? null,
       summary: 'Query capabilities changed',
+    });
+  }
+
+  const beforeUnknown = unknownFieldPolicy(before);
+  const afterUnknown = unknownFieldPolicy(after);
+  if (beforeUnknown !== afterUnknown) {
+    const direction = unknownFieldsDirection(beforeUnknown, afterUnknown);
+    changes.push({
+      kind: 'UNKNOWN_FIELDS_CHANGED',
+      /*
+       * Three directions, three risks — the reason this is not a flat `SAFE`
+       * like the query toggles above. Narrowing to `reject` fails requests that
+       * worked, which is unconditional breakage. `allow` → `strip` fails
+       * nothing and is the more dangerous of the two to miss: extra keys simply
+       * stop coming back, so a client notices when data is already gone rather
+       * than when a request 422s.
+       */
+      risk: direction === 'narrowing' ? 'BREAKING' : direction === 'lossy' ? 'WARNING' : 'SAFE',
+      // Bodies on the way in and on the way back out, so neither `read` nor
+      // `write` alone covers it.
+      aspect: 'both',
+      // The resolved policies, not the raw fields: a document that never
+      // carried the setting must diff as `allow`, not as `null`.
+      before: beforeUnknown,
+      after: afterUnknown,
+      summary: `Undeclared body fields are now ${describeUnknownFields(afterUnknown)} (was ${describeUnknownFields(beforeUnknown)})`,
     });
   }
 

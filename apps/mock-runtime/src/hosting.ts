@@ -8,7 +8,12 @@
  */
 
 import { AppError, type ProjectKind } from '@instantmockapi/shared';
-import { resolveQueryFeatures, type QueryFeatures } from '@instantmockapi/ips';
+import {
+  resolveQueryFeatures,
+  resolveUnknownFields,
+  type QueryFeatures,
+  type UnknownFieldPolicy,
+} from '@instantmockapi/ips';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import { Project, publishedVersionOf } from '@instantmockapi/db';
 import { getArtifactRecord } from '@instantmockapi/registry';
@@ -40,6 +45,12 @@ export interface HostedContext {
    * the API it backs answers exactly as it did before.
    */
   features: QueryFeatures;
+  /**
+   * What writes do with body keys no field declares. Resolved from the hosted
+   * config, so a config generated before the setting existed reads as `allow`
+   * and the API it backs accepts exactly what it accepted before.
+   */
+  unknownFields: UnknownFieldPolicy;
   /**
    * Generation stamp of the hosted artifact backing this context. Downstream
    * cache keys embed it so a regenerate invalidates by producing new keys
@@ -161,6 +172,9 @@ export async function resolveHostedProject(
     slug: project.slug ?? null,
     entities,
     features: resolveQueryFeatures(config.features),
+    // Absent on every config generated before the setting existed, which is
+    // exactly the live-API case: extra keys are stored, as they always were.
+    unknownFields: resolveUnknownFields(config.unknownFields),
     // Absent on every config generated before Phase 3, which is exactly §26's
     // case: no Auth API, and `/signUp` 404s as it always did.
     auth: config.auth ?? null,

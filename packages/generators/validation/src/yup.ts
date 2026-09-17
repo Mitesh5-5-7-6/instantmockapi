@@ -4,7 +4,42 @@
  * Translates IPS entities, nested types, and validation rules into executable Yup code (doc 04 §F5, doc 09 §4).
  */
 
-import type { InternalProjectSchema, Entity, Field } from '@instantmockapi/ips';
+import {
+  unknownFieldPolicy,
+  type InternalProjectSchema,
+  type Entity,
+  type Field,
+  type UnknownFieldPolicy,
+} from '@instantmockapi/ips';
+
+/**
+ * The Yup suffix that encodes the project's unknown-field policy.
+ *
+ * Yup splits this differently from Zod, and the split is worth stating because
+ * the two generators do not look alike here:
+ *
+ * - `allow` — the default. A bare `yup.object()` keeps undeclared keys.
+ * - `strip` — `.noUnknown()`. Outside strict mode this enables `stripUnknown`,
+ *   so the cast result drops them.
+ * - `reject` — `.noUnknown()` alone would still only strip, because the test it
+ *   adds passes trivially once the keys have been removed. `.strict(true)` is
+ *   what turns it into an error.
+ *
+ * `.strict(true)` also switches off Yup's type coercion for the object, which is
+ * a side effect worth knowing and, here, the right one: the hosted runtime never
+ * coerces either, so a rejecting project's downloaded schema and its live API
+ * agree on `"30"` not being a number.
+ */
+function objectSuffix(policy: UnknownFieldPolicy): string {
+  switch (policy) {
+    case 'strip':
+      return '.noUnknown()';
+    case 'reject':
+      return '.noUnknown().strict(true)';
+    default:
+      return '';
+  }
+}
 
 /**
  * Generates executable Yup TypeScript code from an IPS schema.
@@ -13,27 +48,29 @@ import type { InternalProjectSchema, Entity, Field } from '@instantmockapi/ips';
 export function generateYup(ips: InternalProjectSchema): Record<string, string> {
   const result: Record<string, string> = {};
 
+  const policy = unknownFieldPolicy(ips.generationConfig);
+
   for (const entity of ips.entities) {
-    const code = generateYupForEntity(entity);
+    const code = generateYupForEntity(entity, policy);
     result[`${entity.name.toLowerCase()}.yup.ts`] = code;
   }
 
   return result;
 }
 
-function generateYupForEntity(entity: Entity): string {
+function generateYupForEntity(entity: Entity, policy: UnknownFieldPolicy): string {
   const lines: string[] = [];
   lines.push("import * as yup from 'yup';");
   lines.push('');
 
   // Recursive field generation starts
   const renderedFields = entity.fields.map((field) => {
-    return `  ${field.name}: ${renderField(field, 1)}`;
+    return `  ${field.name}: ${renderField(field, 1, policy)}`;
   });
 
   lines.push(`export const ${entity.name}Schema = yup.object({`);
   lines.push(renderedFields.join(',\n'));
-  lines.push('});');
+  lines.push(`})${objectSuffix(policy)};`);
   lines.push('');
   lines.push(`export type ${entity.name} = yup.InferType<typeof ${entity.name}Schema>;`);
   lines.push('');
@@ -41,7 +78,7 @@ function generateYupForEntity(entity: Entity): string {
   return lines.join('\n');
 }
 
-function renderField(field: Field, indent: number): string {
+function renderField(field: Field, indent: number, policy: UnknownFieldPolicy): string {
   const rules = field.validation;
   const msgArg = rules.message ? `, ${JSON.stringify(rules.message)}` : '';
   const onlyMsgArg = rules.message ? JSON.stringify(rules.message) : '';
@@ -106,16 +143,16 @@ function renderField(field: Field, indent: number): string {
     case 'object': {
       const objIndent = '  '.repeat(indent);
       const innerFields = field.children.map((child) => {
-        return `${objIndent}  ${child.name}: ${renderField(child, indent + 1)}`;
+        return `${objIndent}  ${child.name}: ${renderField(child, indent + 1, policy)}`;
       });
-      base = `yup.object({\n${innerFields.join(',\n')}\n${objIndent}})`;
+      base = `yup.object({\n${innerFields.join(',\n')}\n${objIndent}})${objectSuffix(policy)}`;
       break;
     }
     case 'array':
       if (field.children.length > 0) {
         const itemField = field.children[0]!;
         // Handle array of objects or primitives
-        const renderedItem = renderField(itemField, indent + 1);
+        const renderedItem = renderField(itemField, indent + 1, policy);
         base = `yup.array().of(${renderedItem})`;
       } else {
         base = 'yup.array()';

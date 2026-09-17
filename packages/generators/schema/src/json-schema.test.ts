@@ -228,3 +228,72 @@ describe('JSON Schema Generator — Golden-File Tests', () => {
     expect(schema.required).toBeUndefined();
   });
 });
+
+/**
+ * `additionalProperties`, from the project's unknown-field policy.
+ *
+ * Only two of the three policies have an honest answer in JSON Schema, and the
+ * third deliberately emits nothing — see `additionalProperties` in the generator.
+ */
+describe('unknown-field policy', () => {
+  const ipsWith = (unknownFields?: 'allow' | 'strip' | 'reject'): InternalProjectSchema =>
+    ({
+      projectId: 'proj_policy',
+      version: 1,
+      entities: [
+        {
+          name: 'Current',
+          fields: [
+            {
+              name: 'detail',
+              type: 'object',
+              required: false,
+              default: null,
+              validation: {},
+              meta: {},
+              children: [
+                {
+                  name: 'note',
+                  type: 'string',
+                  required: false,
+                  default: null,
+                  validation: {},
+                  meta: {},
+                  children: [],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        validators: [],
+        types: [],
+        methods: ['POST'],
+        mockRecords: 1,
+        ...(unknownFields ? { unknownFields } : {}),
+      },
+    }) as InternalProjectSchema;
+
+  const parse = (unknownFields?: 'allow' | 'strip' | 'reject') =>
+    JSON.parse(generateJSONSchema(ipsWith(unknownFields))['current.schema.json']!);
+
+  it('closes the schema for reject, at every level', () => {
+    const schema = parse('reject');
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.properties.detail.additionalProperties).toBe(false);
+  });
+
+  it('states additionalProperties: true for allow rather than leaving it implied', () => {
+    expect(parse('allow').additionalProperties).toBe(true);
+  });
+
+  it('says nothing for strip — the key is neither invalid nor retained', () => {
+    // `false` would document a 422 that never happens: the request succeeds.
+    expect(parse('strip').additionalProperties).toBeUndefined();
+  });
+
+  it('reads an absent policy as allow', () => {
+    expect(parse().additionalProperties).toBe(true);
+  });
+});

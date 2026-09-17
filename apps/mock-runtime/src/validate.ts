@@ -7,6 +7,7 @@
  */
 
 import type { ErrorDetail } from '@instantmockapi/shared';
+import type { UnknownFieldPolicy } from '@instantmockapi/ips';
 import type { HostedFieldRule } from '@instantmockapi/generator-hosting';
 
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -185,9 +186,124 @@ function validateFields(
 }
 
 /**
+ * Collect every body key no field declares, at every depth.
+ *
+ * Recurses only into objects the schema *describes* as objects — an undeclared
+ * key is reported once, by its own path, rather than having its whole subtree
+ * walked and reported key by key. Arrays of objects are walked per element, so
+ * the path a caller is handed (`items[2].sku`) points at the value they sent.
+ */
+function collectUnknown(
+  fields: HostedFieldRule[],
+  record: Record<string, unknown>,
+  prefix: string,
+  found: string[],
+): void {
+  const declared = new Map(fields.map((field) => [field.name, field]));
+
+  for (const key of Object.keys(record)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    const field = declared.get(key);
+    if (!field) {
+      found.push(path);
+      continue;
+    }
+
+    const value = record[key];
+    if (field.type === 'object' && isPlainObject(value)) {
+      collectUnknown(field.children, value, path, found);
+    } else if (field.type === 'array' && Array.isArray(value)) {
+      const itemRule = field.children[0];
+      if (itemRule?.type === 'object') {
+        value.forEach((item, index) => {
+          if (isPlainObject(item)) {
+            collectUnknown(itemRule.children, item, `${path}[${index}]`, found);
+          }
+        });
+      }
+    }
+  }
+}
+
+/**
+ * Drop every undeclared key, at every depth, returning a new record.
+ *
+ * Structural mirror of `collectUnknown` — same traversal, different verb — so a
+ * key that `reject` would name is exactly a key that `strip` removes. Written as
+ * a copy rather than a mutation because the caller's body belongs to the request
+ * object, and the seeded/stored record must not alias it.
+ */
+function pruneUnknown(
+  fields: HostedFieldRule[],
+  record: Record<string, unknown>,
+): Record<string, unknown> {
+  const declared = new Map(fields.map((field) => [field.name, field]));
+  const pruned: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(record)) {
+    const field = declared.get(key);
+    if (!field) {
+      continue;
+    }
+    if (field.type === 'object' && isPlainObject(value)) {
+      pruned[key] = pruneUnknown(field.children, value);
+    } else if (field.type === 'array' && Array.isArray(value)) {
+      const itemRule = field.children[0];
+      pruned[key] =
+        itemRule?.type === 'object'
+          ? value.map((item) =>
+              isPlainObject(item) ? pruneUnknown(itemRule.children, item) : item,
+            )
+          : value;
+    } else {
+      pruned[key] = value;
+    }
+  }
+  return pruned;
+}
+
+/**
+ * Undeclared keys in a body, as validation errors.
+ *
+ * Empty for `allow` and `strip`: neither is a failure, and `strip` is applied by
+ * `stripUnknownFields` after validation passes rather than reported here.
+ */
+export function unknownFieldErrors(
+  fields: HostedFieldRule[],
+  record: unknown,
+  policy: UnknownFieldPolicy,
+): ErrorDetail[] {
+  if (policy !== 'reject' || !isPlainObject(record)) {
+    return [];
+  }
+  const found: string[] = [];
+  collectUnknown(fields, record, '', found);
+  return found.map((path) => ({ path, issue: 'is not a field of this entity' }));
+}
+
+/**
+ * The record to store, with undeclared keys removed when the policy says so.
+ *
+ * Returns the input untouched for `allow` and `reject` — `reject` never reaches
+ * here with an offending key, because `unknownFieldErrors` already refused the
+ * request.
+ */
+export function stripUnknownFields<T extends Record<string, unknown>>(
+  fields: HostedFieldRule[],
+  record: T,
+  policy: UnknownFieldPolicy,
+): T {
+  return policy === 'strip' ? (pruneUnknown(fields, record) as T) : record;
+}
+
+/**
  * Validate a record against an entity's field rules.
  * `partial: true` (PATCH) skips required checks for absent fields.
- * Unknown extra keys are allowed — mock stores are intentionally lenient.
+ *
+ * Declared fields only. What happens to an *undeclared* key is the project's
+ * `unknownFields` policy, applied by `unknownFieldErrors` and
+ * `stripUnknownFields` — kept out of here because this function answers "are
+ * the values right", and that one answers "is this key permitted at all".
  */
 export function validateRecord(
   fields: HostedFieldRule[],

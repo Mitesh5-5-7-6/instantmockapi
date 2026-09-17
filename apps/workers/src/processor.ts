@@ -485,12 +485,16 @@ async function settle(
     // version with no artifacts. Keying the exception on it would withhold the
     // first publish from exactly the user it exists for.
     live: hasLiveDeployment(project),
+    // The project's opt-in to skipping the explicit step. Absent on every
+    // project written before the setting, which reads as off.
+    autoPublish: project.autoPublish === true,
     outcomes: versionOutcomes,
   });
 
-  log.info(decision.promote ? 'Publishing first version' : 'Not publishing', {
+  log.info(decision.promote ? 'Publishing version' : 'Not publishing', {
     version: payload.version,
     livePublished: project.publishedVersion ?? null,
+    autoPublish: project.autoPublish === true,
     reason: decision.reason,
     blocking: decision.readiness.blocking,
     degraded: decision.readiness.degraded,
@@ -510,10 +514,11 @@ async function settle(
   await project.save();
 
   if (decision.promote) {
-    // Generation does NOT publish (Phase 2 §1). The single exception is a
-    // project with nothing live: onboarding must end on a working URL, and
-    // there is no live runtime to disturb. Every other version stops at READY
-    // and waits for `POST /versions/:version/publish`.
+    // Generation does NOT publish (Phase 2 §1), except in the two cases
+    // `evaluateAutoPublish` names: a project with nothing live (onboarding must
+    // end on a working URL) or one whose owner switched `autoPublish` on. Every
+    // other version stops at READY and waits for
+    // `POST /versions/:version/publish`.
     //
     // The invariant this preserves either way: a failed generation can never
     // destroy or temporarily disable the currently live version.

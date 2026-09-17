@@ -8,21 +8,39 @@
  * simply had nowhere to send them. `description` in particular was stored,
  * serialized and rendered nowhere until the workspace header started showing it.
  *
- * ## Two kinds of setting, deliberately separated
+ * ## Three kinds of setting, deliberately separated
  *
  * **Addressing** — name, slug, description — is cosmetic. Changing it never bumps
  * the version and never invalidates a URL anyone has copied, because hosted
  * resolution matches on `publicId` alone.
  *
- * **Generation** — methods, query features — changes what the *next* generation
- * produces. Saving it does not reshape the API that is already hosted, so the
- * form says so rather than letting someone believe a toggle took effect
- * immediately.
+ * **Publishing** — `autoPublish` — changes who decides when a version goes live,
+ * and nothing about what the API does. It is the one setting here that is not
+ * part of the definition at all: it lives on the Project rather than in
+ * `generationConfig`, so it is never diffed and never bumps a version. Its own
+ * card and its own Save for that reason — folding it into Generation would
+ * suggest it applies to the version being configured, when it applies to the
+ * next generation onward.
+ *
+ * **Generation** — methods, query features, unknown-field policy — changes what
+ * the *next* generation produces. Saving it does not reshape the API that is
+ * already hosted, so the form says so rather than letting someone believe a
+ * toggle took effect immediately.
  */
 
 import { useEffect, useId, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Button, Card, Checkbox, Field, Input, Modal, Note, Textarea } from '@instantmockapi/ui';
+import {
+  Button,
+  Card,
+  Checkbox,
+  Field,
+  Input,
+  Modal,
+  Note,
+  Select,
+  Textarea,
+} from '@instantmockapi/ui';
 import { ApiError } from '../../../../lib/api-client';
 import {
   useDeleteProject,
@@ -30,7 +48,7 @@ import {
   useProject,
   useUpdateProject,
 } from '../../../../lib/hooks';
-import type { QueryFeatures } from '../../../../lib/api-types';
+import type { QueryFeatures, UnknownFieldPolicy } from '../../../../lib/api-types';
 
 /** Mirrors the API's own allow-list; anything else is rejected server-side. */
 const METHOD_OPTIONS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
@@ -43,6 +61,19 @@ const FEATURE_OPTIONS: { key: keyof QueryFeatures; label: string; hint: string }
 ];
 
 const NO_FEATURES: QueryFeatures = { search: false, filter: false, sort: false, include: false };
+
+/**
+ * What a write does with a field the schema never declared.
+ *
+ * Lenient first, and `allow` is what an absent setting means — so a project
+ * created before this existed shows the behaviour it actually has rather than a
+ * blank control.
+ */
+const UNKNOWN_FIELD_OPTIONS: { value: UnknownFieldPolicy; label: string }[] = [
+  { value: 'allow', label: 'Keep it — stored and returned' },
+  { value: 'strip', label: 'Drop it — request succeeds, field discarded' },
+  { value: 'reject', label: 'Reject the request — 422 naming the field' },
+];
 
 export default function SettingsPage() {
   const { id } = useParams<{ id: string }>();
@@ -63,6 +94,8 @@ export default function SettingsPage() {
   const [description, setDescription] = useState('');
   const [methods, setMethods] = useState<string[]>([]);
   const [features, setFeatures] = useState<QueryFeatures>(NO_FEATURES);
+  const [unknownFields, setUnknownFields] = useState<UnknownFieldPolicy>('allow');
+  const [autoPublish, setAutoPublish] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -80,6 +113,9 @@ export default function SettingsPage() {
       // Absent on every project generated before the query layer, which means
       // all off rather than undefined.
       setFeatures(detail.generationConfig.features ?? NO_FEATURES);
+      // Absent means `allow` here, not off — the API resolves it the same way.
+      setUnknownFields(detail.generationConfig.unknownFields ?? 'allow');
+      setAutoPublish(detail.autoPublish);
       setLoaded(true);
     }
   }, [detail, loaded]);
@@ -101,7 +137,22 @@ export default function SettingsPage() {
     FEATURE_OPTIONS.some(
       (option) =>
         features[option.key] !== (detail.generationConfig.features ?? NO_FEATURES)[option.key],
-    );
+    ) ||
+    unknownFields !== (detail.generationConfig.unknownFields ?? 'allow');
+
+  const publishingChanged = autoPublish !== detail.autoPublish;
+
+  /*
+   * Sent on its own, never folded into either Save button above.
+   *
+   * It is neither addressing nor generation: it changes when this project asks
+   * to be published, and nothing about what it serves. Attaching it to the
+   * generation save would also imply it takes effect on the version being
+   * configured, which it does not — it applies from the next generation on.
+   */
+  const savePublishing = (): void => {
+    update.mutate({ autoPublish });
+  };
 
   const saveAddressing = (): void => {
     update.mutate({
@@ -118,7 +169,7 @@ export default function SettingsPage() {
     update.mutate({
       // A full replacement, not a patch: the API validates the whole block, so
       // sending only `methods` would switch every feature off.
-      generationConfig: { ...detail.generationConfig, methods, features },
+      generationConfig: { ...detail.generationConfig, methods, features, unknownFields },
     });
   };
 
@@ -183,6 +234,51 @@ export default function SettingsPage() {
 
       <Card className="ui-stack">
         <div>
+          <h2>Publishing</h2>
+          <p className="ui-meta">
+            Who decides when a new version goes live. This changes nothing about what the API
+            returns.
+          </p>
+        </div>
+
+        <Field
+          label="When a version finishes generating"
+          hint="A version that fails to generate is never published either way — this decides whether you are asked, not whether the version can serve."
+        >
+          <Checkbox
+            checked={autoPublish}
+            disabled={update.isPending}
+            onChange={setAutoPublish}
+            label={
+              <span>
+                Publish it automatically{' '}
+                <span className="ui-meta">skip the Publish button on the Versions tab</span>
+              </span>
+            }
+          />
+        </Field>
+
+        {autoPublish ? (
+          <Note variant="warning">
+            A change that breaks your callers will reach them as soon as it generates, with no
+            review step. Leave this off if anyone other than you calls this API.
+          </Note>
+        ) : null}
+
+        <div className="ui-row" style={{ gap: 'var(--space-2)' }}>
+          <Button disabled={!publishingChanged || update.isPending} onClick={savePublishing}>
+            {update.isPending ? 'Saving…' : 'Save publishing'}
+          </Button>
+          {publishingChanged ? (
+            <span className="ui-meta">
+              Applies from the next generation — a version already waiting still needs Publish
+            </span>
+          ) : null}
+        </div>
+      </Card>
+
+      <Card className="ui-stack">
+        <div>
           <h2>Generation</h2>
           <p className="ui-meta">
             What the next generation produces. Saving these does not change the API that is
@@ -237,6 +333,37 @@ export default function SettingsPage() {
             ))}
           </div>
         </Field>
+
+        <Field
+          label="Undeclared fields on write"
+          hint="Applies to POST, PUT and PATCH bodies and to nested objects. The downloaded Zod, Yup, JSON Schema and OpenAPI all state whichever rule you pick."
+        >
+          <Select
+            value={unknownFields}
+            disabled={update.isPending}
+            onChange={(event) => setUnknownFields(event.target.value as UnknownFieldPolicy)}
+            style={{ maxWidth: 400 }}
+          >
+            {UNKNOWN_FIELD_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        {/* The two directions that hurt, named rather than generically warned
+            about — switching to `reject` is the only setting on this page that
+            can 422 a request that worked, and `strip` is the only one that can
+            make data quietly stop coming back. */}
+        {unknownFields !== (detail.generationConfig.unknownFields ?? 'allow') &&
+        unknownFields !== 'allow' ? (
+          <Note variant="warning">
+            {unknownFields === 'reject'
+              ? 'Callers currently sending an extra field will start getting 422 once this is generated and published.'
+              : 'Extra fields already stored on existing records keep being returned; new writes will drop them.'}
+          </Note>
+        ) : null}
 
         {methods.length === 0 ? (
           <Note variant="warning">

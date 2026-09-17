@@ -14,6 +14,7 @@ import {
 import type { EnvConfig } from '@instantmockapi/config';
 import {
   ALL_QUERY_FEATURES,
+  DEFAULT_UNKNOWN_FIELDS,
   materializeRelations,
   validateIPS,
   type AuthConfig,
@@ -32,6 +33,10 @@ function defaultGenerationConfig(env: EnvConfig): GenerationConfig {
     // On by default, for the same reason every HTTP method is: a fresh project
     // should expose the whole surface, and the wizard turns things off.
     features: { ...ALL_QUERY_FEATURES },
+    // The opposite default to the toggles above, and for the opposite reason: a
+    // new project should expose everything, but it should not reject a field a
+    // developer is still sketching. Strictness is opted into.
+    unknownFields: DEFAULT_UNKNOWN_FIELDS,
   };
 }
 

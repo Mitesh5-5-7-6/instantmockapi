@@ -9,8 +9,8 @@
  * with the API's config shape.
  */
 
-import { Checkbox, Field, Input, Note } from '@instantmockapi/ui';
-import type { GenerationConfig, QueryFeatures } from '../../lib/api-types';
+import { Checkbox, Field, Input, Note, Select } from '@instantmockapi/ui';
+import type { GenerationConfig, QueryFeatures, UnknownFieldPolicy } from '../../lib/api-types';
 
 const VALIDATORS = [
   { value: 'zod', label: 'zod' },
@@ -35,6 +35,18 @@ export const ALL_FEATURES: QueryFeatures = {
   include: true,
 };
 
+/**
+ * The three answers to "someone sent a field you never declared".
+ *
+ * Ordered lenient → strict, and `allow` is first because it is the default and
+ * what every project built before this setting behaves like.
+ */
+const UNKNOWN_FIELDS: { value: UnknownFieldPolicy; label: string; hint: string }[] = [
+  { value: 'allow', label: 'Keep it', hint: 'stored and returned, like a schemaless store' },
+  { value: 'strip', label: 'Drop it', hint: 'request succeeds, the field is discarded' },
+  { value: 'reject', label: 'Reject the request', hint: '422 naming the field' },
+];
+
 function toggle(list: string[], value: string): string[] {
   return list.includes(value) ? list.filter((entry) => entry !== value) : [...list, value];
 }
@@ -52,6 +64,9 @@ export function GenerationConfigFields({
   recordLabel?: string;
 }) {
   const features = config.features ?? ALL_FEATURES;
+  // Mirrors the API's `resolveUnknownFields`: a config that carries no policy is
+  // an `allow` project, so the control must show `allow` rather than blank.
+  const unknownFields = config.unknownFields ?? 'allow';
   const setFeature = (key: keyof QueryFeatures, value: boolean): void =>
     onChange({ ...config, features: { ...features, [key]: value } });
 
@@ -129,6 +144,28 @@ export function GenerationConfigFields({
         Features only widen what the hosted API accepts — a request that sends no query parameters
         returns the same response either way. You can change them later; each change generates a new
         version.
+      </Note>
+
+      <Field label="Undeclared fields on write">
+        <Select
+          value={unknownFields}
+          onChange={(event) =>
+            onChange({ ...config, unknownFields: event.target.value as UnknownFieldPolicy })
+          }
+          style={{ maxWidth: 320 }}
+        >
+          {UNKNOWN_FIELDS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label} — {option.hint}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      <Note>
+        This applies to POST, PUT and PATCH bodies, and to nested objects. Whichever you pick, the
+        downloaded Zod, Yup, JSON Schema and OpenAPI say the same thing — so a client that validates
+        a response cannot disagree with the hosted API about whether an extra field belongs.
       </Note>
 
       <Field label={recordLabel}>

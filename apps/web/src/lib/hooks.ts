@@ -320,11 +320,83 @@ export function useProjects(params: ProjectListParams = {}) {
   });
 }
 
+/**
+ * How long a definition-derived query stays fresh.
+ *
+ * Five minutes, not the ten seconds the provider defaults to. The short window
+ * existed because nothing invalidated these caches when a generation finished,
+ * so staleness was doing the job invalidation should — and the cost was four
+ * refetches per tab visit, since every tab page mounts its own `useProject`
+ * observer and a remount refetches anything stale.
+ *
+ * A long window is only safe with `invalidateProjectScope` below wired into
+ * every path that changes a definition. The two go together; raising this alone
+ * would leave a header reading "generating" after the job had finished.
+ */
+export const DEFINITION_STALE_MS = 5 * 60_000;
+
+/**
+ * Every cache derived from one project's definition.
+ *
+ * Listed in one place because the failure mode is an omission: a mutation that
+ * invalidates `project` but forgets `technical-notes` leaves a document
+ * describing a schema the user just changed, and nothing about that looks
+ * broken until someone reads it closely.
+ *
+ * Prefix keys on purpose — `invalidateQueries` matches by prefix, so
+ * `['artifacts', id]` covers `['artifacts', id, version]` and
+ * `['technical-notes', id]` covers every `view` of it.
+ *
+ * Traffic queries (`project-metrics`, `project-logs`) are deliberately absent:
+ * they describe requests the hosted API served, which an edit does not change.
+ */
+function projectScopedKeys(projectId: string): unknown[][] {
+  return [
+    ['project', projectId],
+    ['versions', projectId],
+    ['artifacts', projectId],
+    /*
+     * Separate from `artifacts`, because prefix matching does not reach it: the
+     * list is `['artifacts', id]` and the decoded body is
+     * `['artifact-content', id, type]`, so invalidating the first leaves the
+     * second holding the previous generation's code in an open viewer.
+     */
+    ['artifact-content', projectId],
+    ['technical-notes', projectId],
+    ['ai-context', projectId],
+    ['blueprint', projectId],
+    ['open-draft', projectId],
+  ];
+}
+
+/**
+ * Mark everything derived from this project's definition as stale.
+ *
+ * Invalidation only *marks*; a refetch happens for mounted observers, so
+ * calling this is cheap for the tabs the user is not looking at.
+ */
+export function useProjectScopeInvalidator(projectId: string) {
+  const queryClient = useQueryClient();
+  return async (): Promise<void> => {
+    await Promise.all(
+      projectScopedKeys(projectId).map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+    );
+  };
+}
+
 export function useProject(projectId: string | null) {
   return useQuery({
     queryKey: ['project', projectId],
     queryFn: () => apiFetch<ProjectDetail>(`/v1/projects/${projectId}`),
     enabled: projectId !== null,
+    /*
+     * The workspace layout and every tab page observe this key, and a tab
+     * switch remounts the page's observer — so with the provider's 10s default
+     * this refetched on nearly every tab click. Safe to hold now that
+     * `useProjectScopeInvalidator` covers every path that changes it,
+     * including a generation settling in a worker.
+     */
+    staleTime: DEFINITION_STALE_MS,
   });
 }
 
@@ -399,6 +471,7 @@ export function useCreateProject() {
 
 export function useGenerate(projectId: string) {
   const queryClient = useQueryClient();
+  const invalidateScope = useProjectScopeInvalidator(projectId);
   return useMutation({
     mutationFn: (generationConfig?: GenerationConfig) =>
       apiFetch<{ jobId: string; status: string }>(`/v1/projects/${projectId}/generate`, {
@@ -406,7 +479,7 @@ export function useGenerate(projectId: string) {
         body: generationConfig ? { generationConfig } : {},
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+      void invalidateScope();
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
     },
   });
@@ -446,7 +519,31 @@ export function useJobStream(jobId: string | null): void {
       }
       abort = subscribeJobStream(
         jobId,
-        (snapshot) => queryClient.setQueryData(['job', jobId], snapshot),
+        (snapshot) => {
+          queryClient.setQueryData(['job', jobId], snapshot);
+          /*
+           * A settled job changes the project, and nothing else was saying so.
+           *
+           * Generation moves `status`, `currentVersion`, `publishedVersion` and
+           * `hosted.url`, and writes a version row and artifact rows — none of
+           * which any mutation invalidates, because the change happens in a
+           * worker rather than in a request. Until now the workspace noticed
+           * only because every query went stale after ten seconds, which is
+           * invalidation by accident: it cost a refetch on every tab switch and
+           * still left a window where the header was wrong.
+           */
+          const view = snapshot as JobView | undefined;
+          if (
+            view?.projectId &&
+            (view.status === 'completed' || view.status === 'failed_partial')
+          ) {
+            void Promise.all(
+              projectScopedKeys(view.projectId).map((queryKey) =>
+                queryClient.invalidateQueries({ queryKey }),
+              ),
+            );
+          }
+        },
         () => {
           // The API caps each SSE connection at ~25s. Reconnect while the job
           // is still unsettled so progress keeps flowing in real time; stop
@@ -495,7 +592,7 @@ export function useArtifactContent(
 }
 
 export function useRegenerate(projectId: string) {
-  const queryClient = useQueryClient();
+  const invalidateScope = useProjectScopeInvalidator(projectId);
   return useMutation({
     mutationFn: (artifacts: string[]) =>
       apiFetch<{ jobId: string; status: string }>(`/v1/projects/${projectId}/regenerate`, {
@@ -503,14 +600,14 @@ export function useRegenerate(projectId: string) {
         body: { artifacts },
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['artifacts', projectId] });
-      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+      void invalidateScope();
     },
   });
 }
 
 export function useGenerateAgain(projectId: string) {
   const queryClient = useQueryClient();
+  const invalidateScope = useProjectScopeInvalidator(projectId);
   return useMutation({
     mutationFn: () =>
       apiFetch<{ jobId: string; status: string }>(`/v1/projects/${projectId}/generate-again`, {
@@ -518,7 +615,7 @@ export function useGenerateAgain(projectId: string) {
         body: {},
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+      void invalidateScope();
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
     },
   });
@@ -553,6 +650,7 @@ export function useUpdateProject(projectId: string) {
       slug?: string;
       description?: string;
       generationConfig?: GenerationConfig;
+      autoPublish?: boolean;
     }) => apiFetch<ProjectDetail>(`/v1/projects/${projectId}`, { method: 'PATCH', body: input }),
     onSuccess: (detail) => {
       queryClient.setQueryData(['project', projectId], detail);
@@ -599,6 +697,9 @@ export function useVersions(projectId: string | null) {
     queryKey: ['versions', projectId],
     queryFn: () => apiFetch<ListEnvelope<VersionView>>(`/v1/projects/${projectId}/versions`),
     enabled: projectId !== null,
+    // Read by the Versions tab and by the Docs tab's version picker, so it was
+    // refetched twice per visit to either.
+    staleTime: DEFINITION_STALE_MS,
   });
 }
 
@@ -623,6 +724,7 @@ export function useVersions(projectId: string | null) {
  */
 export function useRestoreVersion(projectId: string) {
   const queryClient = useQueryClient();
+  const invalidateScope = useProjectScopeInvalidator(projectId);
   return useMutation({
     mutationFn: (version: number) =>
       apiFetch<RestoredDraft>(`/v1/projects/${projectId}/versions/${version}/restore`, {
@@ -632,9 +734,9 @@ export function useRestoreVersion(projectId: string) {
       const { analysis, ...draft } = restored;
       queryClient.setQueryData(draftKey(projectId), draft);
       queryClient.setQueryData(impactKey(projectId), analysis);
-      // The project itself gains an open draft, which its detail payload
-      // reports, so that one is genuinely stale.
-      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+      // The project gains an open draft, which its detail payload reports —
+      // and a restore rewrites the definition every derived document reads.
+      void invalidateScope();
     },
   });
 }
@@ -683,14 +785,16 @@ export interface PublishResult {
  */
 export function usePublishVersion(projectId: string) {
   const queryClient = useQueryClient();
+  const invalidateScope = useProjectScopeInvalidator(projectId);
   return useMutation({
     mutationFn: (version: number) =>
       apiFetch<PublishResult>(`/v1/projects/${projectId}/versions/${version}/publish`, {
         method: 'POST',
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
-      void queryClient.invalidateQueries({ queryKey: ['versions', projectId] });
+      // Publishing moves what the hosted API serves, so every document that
+      // reports "is this the served definition" changes with it.
+      void invalidateScope();
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
     },
   });
@@ -826,10 +930,13 @@ function useAdoptDraft(projectId: string) {
  */
 function useForgetDraft(projectId: string) {
   const queryClient = useQueryClient();
+  const invalidateScope = useProjectScopeInvalidator(projectId);
   return async () => {
     queryClient.removeQueries({ queryKey: draftKey(projectId) });
     queryClient.removeQueries({ queryKey: impactKey(projectId) });
-    await queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+    // A commit rewrites the definition; a discard restores it. Either way
+    // every derived document is now describing something else.
+    await invalidateScope();
   };
 }
 
@@ -918,6 +1025,12 @@ export function useTechnicalNotes(projectId: string | null, view = 'current') {
       ),
     enabled: projectId !== null,
     retry: false,
+    /*
+     * A pure function of the definition, and the most expensive document the
+     * API builds — so it is the one most worth not rebuilding on a tab switch.
+     * Invalidated by every path that changes a definition.
+     */
+    staleTime: DEFINITION_STALE_MS,
   });
 }
 
@@ -937,6 +1050,7 @@ export function useAiContext(projectId: string | null, wanted: boolean, view = '
       ),
     enabled: projectId !== null && wanted,
     retry: false,
+    staleTime: DEFINITION_STALE_MS,
   });
 }
 
@@ -955,6 +1069,7 @@ export function useBlueprint(projectId: string | null, wanted: boolean) {
     queryKey: ['blueprint', projectId],
     queryFn: () => apiFetch<Record<string, unknown>>(`/v1/projects/${projectId}/blueprint`),
     enabled: projectId !== null && wanted,
+    staleTime: DEFINITION_STALE_MS,
   });
 }
 
@@ -1009,5 +1124,12 @@ export function useOpenDraft(projectId: string | null) {
     queryFn: () => apiFetch<{ baseVersion: number }>(`/v1/projects/${projectId}/draft`),
     enabled: projectId !== null,
     retry: false,
+    /*
+     * Shorter than the rest. This answers "is a draft open", which changes
+     * when the user starts or commits an edit in another tab, and being wrong
+     * means a Draft option that 404s or a missing one. Thirty seconds keeps it
+     * off the tab-switch path without holding a stale answer.
+     */
+    staleTime: 30_000,
   });
 }

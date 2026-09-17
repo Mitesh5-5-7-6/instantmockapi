@@ -19,8 +19,11 @@ import type { EnvConfig } from '@instantmockapi/config';
 import {
   NO_QUERY_FEATURES,
   QUERY_FEATURES,
+  UNKNOWN_FIELD_POLICIES,
   resolveQueryFeatures,
+  resolveUnknownFields,
   type GenerationConfig,
+  type UnknownFieldPolicy,
   type QueryFeatures,
 } from '@instantmockapi/ips';
 import type { IJobWorker } from '@instantmockapi/db';
@@ -130,6 +133,28 @@ export function validateGenerationConfig(
 
   const features = validateFeatures(cfg.features, details);
 
+  /*
+   * Unlike `features`, an omitted `unknownFields` does **not** take the
+   * all-off/strictest reading — it resolves to `allow`, which is what every
+   * project already does.
+   *
+   * The asymmetry is deliberate and is the safe direction in both cases: a
+   * client that forgets the toggles loses a query capability, while a client
+   * that forgets this one would otherwise start 422ing its callers' requests.
+   * An explicitly wrong value is still rejected rather than defaulted, on the
+   * same "a typo that silently does nothing looks like a broken feature"
+   * argument `validateFeatures` makes above.
+   */
+  if (
+    cfg.unknownFields !== undefined &&
+    !UNKNOWN_FIELD_POLICIES.includes(cfg.unknownFields as UnknownFieldPolicy)
+  ) {
+    details.push({
+      path: 'generationConfig.unknownFields',
+      issue: `must be one of ${UNKNOWN_FIELD_POLICIES.join(', ')}`,
+    });
+  }
+
   if (details.length > 0) {
     return err(
       new AppError({ code: 'VALIDATION_ERROR', message: 'Invalid generation config', details }),
@@ -141,6 +166,7 @@ export function validateGenerationConfig(
     methods: [...(cfg.methods as GenerationConfig['methods'])],
     mockRecords: cfg.mockRecords as number,
     features,
+    unknownFields: resolveUnknownFields(cfg.unknownFields),
   });
 }
 

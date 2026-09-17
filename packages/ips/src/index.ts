@@ -15,7 +15,17 @@ export {
   type AuthMode,
   type AuthUserField,
   type EntityAuth,
+  UNKNOWN_FIELD_POLICIES,
+  DEFAULT_UNKNOWN_FIELDS,
+  type UnknownFieldPolicy,
 } from './types.js';
+
+export {
+  resolveUnknownFields,
+  unknownFieldPolicy,
+  unknownFieldsDirection,
+  describeUnknownFields,
+} from './unknown-fields.js';
 
 export {
   AUTH_ENDPOINT_NAMES,

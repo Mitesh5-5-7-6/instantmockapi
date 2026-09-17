@@ -61,6 +61,26 @@ export interface IProject extends Document {
    * signal the platform never had a way to express.
    */
   publishedVersion?: number | null;
+  /**
+   * Whether a successful generation may move `publishedVersion` on its own.
+   *
+   * Phase 2 §1 made publishing explicit, with one exception — a project with
+   * nothing live. This opts a project into a second: **every** ready version
+   * goes live the moment it generates.
+   *
+   * ## Why it lives here and not in `generationConfig`
+   *
+   * `generationConfig` is part of the versioned IPS, so a setting placed there
+   * is diffed, risk-scored and shown in the compare view as a change to the
+   * API. This is none of those things — it changes *when a human is asked*, not
+   * what the API does. A caller cannot observe it. Putting it in the IPS would
+   * also make toggling it a definition change that itself needs publishing,
+   * which is a loop with no honest exit.
+   *
+   * Absent on every project written before it existed, and read as `false` —
+   * the explicit step is what those projects have today.
+   */
+  autoPublish?: boolean;
   generationConfig: GenerationConfig;
   hosted: {
     url: string | null;
@@ -140,6 +160,12 @@ const projectSchema = new Schema<IProject>(
       // serving a version whose artifacts do not exist — the exact confusion
       // this field exists to remove.
       default: null,
+    },
+    autoPublish: {
+      type: Boolean,
+      // False, not undefined: the explicit-publish step is the behaviour every
+      // existing project has, and a missing field must keep meaning that.
+      default: false,
     },
     generationConfig: {
       type: Schema.Types.Mixed, // GenerationConfig structure

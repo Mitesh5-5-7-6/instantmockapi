@@ -287,6 +287,94 @@ describe('generation does not publish (Phase 2 §1)', () => {
   });
 
   /**
+   * The opt-in that makes the explicit step skippable (chosen 2026-09-17).
+   *
+   * Same staging as the test above — a project already serving v1 — with the
+   * single difference that its owner switched `autoPublish` on. That is what
+   * makes this the honest test of the flag: everything else about the scenario
+   * is a case the platform already refuses to publish.
+   */
+  it('publishes over a live version when the project set autoPublish', async () => {
+    const { payload, project } = await stageJob(FULL_ARTIFACTS);
+
+    const live = await Project.findById(project._id);
+    live!.publishedVersion = 1;
+    live!.status = 'active';
+    live!.autoPublish = true;
+    live!.hosted = {
+      url: 'https://api.instantmockapi.dev/p/prj_deadbeef00/shop',
+      expiresAt: new Date('2030-01-01T00:00:00.000Z'),
+    };
+    await live!.save();
+
+    await Version.create({
+      projectId: project._id,
+      version: 2,
+      ipsSnapshot: live!.ips,
+      configSnapshot: live!.generationConfig,
+    });
+    for (const artifactType of FULL_ARTIFACTS) {
+      const reset = await createOrResetArtifactRecord(String(project._id), artifactType, 2);
+      if (!reset.ok) {
+        throw reset.error;
+      }
+    }
+
+    await processGenerationJob({ ...payload, version: 2 }, deps());
+
+    const updated = await Project.findById(project._id);
+    expect(updated?.publishedVersion).toBe(2);
+    // The publish event has to be stamped, or the history list cannot tell
+    // which version went live when — the same record an explicit publish writes.
+    const published = await Version.findOne({ projectId: project._id, version: 2 });
+    expect(published?.publishedAt).toBeInstanceOf(Date);
+  });
+
+  it('still refuses to publish an unready version with autoPublish on', async () => {
+    // Readiness is not a preference. A failed `hosted_api` means the version
+    // cannot serve, and no setting may override that — the live v1 stays.
+    const { payload, project } = await stageJob(FULL_ARTIFACTS);
+
+    const live = await Project.findById(project._id);
+    live!.publishedVersion = 1;
+    live!.status = 'active';
+    live!.autoPublish = true;
+    live!.hosted = {
+      url: 'https://api.instantmockapi.dev/p/prj_deadbeef00/shop',
+      expiresAt: new Date('2030-01-01T00:00:00.000Z'),
+    };
+    await live!.save();
+
+    await Version.create({
+      projectId: project._id,
+      version: 2,
+      ipsSnapshot: live!.ips,
+      configSnapshot: live!.generationConfig,
+    });
+    for (const artifactType of FULL_ARTIFACTS) {
+      const reset = await createOrResetArtifactRecord(String(project._id), artifactType, 2);
+      if (!reset.ok) {
+        throw reset.error;
+      }
+    }
+
+    await processGenerationJob(
+      { ...payload, version: 2 },
+      deps({
+        producers: {
+          hosted_api: () => {
+            throw new Error('hosting config generation failed');
+          },
+        },
+      }),
+    );
+
+    const updated = await Project.findById(project._id);
+    expect(updated?.publishedVersion).toBe(1);
+    expect(updated?.hosted.url).toBe('https://api.instantmockapi.dev/p/prj_deadbeef00/shop');
+  });
+
+  /**
    * The regression guard for the trap in this design.
    *
    * `pinPublishedVersion` stamps `publishedVersion` speculatively on the first
