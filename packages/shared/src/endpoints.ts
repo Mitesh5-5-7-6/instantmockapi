@@ -23,6 +23,7 @@
  */
 
 import type { HttpMethod } from './constants.js';
+import { EXAMPLE_AVATAR_URL } from './avatar.js';
 import { entitySlug } from './routing.js';
 
 /**
@@ -193,6 +194,8 @@ function exampleValue(field: IpsField): unknown {
       return 'https://example.com';
     case 'uuid':
       return '3f1a7c4e-0b2d-4e5f-8a91-2c6d5e4f7a8b';
+    case 'avatar':
+      return EXAMPLE_AVATAR_URL;
     case 'enum':
       return 'value';
     case 'object':

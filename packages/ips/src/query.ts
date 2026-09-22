@@ -123,10 +123,17 @@ const SCALAR_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
   'email',
   'url',
   'uuid',
+  'avatar',
   'enum',
 ]);
 
-/** Scalar types whose values read as human text, and so are worth searching. */
+/**
+ * Scalar types whose values read as human text, and so are worth searching.
+ *
+ * `avatar` is filterable and sortable above but **not** searchable: its value is
+ * a generated URL full of trait names, so `?search=hat` would match every record
+ * wearing one — a result nobody asked for and cannot explain.
+ */
 const TEXTUAL_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
   'string',
   'email',

@@ -77,8 +77,13 @@ export interface IProject extends Document {
    * also make toggling it a definition change that itself needs publishing,
    * which is a loop with no honest exit.
    *
-   * Absent on every project written before it existed, and read as `false` —
-   * the explicit step is what those projects have today.
+   * **On by default** (chosen 2026-09-21). Read every absent value as `true`,
+   * never `project.autoPublish === true` — that idiom silently opts out every
+   * document written before the field existed, which is the opposite of the
+   * default. The safe reading here is `!== false`.
+   *
+   * A user who wants the review step switches this off; the version then stops
+   * at READY and waits for `POST /versions/:v/publish`, exactly as before.
    */
   autoPublish?: boolean;
   generationConfig: GenerationConfig;
@@ -163,9 +168,11 @@ const projectSchema = new Schema<IProject>(
     },
     autoPublish: {
       type: Boolean,
-      // False, not undefined: the explicit-publish step is the behaviour every
-      // existing project has, and a missing field must keep meaning that.
-      default: false,
+      // True: a ready version goes live by itself unless its owner asks for the
+      // review step. Every reader must treat a MISSING value the same way —
+      // `!== false`, never `=== true` — or documents written before this field
+      // existed would behave as though they had opted out.
+      default: true,
     },
     generationConfig: {
       type: Schema.Types.Mixed, // GenerationConfig structure

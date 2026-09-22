@@ -14,7 +14,7 @@ import {
 import type { EnvConfig } from '@instantmockapi/config';
 import {
   ALL_QUERY_FEATURES,
-  DEFAULT_UNKNOWN_FIELDS,
+  NEW_PROJECT_UNKNOWN_FIELDS,
   materializeRelations,
   validateIPS,
   type AuthConfig,
@@ -33,10 +33,16 @@ function defaultGenerationConfig(env: EnvConfig): GenerationConfig {
     // On by default, for the same reason every HTTP method is: a fresh project
     // should expose the whole surface, and the wizard turns things off.
     features: { ...ALL_QUERY_FEATURES },
-    // The opposite default to the toggles above, and for the opposite reason: a
-    // new project should expose everything, but it should not reject a field a
-    // developer is still sketching. Strictness is opted into.
-    unknownFields: DEFAULT_UNKNOWN_FIELDS,
+    /*
+     * Strict from the first request — `reject`, not the `allow` that an absent
+     * setting resolves to.
+     *
+     * A mock API earns its keep by catching the mismatch between a client and a
+     * schema, and a body carrying an undeclared field is exactly that. Storing
+     * it silently is the one answer that teaches nothing. Loosening to `allow`
+     * or `strip` is a setting away; not being told at all is not recoverable.
+     */
+    unknownFields: NEW_PROJECT_UNKNOWN_FIELDS,
   };
 }
 

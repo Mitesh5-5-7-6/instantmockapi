@@ -45,6 +45,7 @@ const VALID_FIELD_TYPES: ReadonlySet<FieldType> = new Set([
   'email',
   'url',
   'uuid',
+  'avatar',
   'enum',
   'object',
   'array',

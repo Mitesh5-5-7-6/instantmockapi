@@ -127,6 +127,12 @@ function renderField(field: Field, indent: number, policy: UnknownFieldPolicy): 
       base = `z.string().uuid(${noMsgOpt})`;
       break;
 
+    // An avatar is a URL, and validating it as one is the whole rule — the trait
+    // vocabulary is the generator's business, not something a caller must match.
+    case 'avatar':
+      base = `z.string().url(${noMsgOpt})`;
+      break;
+
     case 'enum': {
       const enumValues = rules.enum ?? [];
       const formattedEnum = enumValues.map((v) => JSON.stringify(v)).join(', ');

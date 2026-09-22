@@ -46,8 +46,28 @@ export type UnknownFieldPolicy = (typeof UNKNOWN_FIELD_POLICIES)[number];
  * `allow` is not a preference — it is the behaviour every already-published
  * project has, and changing what missing means would silently narrow live APIs
  * on their next regeneration.
+ *
+ * **Not the same thing as what a new project starts with.** See
+ * `NEW_PROJECT_UNKNOWN_FIELDS` below; the two differ on purpose and conflating
+ * them is how a compatibility default turns into a breaking change.
  */
 export const DEFAULT_UNKNOWN_FIELDS: UnknownFieldPolicy = 'allow';
+
+/**
+ * The policy a **newly created** project starts with.
+ *
+ * `reject`, because the thing a mock API is for is finding the mismatch between
+ * a client and a schema before production does. A body carrying a field the
+ * schema never declared is that mismatch, and silently storing it is the one
+ * response that teaches the developer nothing.
+ *
+ * Deliberately different from `DEFAULT_UNKNOWN_FIELDS` above, and the split is
+ * the whole design: *missing* means `allow` so that a live API's behaviour never
+ * changes underneath it, while *new* means `reject` so that a project created
+ * today is strict from the start. An existing project moves only when its owner
+ * changes the setting and regenerates.
+ */
+export const NEW_PROJECT_UNKNOWN_FIELDS: UnknownFieldPolicy = 'reject';
 
 /**
  * Valid primitive and nested field types in the IPS.
@@ -63,6 +83,15 @@ export type FieldType =
   | 'email'
   | 'url'
   | 'uuid'
+  /**
+   * A profile picture, emitted as a getavataaars.com URL.
+   *
+   * A distinct type rather than a `url` field named `avatar`, because the type
+   * is what the mock-data generator dispatches on: only a declared `avatar`
+   * guarantees every seeded record carries a picture that actually renders,
+   * instead of the `https://random-word.com` that `url` produces.
+   */
+  | 'avatar'
   | 'enum'
   | 'object'
   | 'array';

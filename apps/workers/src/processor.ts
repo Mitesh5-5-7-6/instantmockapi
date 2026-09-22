@@ -485,16 +485,16 @@ async function settle(
     // version with no artifacts. Keying the exception on it would withhold the
     // first publish from exactly the user it exists for.
     live: hasLiveDeployment(project),
-    // The project's opt-in to skipping the explicit step. Absent on every
-    // project written before the setting, which reads as off.
-    autoPublish: project.autoPublish === true,
+    // `!== false`, not `=== true`: auto-publish is ON by default, so a project
+    // written before the field existed publishes rather than waiting.
+    autoPublish: project.autoPublish !== false,
     outcomes: versionOutcomes,
   });
 
   log.info(decision.promote ? 'Publishing version' : 'Not publishing', {
     version: payload.version,
     livePublished: project.publishedVersion ?? null,
-    autoPublish: project.autoPublish === true,
+    autoPublish: project.autoPublish !== false,
     reason: decision.reason,
     blocking: decision.readiness.blocking,
     degraded: decision.readiness.degraded,

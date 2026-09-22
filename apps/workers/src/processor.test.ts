@@ -243,7 +243,7 @@ describe('generation does not publish (Phase 2 §1)', () => {
    * The whole point of explicit publish, and the case the fresh-project tests
    * above cannot cover: a project that is *already serving* something.
    */
-  it('leaves a live project on its published version after a clean generation', async () => {
+  it('leaves a live project on its published version when autoPublish is off', async () => {
     const { payload, project } = await stageJob(FULL_ARTIFACTS);
 
     // The state a successful publish leaves behind. `hosted.url` is what makes
@@ -251,6 +251,10 @@ describe('generation does not publish (Phase 2 §1)', () => {
     const live = await Project.findById(project._id);
     live!.publishedVersion = 1;
     live!.status = 'active';
+    // Explicit, because auto-publish is ON by default (2026-09-21). This test is
+    // about the opt-OUT — the review step a user asks for when callers other
+    // than them depend on the URL.
+    live!.autoPublish = false;
     live!.hosted = {
       url: 'https://api.instantmockapi.dev/p/prj_deadbeef00/shop',
       expiresAt: new Date('2030-01-01T00:00:00.000Z'),
@@ -290,11 +294,11 @@ describe('generation does not publish (Phase 2 §1)', () => {
    * The opt-in that makes the explicit step skippable (chosen 2026-09-17).
    *
    * Same staging as the test above — a project already serving v1 — with the
-   * single difference that its owner switched `autoPublish` on. That is what
-   * makes this the honest test of the flag: everything else about the scenario
-   * is a case the platform already refuses to publish.
+   * single difference that `autoPublish` is left at its default. Set explicitly
+   * anyway, so the test states the behaviour it is pinning rather than depending
+   * on a schema default that could move again.
    */
-  it('publishes over a live version when the project set autoPublish', async () => {
+  it('publishes over a live version when autoPublish is on (the default)', async () => {
     const { payload, project } = await stageJob(FULL_ARTIFACTS);
 
     const live = await Project.findById(project._id);
