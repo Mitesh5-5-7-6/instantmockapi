@@ -12,6 +12,7 @@
  */
 
 import { Faker, en } from '@faker-js/faker';
+import { AVATAR_TRAITS, AVATAR_TRAIT_NAMES, avatarUrl } from '@instantmockapi/shared';
 import {
   entityIdentity,
   entityRelations,
@@ -291,6 +292,207 @@ function generateRecord(
   return record;
 }
 
+/**
+ * Field-name → realistic value, for `string` fields.
+ *
+ * ## Why this exists
+ *
+ * A field called `email` declared as `string` used to seed "Censura claro
+ * defung". Lorem ipsum is a fine placeholder for a `description`; it is a bug
+ * for anything a developer will paste into a form, render in a UI, or hand to a
+ * library that parses it. The value of a mock API is that the fake data behaves
+ * like the real data, and a mailto: link built from Latin does not.
+ *
+ * ## How the matching works, and its one rule
+ *
+ * The list is ordered, first match wins, and **the specific must precede the
+ * general**. `firstName` has to be tested before `name`, or every name-ish
+ * field collapses into a full name. Each entry that depends on its position says
+ * so where it is not obvious.
+ *
+ * Matching is on a normalized name — lower-cased with `_`, `-` and spaces
+ * removed — so `first_name`, `firstName` and `FIRST NAME` are one case rather
+ * than three near-misses.
+ *
+ * ## What is deliberately NOT here
+ *
+ * `title`, `description`, `note`, `content`, `body` and friends. Those really
+ * are free text and lorem is the honest answer; inventing a sentence that reads
+ * like a product name would just move the surprise somewhere else.
+ */
+const SEMANTIC_FIELDS: { test: (name: string) => boolean; value: (faker: Faker) => string }[] = [
+  /* ── identity ──
+   *
+   * Before the `name` entry: a `firstName` matched by that rule becomes a
+   * full name, and two columns of the same table then disagree about what a
+   * person is called. */
+  {
+    test: (n) => n.includes('firstname') || n === 'fname' || n === 'givenname',
+    value: (f) => f.person.firstName(),
+  },
+  {
+    test: (n) => n.includes('lastname') || n === 'lname' || n === 'surname' || n === 'familyname',
+    value: (f) => f.person.lastName(),
+  },
+  { test: (n) => n.includes('middlename'), value: (f) => f.person.middleName() },
+  {
+    test: (n) => n.includes('username') || n === 'login' || n === 'handle' || n === 'nickname',
+    value: (f) => f.internet.username(),
+  },
+  {
+    test: (n) =>
+      n.includes('fullname') || n === 'name' || n === 'displayname' || n === 'contactname',
+    value: (f) => f.person.fullName(),
+  },
+  { test: (n) => n === 'gender' || n === 'sex', value: (f) => f.person.sex() },
+  {
+    test: (n) => n === 'jobtitle' || n === 'designation' || n === 'occupation' || n === 'position',
+    value: (f) => f.person.jobTitle(),
+  },
+
+  /* ── contact ──
+   *
+   * Avatar first: an `avatarUrl` field typed `string` should still be a
+   * picture, not the random domain the `url` suffix rule below would give it. */
+  {
+    test: (n) =>
+      n.includes('avatar') ||
+      n.includes('profilepic') ||
+      n.includes('profileimage') ||
+      n === 'photo' ||
+      n === 'picture',
+    value: (faker) => randomAvatarUrl(faker),
+  },
+  { test: (n) => n.includes('email') || n === 'mail', value: (f) => f.internet.email() },
+  {
+    test: (n) =>
+      n.includes('phone') ||
+      n.includes('mobile') ||
+      n.includes('contactnumber') ||
+      n === 'tel' ||
+      n === 'telephone' ||
+      n === 'whatsapp',
+    value: (f) => f.phone.number(),
+  },
+  {
+    test: (n) =>
+      n.includes('website') || n.includes('homepage') || n.endsWith('url') || n.endsWith('link'),
+    value: (f) => f.internet.url(),
+  },
+
+  /* ── address ──
+   *
+   * The two numbered lines come before the general `address` rule, or
+   * `addressLine1` and `address` would hold the same full address twice. */
+  {
+    test: (n) =>
+      n.includes('zipcode') ||
+      n === 'zip' ||
+      n.includes('postalcode') ||
+      n.includes('pincode') ||
+      n === 'pin',
+    value: (f) => f.location.zipCode(),
+  },
+  {
+    test: (n) => n.includes('street') || n === 'addressline1' || n === 'line1',
+    value: (f) => f.location.streetAddress(),
+  },
+  {
+    test: (n) => n === 'addressline2' || n === 'line2',
+    value: (f) => f.location.secondaryAddress(),
+  },
+  {
+    test: (n) => n.includes('address'),
+    value: (f) => f.location.streetAddress({ useFullAddress: true }),
+  },
+  {
+    test: (n) => n === 'city' || n === 'town' || n === 'locality',
+    value: (f) => f.location.city(),
+  },
+  {
+    test: (n) => n === 'state' || n === 'province' || n === 'region',
+    value: (f) => f.location.state(),
+  },
+  { test: (n) => n === 'country', value: (f) => f.location.country() },
+  { test: (n) => n === 'countrycode', value: (f) => f.location.countryCode() },
+  { test: (n) => n === 'timezone' || n === 'tz', value: (f) => f.location.timeZone() },
+
+  /* ── company ── */
+  {
+    test: (n) =>
+      n.includes('company') || n === 'organisation' || n === 'organization' || n === 'employer',
+    value: (f) => f.company.name(),
+  },
+  { test: (n) => n === 'department' || n === 'team', value: (f) => f.commerce.department() },
+
+  /* ── commerce ── */
+  {
+    test: (n) => n === 'productname' || n === 'product' || n === 'itemname',
+    value: (f) => f.commerce.productName(),
+  },
+  {
+    test: (n) => n === 'sku' || n === 'skucode',
+    value: (f) => f.string.alphanumeric({ length: 8, casing: 'upper' }),
+  },
+  { test: (n) => n === 'currency' || n === 'currencycode', value: (f) => f.finance.currencyCode() },
+  { test: (n) => n === 'iban', value: (f) => f.finance.iban() },
+  { test: (n) => n === 'color' || n === 'colour', value: (f) => f.color.human() },
+
+  /* ── web and system ── */
+  {
+    test: (n) => n === 'slug' || n === 'permalink',
+    value: (f) => f.helpers.slugify(f.lorem.words(3)).toLowerCase(),
+  },
+  { test: (n) => n === 'ip' || n === 'ipaddress', value: (f) => f.internet.ipv4() },
+  { test: (n) => n === 'macaddress' || n === 'mac', value: (f) => f.internet.mac() },
+  { test: (n) => n === 'useragent', value: (f) => f.internet.userAgent() },
+  {
+    test: (n) => n === 'password' || n === 'passwordhash',
+    value: (f) => f.internet.password({ length: 16 }),
+  },
+  {
+    test: (n) => n === 'token' || n === 'apikey' || n === 'accesstoken',
+    value: (f) => f.string.alphanumeric(32),
+  },
+  {
+    test: (n) => n === 'language' || n === 'locale' || n === 'lang',
+    value: (f) => f.location.countryCode(),
+  },
+];
+
+/**
+ * Normalize a field name for matching.
+ *
+ * Separators are stripped rather than kept, so `first_name`, `first-name`,
+ * `firstName` and `First Name` all reduce to `firstname` and one entry above
+ * covers every spelling a schema might use.
+ */
+function normalizeFieldName(name: string): string {
+  return name.toLowerCase().replace(/[\s_-]/g, '');
+}
+
+/** The realistic value a field name implies, or null when the name says nothing. */
+function semanticValue(name: string, faker: Faker): string | null {
+  const normalized = normalizeFieldName(name);
+  const match = SEMANTIC_FIELDS.find((entry) => entry.test(normalized));
+  return match ? match.value(faker) : null;
+}
+
+/**
+ * One avatar, drawn trait by trait.
+ *
+ * Every trait is one `arrayElement` call, in the fixed order of
+ * `AVATAR_TRAIT_NAMES`, so a seeded run reproduces the same face — the same
+ * contract every other value in this module keeps.
+ */
+function randomAvatarUrl(faker: Faker): string {
+  const traits: Record<string, string> = {};
+  for (const trait of AVATAR_TRAIT_NAMES) {
+    traits[trait] = faker.helpers.arrayElement(AVATAR_TRAITS[trait] as readonly string[]);
+  }
+  return avatarUrl(traits);
+}
+
 function generateFieldValue(field: Field, faker: Faker, refDate: Date | undefined): unknown {
   // Respect nullable/optional probability if not required
   if (!field.required && faker.number.float() < 0.1) {
@@ -301,18 +503,9 @@ function generateFieldValue(field: Field, faker: Faker, refDate: Date | undefine
 
   switch (field.type) {
     case 'string': {
-      const name = field.name.toLowerCase();
-
-      if (name.includes('firstname')) return faker.person.firstName();
-      if (name.includes('lastname')) return faker.person.lastName();
-      if (name.includes('fullname') || name === 'name') return faker.person.fullName();
-      if (name.includes('phone') || name.includes('mobile')) return faker.phone.number();
-      if (name.includes('company')) return faker.company.name();
-      if (name.includes('city')) return faker.location.city();
-      if (name.includes('country')) return faker.location.country();
-      if (name.includes('zip') || name.includes('postal')) return faker.location.zipCode();
-      if (name.includes('street') || name.includes('address')) {
-        return faker.location.streetAddress();
+      const semantic = semanticValue(field.name, faker);
+      if (semantic !== null) {
+        return semantic;
       }
 
       const minLen = rules.min ?? rules.length ?? 5;
@@ -364,6 +557,9 @@ function generateFieldValue(field: Field, faker: Faker, refDate: Date | undefine
 
     case 'uuid':
       return faker.string.uuid();
+
+    case 'avatar':
+      return randomAvatarUrl(faker);
 
     case 'enum': {
       const values = rules.enum ?? [];

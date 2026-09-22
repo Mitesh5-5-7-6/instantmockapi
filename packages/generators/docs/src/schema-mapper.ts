@@ -5,7 +5,13 @@
  * type array, since 3.1 removes the `nullable` keyword).
  */
 
-import { DEFAULT_UNKNOWN_FIELDS, type Entity, type Field, type UnknownFieldPolicy } from '@instantmockapi/ips';
+import { EXAMPLE_AVATAR_URL } from '@instantmockapi/shared';
+import {
+  DEFAULT_UNKNOWN_FIELDS,
+  type Entity,
+  type Field,
+  type UnknownFieldPolicy,
+} from '@instantmockapi/ips';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export interface OpenAPISchemaNode {
@@ -110,6 +116,15 @@ function fieldSchema(field: Field, policy: UnknownFieldPolicy): OpenAPISchemaNod
     case 'uuid':
       s['type'] = 'string';
       s['format'] = 'uuid';
+      break;
+
+    // Carries an example because this is the one type whose value a reader
+    // cannot picture from `string`/`uri` alone.
+    case 'avatar':
+      s['type'] = 'string';
+      s['format'] = 'uri';
+      s['description'] = 'Avatar image URL';
+      s['example'] = EXAMPLE_AVATAR_URL;
       break;
 
     case 'enum':

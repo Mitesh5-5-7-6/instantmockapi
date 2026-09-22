@@ -233,9 +233,22 @@ describe('PATCH /v1/projects/:id', () => {
     expect(res.json().currentVersion).toBe(1);
   });
 
-  it('defaults autoPublish off, so a new project keeps the explicit Publish step', async () => {
+  it('defaults autoPublish ON, so a ready version does not wait for a button', async () => {
     const created = await createProjectViaApi(app, session.accessToken);
-    expect(created.json().autoPublish).toBe(false);
+    expect(created.json().autoPublish).toBe(true);
+  });
+
+  it('turns autoPublish off when asked, and says so on the wire', async () => {
+    // The opt-OUT is the one a user reaches for when callers other than them
+    // depend on the URL, so it has to round-trip as explicitly as the default.
+    const created = await createProjectViaApi(app, session.accessToken);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/projects/${created.json().id}`,
+      headers: authHeader(session.accessToken),
+      payload: { autoPublish: false },
+    });
+    expect(res.json().autoPublish).toBe(false);
   });
 
   it('toggles autoPublish WITHOUT bumping the version', async () => {
@@ -248,11 +261,11 @@ describe('PATCH /v1/projects/:id', () => {
       method: 'PATCH',
       url: `/v1/projects/${created.json().id}`,
       headers: authHeader(session.accessToken),
-      payload: { autoPublish: true },
+      payload: { autoPublish: false },
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json().autoPublish).toBe(true);
+    expect(res.json().autoPublish).toBe(false);
     expect(res.json().currentVersion).toBe(created.json().currentVersion);
   });
 

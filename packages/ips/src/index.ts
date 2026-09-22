@@ -17,6 +17,7 @@ export {
   type EntityAuth,
   UNKNOWN_FIELD_POLICIES,
   DEFAULT_UNKNOWN_FIELDS,
+  NEW_PROJECT_UNKNOWN_FIELDS,
   type UnknownFieldPolicy,
 } from './types.js';
 

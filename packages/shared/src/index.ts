@@ -103,6 +103,17 @@ export {
   type VersionStatus,
 } from './promotion.js';
 
+export {
+  AVATAR_BASE_URL,
+  AVATAR_FIXED,
+  AVATAR_TRAITS,
+  AVATAR_TRAIT_NAMES,
+  EXAMPLE_AVATAR_URL,
+  avatarUrl,
+  isAvatarUrl,
+  type AvatarTrait,
+} from './avatar.js';
+
 /**
  * Which generated artifacts are behind the version being served (Phase 2 §18).
  *

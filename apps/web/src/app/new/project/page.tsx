@@ -83,9 +83,10 @@ const DEFAULT_CONFIG: GenerationConfig = {
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   mockRecords: 25,
   features: ALL_FEATURES,
-  // Lenient to start with, the opposite of the features above: a project being
-  // sketched should not 422 a field the developer has not declared yet.
-  unknownFields: 'allow',
+  // Strict from the first request, matching the API's own new-project default.
+  // A body carrying a field the schema never declared is the mismatch a mock
+  // API exists to surface; it can be loosened on the Settings tab.
+  unknownFields: 'reject',
 };
 
 /** Mirrors the API's slugify so the preview matches what gets stored. */

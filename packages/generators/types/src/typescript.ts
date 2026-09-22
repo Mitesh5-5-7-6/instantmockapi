@@ -71,10 +71,13 @@ function getFieldTypeName(
   definitions: InterfaceDefinition[],
 ): string {
   switch (field.type) {
+    // `avatar` joins these: it is a URL on the wire, and a narrower TypeScript
+    // type would say nothing `string` does not already say.
     case 'string':
     case 'email':
     case 'url':
     case 'uuid':
+    case 'avatar':
       return 'string';
 
     case 'number':

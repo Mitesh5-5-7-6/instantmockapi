@@ -134,6 +134,10 @@ function renderField(field: Field, indent: number, policy: UnknownFieldPolicy): 
       base = `yup.string().uuid(${onlyMsgArg})`;
       break;
 
+    case 'avatar':
+      base = `yup.string().url(${onlyMsgArg})`;
+      break;
+
     case 'enum': {
       const enumValues = rules.enum ?? [];
       const formattedEnum = enumValues.map((v) => JSON.stringify(v)).join(', ');

@@ -84,6 +84,7 @@ export const FIELD_TYPES = [
   'email',
   'url',
   'uuid',
+  'avatar',
   'enum',
   'object',
   'array',
@@ -91,7 +92,12 @@ export const FIELD_TYPES = [
 
 export const NUMERIC_TYPES = ['number', 'decimal', 'integer'];
 
-/** Types that can hold a searchable string, mirroring the IPS default. */
+/**
+ * Types that can hold a searchable string, mirroring the IPS default.
+ *
+ * `avatar` is absent on purpose, matching `TEXTUAL_TYPES` in the IPS: its value
+ * is a URL full of trait names, so searching it matches on `Hat` and `Blonde`.
+ */
 export const TEXTUAL_TYPES = ['string', 'email', 'url', 'uuid', 'enum'];
 
 /**

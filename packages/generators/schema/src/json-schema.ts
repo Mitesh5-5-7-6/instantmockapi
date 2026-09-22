@@ -147,6 +147,14 @@ function renderFieldSchema(field: Field, policy: UnknownFieldPolicy): JSONSchema
       s['format'] = 'uuid';
       break;
 
+    // `uri`, not a bespoke format: a validator that does not know about avatars
+    // still checks the thing that matters, and one that does gains nothing.
+    case 'avatar':
+      s['type'] = 'string';
+      s['format'] = 'uri';
+      s['description'] = 'Avatar image URL';
+      break;
+
     case 'enum':
       s['type'] = 'string';
       s['enum'] = rules.enum ?? [];

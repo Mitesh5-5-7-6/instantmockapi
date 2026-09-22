@@ -95,7 +95,9 @@ export default function SettingsPage() {
   const [methods, setMethods] = useState<string[]>([]);
   const [features, setFeatures] = useState<QueryFeatures>(NO_FEATURES);
   const [unknownFields, setUnknownFields] = useState<UnknownFieldPolicy>('allow');
-  const [autoPublish, setAutoPublish] = useState(false);
+  // On, matching the project-level default. Overwritten from the loaded project
+  // below; this is only what the control shows for the instant before that.
+  const [autoPublish, setAutoPublish] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -252,18 +254,26 @@ export default function SettingsPage() {
             label={
               <span>
                 Publish it automatically{' '}
-                <span className="ui-meta">skip the Publish button on the Versions tab</span>
+                <span className="ui-meta">
+                  default — no Publish button to press on the Versions tab
+                </span>
               </span>
             }
           />
         </Field>
 
         {autoPublish ? (
-          <Note variant="warning">
-            A change that breaks your callers will reach them as soon as it generates, with no
-            review step. Leave this off if anyone other than you calls this API.
+          <Note>
+            A change that breaks your callers reaches them as soon as it generates, with no review
+            step. Switch this off if anyone other than you calls this API and you want to choose the
+            moment.
           </Note>
-        ) : null}
+        ) : (
+          <Note variant="warning">
+            Every version after the first will stop at READY and wait for you to press Publish on
+            the Versions tab. Until you do, callers keep getting the version that is live now.
+          </Note>
+        )}
 
         <div className="ui-row" style={{ gap: 'var(--space-2)' }}>
           <Button disabled={!publishingChanged || update.isPending} onClick={savePublishing}>

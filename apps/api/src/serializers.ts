@@ -102,10 +102,10 @@ export function toProjectDetail(project: IProject) {
     /*
      * Serialized beside `generationConfig` but read from the Project, not from
      * inside it — this is a workflow preference, not part of the versioned
-     * definition. Normalized to a boolean here so a client never has to decide
-     * what `undefined` meant; it means off.
+     * definition. Normalized here so a client never has to decide what
+     * `undefined` meant: it means ON, which is why this is `!== false`.
      */
-    autoPublish: project.autoPublish === true,
+    autoPublish: project.autoPublish !== false,
   };
 }
 

@@ -3,6 +3,7 @@ import { generateMockData } from './mock-data.js';
 import { goldenFixtureIPS } from '../../__tests__/golden-fixture.js';
 import { goldenRelationsIPS } from '../../../ips/__tests__/golden-relations-fixture.js';
 import { materializeRelations, type InternalProjectSchema } from '@instantmockapi/ips';
+import { AVATAR_TRAITS, AVATAR_TRAIT_NAMES } from '@instantmockapi/shared';
 
 describe('Mock Data Generator — Golden-File Tests', () => {
   // ── Existing basic test ─────────────────────────────────────────────
@@ -231,13 +232,28 @@ describe('Mock Data Generator — relational seeding (doc 19 §Phase A)', () => 
    * owning relations, and identity assignment requires an explicit
    * `entity.identity`. These two literals were captured from the pre-rewrite
    * generator — if either changes, the gating has leaked.
+   *
+   * **Both literals were re-captured when the semantic field table landed.**
+   * `slug` was `'Alter stella decerno'` — three lorem words, because the name
+   * carried no rule — and is now slugified; `viewCount` was `343` and is now
+   * `4401`, because slugifying draws a different number of values from Faker
+   * than `lorem.sentence()` did, which shifts every draw after it.
+   *
+   * That is worth being precise about, because it narrows what this test
+   * proves. It is **not** a claim that output is stable across releases — a
+   * deliberate change to any value function moves these numbers, and the fix is
+   * to re-capture them after checking the diff is the intended one. What it
+   * still guards is the thing it was written for: that relational seeding stays
+   * gated. If `topologicalEntityOrder` or identity assignment ever applied to an
+   * entity with no relations, these would move *without* anyone having touched a
+   * value function, and this test is the tripwire for that.
    */
-  it('leaves relation-free output byte-identical', () => {
+  it('leaves relation-free output stable', () => {
     const outputs = generateMockData(goldenFixtureIPS, 42);
     expect(Object.keys(outputs)).toEqual(['blogpost.mock.json']);
     const records = JSON.parse(outputs['blogpost.mock.json']!) as Record<string, unknown>[];
-    expect(records[0]!.slug).toBe('Alter stella decerno');
-    expect(records[0]!.viewCount).toBe(343);
+    expect(records[0]!.slug).toBe('cogo-alter-stella');
+    expect(records[0]!.viewCount).toBe(4401);
   });
 
   const materialized = materializeRelations(goldenRelationsIPS);
@@ -441,5 +457,193 @@ describe('Mock Data Generator — relational seeding (doc 19 §Phase A)', () => 
     for (const record of right) {
       expect(leftIds.has(record.leftId)).toBe(true);
     }
+  });
+});
+
+/**
+ * Realistic values by field name, and the `avatar` type.
+ *
+ * The bug behind this: an `email` field declared `string` seeded
+ * `"Censura claro defung"`. Lorem is right for free text and wrong for anything
+ * a developer pastes into a form or hands to a parser.
+ */
+describe('semantic field names', () => {
+  const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+  /** One entity of `string` fields, one per name under test. */
+  function stringEntity(names: string[]): InternalProjectSchema {
+    return {
+      projectId: 'proj_semantic',
+      version: 1,
+      entities: [
+        {
+          name: 'Person',
+          fields: names.map((name) => ({
+            name,
+            type: 'string' as const,
+            // Required, so the 10%-null branch never fires and these cases are
+            // about the value rather than about optionality.
+            required: true,
+            default: null,
+            children: [],
+            validation: {},
+            meta: {},
+          })),
+        },
+      ],
+      generationConfig: {
+        validators: [],
+        types: [],
+        methods: ['GET'],
+        mockRecords: 5,
+      },
+    } as InternalProjectSchema;
+  }
+
+  function records(names: string[], seed = 3): Record<string, unknown>[] {
+    return JSON.parse(generateMockData(stringEntity(names), seed)['person.mock.json']);
+  }
+
+  it('gives an email-named string field a parseable email address', () => {
+    // The reported case, exactly.
+    for (const row of records(['email'])) {
+      expect(String(row.email)).toMatch(EMAIL);
+    }
+  });
+
+  it('matches regardless of separator or case', () => {
+    // `first_name`, `firstName` and `FIRST NAME` are one rule, not three
+    // near-misses that each need their own entry.
+    const row = records(['first_name', 'firstName', 'FIRST NAME'])[0]!;
+    for (const key of ['first_name', 'firstName', 'FIRST NAME']) {
+      expect(String(row[key])).not.toMatch(/ /);
+      expect(String(row[key]).length).toBeGreaterThan(1);
+    }
+  });
+
+  it('keeps firstName and lastName distinct from a full name', () => {
+    // The ordering rule the table depends on: if `name` were tested first,
+    // every one of these columns would hold a full name.
+    const row = records(['firstName', 'lastName', 'name'])[0]!;
+    expect(String(row.firstName)).not.toContain(' ');
+    expect(String(row.lastName)).not.toContain(' ');
+    expect(String(row.name)).toContain(' ');
+  });
+
+  it('produces digits for phone-ish names', () => {
+    const row = records(['phone', 'mobile', 'phoneNumber', 'contactNumber'])[0]!;
+    for (const key of ['phone', 'mobile', 'phoneNumber', 'contactNumber']) {
+      expect(String(row[key])).toMatch(/\d/);
+    }
+  });
+
+  it('produces a postal code for pincode and its spellings', () => {
+    const row = records(['pincode', 'zip', 'zipCode', 'postalCode'])[0]!;
+    for (const key of ['pincode', 'zip', 'zipCode', 'postalCode']) {
+      expect(String(row[key])).toMatch(/^[A-Za-z0-9 -]+$/);
+      expect(String(row[key]).length).toBeLessThanOrEqual(12);
+    }
+  });
+
+  it('does not put the same full address in address and addressLine1', () => {
+    // The general `address` rule sits after the numbered lines for this reason.
+    const row = records(['address', 'addressLine1'])[0]!;
+    expect(row.address).not.toBe(row.addressLine1);
+  });
+
+  it('leaves genuinely free-text names as lorem', () => {
+    // The table's scope, stated as a test: inventing prose for a `description`
+    // would move the surprise rather than remove it.
+    const row = records(['title', 'description', 'note'])[0]!;
+    for (const key of ['title', 'description', 'note']) {
+      expect(typeof row[key]).toBe('string');
+      expect(String(row[key]).length).toBeGreaterThan(0);
+    }
+    expect(String(row.description)).not.toMatch(EMAIL);
+  });
+
+  it('gives an avatar-named string field a picture URL, not a random domain', () => {
+    const row = records(['avatarUrl', 'profilePic', 'photo'])[0]!;
+    for (const key of ['avatarUrl', 'profilePic', 'photo']) {
+      expect(String(row[key])).toContain('getavataaars.com');
+    }
+  });
+
+  it('stays deterministic under a seed', () => {
+    // The contract the whole module keeps; the table must not break it.
+    expect(records(['email', 'firstName', 'avatar'], 11)).toEqual(
+      records(['email', 'firstName', 'avatar'], 11),
+    );
+  });
+});
+
+describe('the avatar field type', () => {
+  function avatarIps(): InternalProjectSchema {
+    return {
+      projectId: 'proj_avatar',
+      version: 1,
+      entities: [
+        {
+          name: 'Member',
+          fields: [
+            {
+              name: 'picture',
+              type: 'avatar' as const,
+              required: true,
+              default: null,
+              children: [],
+              validation: {},
+              meta: {},
+            },
+          ],
+        },
+      ],
+      generationConfig: { validators: [], types: [], methods: ['GET'], mockRecords: 8 },
+    } as InternalProjectSchema;
+  }
+
+  const pictures = (seed = 5): string[] =>
+    (
+      JSON.parse(generateMockData(avatarIps(), seed)['member.mock.json']) as Record<
+        string,
+        unknown
+      >[]
+    ).map((row) => String(row.picture));
+
+  it('emits a getavataaars URL for every record', () => {
+    for (const url of pictures()) {
+      expect(url.startsWith('https://getavataaars.com/?')).toBe(true);
+      expect(() => new URL(url)).not.toThrow();
+    }
+  });
+
+  it('fixes the house style — Circle and Tongue on every face', () => {
+    // The user's one non-negotiable trait. Everything else is drawn.
+    for (const url of pictures()) {
+      const params = new URL(url).searchParams;
+      expect(params.get('avatarStyle')).toBe('Circle');
+      expect(params.get('mouthType')).toBe('Tongue');
+    }
+  });
+
+  it('varies the other traits across records', () => {
+    // Eight identical avatars would make the type pointless.
+    const tops = new Set(pictures().map((url) => new URL(url).searchParams.get('topType')));
+    expect(tops.size).toBeGreaterThan(1);
+  });
+
+  it('draws only from the curated trait lists', () => {
+    // The lists are short so random combinations stay coherent; a value from
+    // outside them means the generator drifted from the vocabulary.
+    for (const url of pictures()) {
+      const params = new URL(url).searchParams;
+      for (const trait of AVATAR_TRAIT_NAMES) {
+        expect(AVATAR_TRAITS[trait] as readonly string[]).toContain(params.get(trait));
+      }
+    }
+  });
+
+  it('is byte-identical under the same seed', () => {
+    expect(pictures(9)).toEqual(pictures(9));
   });
 });

@@ -192,12 +192,18 @@ export function evaluatePromotion(params: {
  * live runtime to disturb, so the "explicit" requirement is protecting nobody.
  * Not opt-in, because a project with no hosted URL has nobody to protect.
  *
- * **The project asked for it** — `autoPublish`. Off by default, and the default
- * is the whole point: the explicit step exists so that a change which breaks
- * callers reaches them at a moment their author chose. A project whose only
- * caller is its author has no such moment to protect, and for them the step is
- * friction. The setting is how a user says which of those they are; the code
- * does not try to guess from the change's risk.
+ * **The project asked for it** — `autoPublish`, **on by default** at the project
+ * level. Editing a data model and then having to press a second button is
+ * friction for the common case, so the product default is that a ready version
+ * goes live. A user who wants the review step — because callers other than the
+ * author depend on the URL — switches it off, and the version then stops at
+ * READY exactly as it did before. The setting is how a user says which of those
+ * they are; the code does not try to guess from the change's risk.
+ *
+ * The **parameter** here still defaults to off when omitted, which is not a
+ * contradiction: the project-level default is resolved by the caller (`!==
+ * false` against the document), and a policy function asked to decide with no
+ * information should take the cautious branch rather than publish.
  *
  * Note what the second exception does **not** relax: `evaluatePromotion` still
  * refuses an unready candidate and still refuses to move backwards. Auto-publish
@@ -230,10 +236,12 @@ export function evaluateAutoPublish(params: {
   /** Whether a version is actually being served. See `hasLiveDeployment`. */
   live: boolean;
   /**
-   * The project's opt-in to publishing every ready version.
+   * Whether this project publishes every ready version by itself.
    *
-   * Optional and read as `false`, because every project written before the
-   * setting existed waits for the explicit step and must keep waiting.
+   * **Already resolved by the caller**, which reads the document as
+   * `autoPublish !== false` — the project-level default is ON. Omitting it here
+   * is read as `false`: a policy function given no answer takes the branch that
+   * cannot surprise a caller.
    */
   autoPublish?: boolean;
   outcomes: readonly ArtifactOutcome[];

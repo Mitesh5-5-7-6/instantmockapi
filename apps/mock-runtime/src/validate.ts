@@ -6,7 +6,7 @@
  * writes obey exactly the rules the downloadable Zod/Yup encode.
  */
 
-import type { ErrorDetail } from '@instantmockapi/shared';
+import { isAvatarUrl, type ErrorDetail } from '@instantmockapi/shared';
 import type { UnknownFieldPolicy } from '@instantmockapi/ips';
 import type { HostedFieldRule } from '@instantmockapi/generator-hosting';
 
@@ -119,6 +119,20 @@ function checkField(
     case 'uuid':
       if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
         return fail('must be a valid UUID');
+      }
+      return;
+
+    /*
+     * Accepted as any URL, not only one this platform generates.
+     *
+     * The seeded values are getavataaars.com URLs, but a caller POSTing their
+     * own CDN link is doing the normal thing with an avatar field. Pinning the
+     * host would reject it, and a mock API that refuses real-looking data is
+     * worse than one that is slightly loose.
+     */
+    case 'avatar':
+      if (typeof value !== 'string' || !isAvatarUrl(value)) {
+        return fail('must be an image URL');
       }
       return;
 
