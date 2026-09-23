@@ -125,7 +125,7 @@ function checkField(
     /*
      * Accepted as any URL, not only one this platform generates.
      *
-     * The seeded values are getavataaars.com URLs, but a caller POSTing their
+     * The seeded values are avataaars.io URLs, but a caller POSTing their
      * own CDN link is doing the normal thing with an avatar field. Pinning the
      * host would reject it, and a mock API that refuses real-looking data is
      * worse than one that is slightly loose.

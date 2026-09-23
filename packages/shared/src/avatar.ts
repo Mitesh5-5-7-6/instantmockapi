@@ -1,7 +1,7 @@
 /**
  * Avatar URLs for the `avatar` field type.
  *
- * Generated mock data for an avatar field is a **getavataaars.com URL**, not a
+ * Generated mock data for an avatar field is a **avataaars.io URL**, not a
  * component and not a package dependency. The reason is what consumes it: a
  * hosted mock API answers JSON to an Angular app, a curl, a Postman run and a
  * React app alike, and only a URL is a value all four can render. Shipping the
@@ -93,7 +93,7 @@ export const AVATAR_FIXED = {
   mouthType: 'Tongue',
 } as const;
 
-export const AVATAR_BASE_URL = 'https://getavataaars.com/';
+export const AVATAR_BASE_URL = 'https://avataaars.io/';
 
 /**
  * Build the URL for a set of traits.

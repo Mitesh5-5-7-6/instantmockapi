@@ -565,7 +565,7 @@ describe('semantic field names', () => {
   it('gives an avatar-named string field a picture URL, not a random domain', () => {
     const row = records(['avatarUrl', 'profilePic', 'photo'])[0]!;
     for (const key of ['avatarUrl', 'profilePic', 'photo']) {
-      expect(String(row[key])).toContain('getavataaars.com');
+      expect(String(row[key])).toContain('avataaars.io');
     }
   });
 
@@ -612,7 +612,7 @@ describe('the avatar field type', () => {
 
   it('emits a getavataaars URL for every record', () => {
     for (const url of pictures()) {
-      expect(url.startsWith('https://getavataaars.com/?')).toBe(true);
+      expect(url.startsWith('https://avataaars.io/?')).toBe(true);
       expect(() => new URL(url)).not.toThrow();
     }
   });

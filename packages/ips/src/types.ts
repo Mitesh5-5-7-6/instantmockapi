@@ -84,7 +84,7 @@ export type FieldType =
   | 'url'
   | 'uuid'
   /**
-   * A profile picture, emitted as a getavataaars.com URL.
+   * A profile picture, emitted as a avataaars.io URL.
    *
    * A distinct type rather than a `url` field named `avatar`, because the type
    * is what the mock-data generator dispatches on: only a declared `avatar`
