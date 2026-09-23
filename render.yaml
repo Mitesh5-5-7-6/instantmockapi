@@ -1,0 +1,147 @@
+# Render Blueprint — the V1 topology as code.
+#
+# INFRASTRUCTURE.md used to end its deployment section with "there is no
+# infrastructure-as-code in this repository ... a committed render.yaml would
+# make Render reconcile deploys against this file". This is that file.
+#
+# Every service builds through `scripts/render-build.sh`, which exists because
+# the obvious build command fails on Render for two unrelated reasons; the
+# script documents both. Keeping the command here as a one-liner means a fix
+# lands in a reviewed commit rather than in three dashboard fields that drift.
+#
+# ## Adopting this for services that already exist
+#
+# Render does not retro-fit a Blueprint onto services created in the dashboard.
+# Either create the services from this file (Dashboard → Blueprints → New), or
+# leave them as they are and point each one's Build Command at the script:
+#
+#     bash ./scripts/render-build.sh @instantmockapi/api
+#
+# Both routes get the same build. Only the first one keeps config in git.
+#
+# ## Secrets, and why they are repeated per service
+#
+# Nothing secret is committed here. Every credential is `sync: false`, which
+# tells Render to prompt for it once and then keep the dashboard value — this
+# file never becomes a place someone might paste a connection string.
+#
+# The shared ones (`MONGO_URI`, `REDIS_URL`, `JWT_SECRET`, `HOSTED_BASE_URL`)
+# are therefore declared on each service that reads them rather than hoisted
+# into a root-level `envVarGroups`. That is not an oversight: Render's spec
+# forbids `sync: false` inside an environment group, so a group would mean
+# committing the values. Duplicated placeholders beat committed credentials.
+#
+# If you later create the group in the dashboard instead, a service links the
+# whole thing with an entry inside its own `envVars`:
+#
+#     envVars:
+#       - fromGroup: instantmockapi-shared
+#
+# `.env.example` remains the full annotated list of what the apps read.
+
+services:
+  # ── Platform API (apps/api) ────────────────────────────────────────────────
+  - type: web
+    name: instantmockapi-api
+    runtime: node
+    # Adjust to the plan you are actually on. `starter` is 512 MB, which the
+    # build survives only because the heap ceiling is scoped to the build step
+    # inside the script rather than set as an environment variable.
+    plan: starter
+    buildCommand: bash ./scripts/render-build.sh @instantmockapi/api
+    # Plain `node`, not `pnpm start`: the runtime container should not need
+    # corepack shims on PATH just to boot a compiled file.
+    startCommand: node apps/api/dist/index.js
+    # `/healthz`, not `/health` — see apps/api/src/server.ts. A wrong path here
+    # fails every health check and rolls the deploy back.
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      # This app listens on API_PORT (apps/api/src/index.ts), not on Render's
+      # PORT, so the two have to be told the same number. 10000 is the port
+      # Render probes first.
+      - key: API_PORT
+        value: '10000'
+      - key: MONGO_URI
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: REDIS_ENABLED
+        value: 'true'
+      - key: JWT_SECRET
+        sync: false
+      # The public base of the hosted mock APIs. The API serves it back to the
+      # dashboard and the worker mints URLs from it, so the two services must be
+      # given the same value.
+      - key: HOSTED_BASE_URL
+        sync: false
+      - key: WEB_ORIGIN
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      # False here on purpose. The worker below is its own service, and running
+      # a second copy in-process would have two workers competing for the same
+      # queue. Flip to true and delete the worker service to collapse to a
+      # single-service deployment — see INFRASTRUCTURE.md "Two logical services".
+      - key: RUN_WORKER_IN_PROCESS
+        value: 'false'
+
+  # ── Hosted mock runtime (apps/mock-runtime) ────────────────────────────────
+  # The service that answers every generated API. Separate from the platform API
+  # because a customer's traffic and the dashboard's traffic should not share a
+  # process — one being slow must not make the other slow.
+  - type: web
+    name: instantmockapi-mockdata
+    runtime: node
+    plan: starter
+    buildCommand: bash ./scripts/render-build.sh @instantmockapi/mock-runtime
+    startCommand: node apps/mock-runtime/dist/index.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: MOCK_RUNTIME_PORT
+        value: '10000'
+      - key: MONGO_URI
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: REDIS_ENABLED
+        value: 'true'
+
+  # ── Generation worker (apps/workers) ───────────────────────────────────────
+  - type: worker
+    name: instantmockapi-worker
+    runtime: node
+    plan: starter
+    buildCommand: bash ./scripts/render-build.sh @instantmockapi/workers
+    startCommand: node apps/workers/dist/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: MONGO_URI
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: REDIS_ENABLED
+        value: 'true'
+      # Same value as the API's. The worker writes the hosted URL onto a project
+      # when it publishes, so a mismatch would mint links the runtime does not
+      # answer on.
+      - key: HOSTED_BASE_URL
+        sync: false
+      - key: WORKER_CONCURRENCY
+        value: '2'

@@ -361,7 +361,8 @@ Vercel
 └── Next.js / React            (apps/web)
 
 Render
-├── API / Web Service          (apps/api)
+├── Platform API               (apps/api)
+├── Hosted mock runtime        (apps/mock-runtime)
 └── Generation Worker          (apps/workers)
 
 MongoDB Atlas
@@ -375,16 +376,34 @@ Cloudflare R2 / S3             not provisioned in V1
 └── Generated artifacts        (STORAGE_DRIVER=s3 moves them here)
 ```
 
-Five services in the Phase 6 diagram, four actually running: artifacts share the MongoDB cluster
-rather than sitting in object storage. See [Where artifacts live](#where-artifacts-live) for why,
+Five services in the Phase 6 diagram, five actually running — the mock runtime is its own Render
+service so a customer's traffic and the dashboard's never share a process. Artifacts share the
+MongoDB cluster rather than sitting in object storage. See [Where artifacts live](#where-artifacts-live) for why,
 and for what flipping it involves.
 
 Deliberately absent: Kubernetes, Kafka, a service mesh, microservice decomposition, a distributed
 database, multiple queues. The system should stay easy to deploy, debug and operate.
 
-There is no infrastructure-as-code in this repository. The topology above is documentation; the
-services are configured on the platform. That is a choice — a committed `render.yaml` would make
-Render reconcile deploys against this file, and the topology is small enough to describe.
+The topology above is described as code in `render.yaml`, which Render reconciles deploys
+against. Each service builds through `scripts/render-build.sh` rather than an inline command,
+because two things about building this repo on Render are not obvious from the failure they
+produce:
+
+- `corepack enable` installs its shims beside the `corepack` binary, which on Render is in the
+  read-only `/usr/bin` — it fails with `EROFS ... unlink '/usr/bin/pnpm'`. The script passes
+  `--install-directory`, and creates that directory first, which corepack does not do.
+- `tsc` across the monorepo exceeds the default heap on a small build container. The script
+  raises the ceiling **for the build step only**. Setting `NODE_OPTIONS` as a service
+  environment variable instead would also apply it at runtime, where telling V8 it may reach
+  4 GB inside a 512 MB container gets the process OOM-killed rather than collected.
+
+Services created in the dashboard before this file existed are not retro-fitted by it: Render
+adopts a Blueprint only for services created from one. Either recreate them from `render.yaml`,
+or point each existing service's Build Command at `bash ./scripts/render-build.sh <filter>`.
+No credential is committed — every secret in the Blueprint is `sync: false`, so Render prompts for
+it and keeps the dashboard value. Shared secrets are repeated per service rather than hoisted into
+a root-level `envVarGroups`, because Render forbids `sync: false` inside a group; a group would
+mean committing the values.
 
 ---
 
