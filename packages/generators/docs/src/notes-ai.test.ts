@@ -74,6 +74,30 @@ const splitRecord = (line: string): string[] =>
     .split(/(?<!\\)\|/)
     .map((cell) => cell.replace(/\\\|/g, '|').trim());
 
+
+/** The `- ` record whose FIRST field is `key`. */
+const recordLine = (context: string, key: string): string => {
+  const line = context
+    .split('\n')
+    .find((candidate) => candidate.startsWith(`- ${key} |`));
+  if (line === undefined) {
+    throw new Error(`no record keyed ${key}`);
+  }
+  return line;
+};
+
+/** The lines of one `## ` section, excluding its heading. */
+const section = (context: string, heading: string): string[] => {
+  const lines = context.split('\n');
+  const start = lines.indexOf(heading);
+  if (start === -1) {
+    throw new Error(`no section ${heading}`);
+  }
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => line.startsWith('## '));
+  return end === -1 ? rest : rest.slice(0, end);
+};
+
 describe('§7: the document shape', () => {
   it('leads with the heading a consumer can anchor on', () => {
     expect(render(ips()).startsWith('# Project Context\n')).toBe(true);
@@ -701,5 +725,142 @@ describe('§7: the query-feature vocabulary is shared, not copied', () => {
     for (const feature of QUERY_FEATURES) {
       expect(line, feature).toContain(feature);
     }
+  });
+});
+
+/**
+ * The protocol block: how to CALL the API, not what it contains.
+ *
+ * The schema half of this document was already complete and still didn't let an
+ * assistant write a working client — it had to guess the envelope, the error
+ * shape and the query grammar. These cases pin the facts that closed that gap,
+ * and in particular the ones that vary by project, because a fixed blob of
+ * prose would state them for projects where they are false.
+ */
+describe('protocol: response shapes and errors', () => {
+  it('states both envelopes, and that a single record is unwrapped', () => {
+    // The asymmetry an assistant gets wrong by assuming symmetry: it writes
+    // `response.data.id` against an entity endpoint and reads undefined.
+    const context = render(ips());
+    expect(context).toContain('## Response Shapes');
+    expect(splitRecord(recordLine(context, 'collection'))[2]).toContain('"data"');
+    expect(splitRecord(recordLine(context, 'collection'))[2]).toContain('"meta"');
+    expect(splitRecord(recordLine(context, 'entity'))[2]).toContain('unwrapped');
+  });
+
+  it('states the one error envelope and the status codes that use it', () => {
+    const context = render(ips());
+    expect(splitRecord(recordLine(context, 'envelope'))[2]).toContain('"error"');
+    for (const status of ['400', '404', '405', '409', '422']) {
+      expect(recordLine(context, status), status).toBeTruthy();
+    }
+  });
+
+  it('keeps a consistent field count across the Errors block', () => {
+    // The document promises records are split on the separator; mixed arity
+    // inside one block is exactly the ambiguity that promise rules out.
+    const context = render(ips());
+    const rows = section(context, '## Errors')
+      .filter((line) => line.startsWith('- '))
+      .map(splitRecord);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row).toHaveLength(3);
+    }
+  });
+
+  it('does not escape pipes into the method list a human reads', () => {
+    const context = render(ips());
+    expect(recordLine(context, 'entity')).not.toContain('\\|');
+  });
+});
+
+describe('protocol: the query grammar tracks enabled features', () => {
+  it('documents each grammar only when its feature is on', () => {
+    // Load-bearing: the runtime rejects an unknown query parameter with 400
+    // rather than ignoring it, so documenting a disabled feature produces a
+    // client that fails on its first call.
+    const off = clone(ips());
+    off.generationConfig.features = { search: false, filter: false, sort: false, include: false };
+    const context = render(off);
+
+    expect(context).toContain('## Query Grammar');
+    expect(context).toContain('no query features are enabled');
+    expect(context).not.toContain('?search=term');
+    expect(context).not.toContain('?sort=field');
+  });
+
+  it('spells out the filter operator suffix form when filtering is on', () => {
+    // The single most-guessed-wrong part of the grammar: assistants reach for
+    // `?price[gte]=` or `?price>=10`.
+    const on = clone(ips());
+    on.generationConfig.features = { search: true, filter: true, sort: true, include: true };
+    const context = render(on);
+
+    expect(splitRecord(recordLine(context, 'filter operators'))[1]).toContain('gte');
+    expect(context).toContain('?price_gte=10');
+    expect(context).toContain('?sort=-field');
+  });
+
+  it('always states page and limit, feature flags or not', () => {
+    const off = clone(ips());
+    off.generationConfig.features = { search: false, filter: false, sort: false, include: false };
+    expect(recordLine(render(off), 'page')).toBeTruthy();
+    expect(recordLine(render(off), 'limit')).toBeTruthy();
+  });
+});
+
+describe('protocol: rules for generated code', () => {
+  it('states the unknown-field policy and warns only when it rejects', () => {
+    const strict = clone(ips());
+    strict.generationConfig.unknownFields = 'reject';
+    const rejects = render(strict);
+    expect(splitRecord(recordLine(rejects, 'undeclared fields'))[1]).toBe('policy=reject');
+    expect(rejects).toContain('One extra property fails the whole request with 422');
+
+    const lenient = clone(ips());
+    lenient.generationConfig.unknownFields = 'allow';
+    const allows = render(lenient);
+    expect(splitRecord(recordLine(allows, 'undeclared fields'))[1]).toBe('policy=allow');
+    // The warning is specific to the policy that fails the request; printing
+    // it under `allow` would describe a 422 that never happens.
+    expect(allows).not.toContain('fails the whole request with 422');
+  });
+
+  it('reads an absent policy as allow rather than omitting the line', () => {
+    const legacy = clone(ips());
+    delete legacy.generationConfig.unknownFields;
+    expect(splitRecord(recordLine(render(legacy), 'undeclared fields'))[1]).toBe('policy=allow');
+  });
+
+  it('names each identity field as server-assigned', () => {
+    const context = render(ips());
+    const identity = splitRecord(recordLine(context, 'identity'));
+    expect(identity[2]).toContain('omit it from create bodies');
+  });
+
+  it('separates PUT from PATCH semantics', () => {
+    const context = render(ips());
+    expect(splitRecord(recordLine(context, 'PUT'))[1]).toContain('replaces');
+    expect(splitRecord(recordLine(context, 'PATCH'))[1]).toContain('merges');
+  });
+
+  it('forbids inventing anything, and says the data is not durable', () => {
+    const context = render(ips());
+    expect(context).toContain('do not invent endpoints, fields, or enum values');
+    expect(context).toContain('not durable storage');
+  });
+});
+
+describe('protocol: still deterministic', () => {
+  it('renders byte-identically twice, protocol block included', () => {
+    // §7 requires stability across repeated generation, and the new sections
+    // must not smuggle in a clock or an unordered iteration.
+    //
+    // ONE document rendered twice, not `ips()` twice: `ensureSchemaIds` mints
+    // fresh ids per call, so two fixtures differ before the renderer is even
+    // reached and the assertion would fail on a difference it is not testing.
+    const document = ips();
+    expect(render(document)).toBe(render(document));
   });
 });
