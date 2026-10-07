@@ -55,7 +55,7 @@ export const RESERVED_SLUGS: readonly string[] = [
   'p',
   'api',
   'v1',
-  'healthz',
+  'health',
   'auth',
   'admin',
   '_meta',

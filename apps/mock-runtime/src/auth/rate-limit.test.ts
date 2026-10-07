@@ -41,7 +41,7 @@ describe('which endpoints are throttled', () => {
   });
 
   it('is null for a path that parses to nothing', () => {
-    expect(key('/healthz')).toBeNull();
+    expect(key('/health/live')).toBeNull();
     expect(key('/p')).toBeNull();
     expect(key('/p/not-an-id/signIn')).toBeNull();
   });

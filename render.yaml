@@ -52,9 +52,9 @@ services:
     # Plain `node`, not `pnpm start`: the runtime container should not need
     # corepack shims on PATH just to boot a compiled file.
     startCommand: node apps/api/dist/index.js
-    # `/healthz`, not `/health` — see apps/api/src/server.ts. A wrong path here
+    # `/health/live`, not `/health` — see apps/api/src/server.ts. A wrong path here
     # fails every health check and rolls the deploy back.
-    healthCheckPath: /healthz
+    healthCheckPath: /health/live
     envVars:
       - key: NODE_ENV
         value: production
@@ -105,7 +105,7 @@ services:
     plan: starter
     buildCommand: bash ./scripts/render-build.sh @instantmockapi/mock-runtime
     startCommand: node apps/mock-runtime/dist/index.js
-    healthCheckPath: /healthz
+    healthCheckPath: /health/live
     envVars:
       - key: NODE_ENV
         value: production

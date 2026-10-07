@@ -195,7 +195,7 @@ describe('CORS (web app is a separate origin)', () => {
   it('stamps allow-origin on actual responses', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/healthz',
+      url: '/health/live',
       headers: { origin: 'http://localhost:3000' },
     });
     expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3000');
@@ -209,8 +209,8 @@ describe('error envelope', () => {
     expect(res.json().error.code).toBe('NOT_FOUND');
   });
 
-  it('healthz is open and healthy', async () => {
-    const res = await app.inject({ method: 'GET', url: '/healthz' });
+  it('health/live is open and healthy', async () => {
+    const res = await app.inject({ method: 'GET', url: '/health/live' });
     expect(res.statusCode).toBe(200);
     expect(res.json().status).toBe('ok');
   });
@@ -224,8 +224,8 @@ describe('error envelope', () => {
    * Null locally: `RENDER_GIT_COMMIT` is set by the platform, so there is no
    * build step and no generated file to keep in step.
    */
-  it('healthz reports which build is answering', async () => {
-    const res = await app.inject({ method: 'GET', url: '/healthz' });
+  it('health/live reports which build is answering', async () => {
+    const res = await app.inject({ method: 'GET', url: '/health/live' });
     const body = res.json() as Record<string, unknown>;
 
     expect(Object.keys(body).sort()).toEqual(['branch', 'commit', 'startedAt', 'status']);
@@ -244,7 +244,7 @@ describe('error envelope', () => {
    * repository is not a credential and cannot be exchanged for source.
    */
   it('needs no token to report the build', async () => {
-    const res = await app.inject({ method: 'GET', url: '/healthz' });
+    const res = await app.inject({ method: 'GET', url: '/health/live' });
     expect(res.statusCode).toBe(200);
     // And nothing sensitive rides along.
     expect(res.body).not.toMatch(/secret|password|token|mongodb:|redis:/i);
@@ -255,9 +255,9 @@ describe('rate limiting', () => {
   it('returns 429 with the envelope and Retry-After once the bucket is empty', async () => {
     const limited = await buildTestServer({ rateLimit: { max: 2, timeWindowMs: 60_000 } });
     try {
-      const first = await limited.inject({ method: 'GET', url: '/healthz' });
-      const second = await limited.inject({ method: 'GET', url: '/healthz' });
-      const third = await limited.inject({ method: 'GET', url: '/healthz' });
+      const first = await limited.inject({ method: 'GET', url: '/health/live' });
+      const second = await limited.inject({ method: 'GET', url: '/health/live' });
+      const third = await limited.inject({ method: 'GET', url: '/health/live' });
 
       expect(first.statusCode).toBe(200);
       expect(second.statusCode).toBe(200);
@@ -288,7 +288,7 @@ describe('rate limiting', () => {
       const get = (forwardedFor: string) =>
         limited.inject({
           method: 'GET',
-          url: '/healthz',
+          url: '/health/live',
           headers: { 'x-forwarded-for': forwardedFor },
         });
 
@@ -317,7 +317,7 @@ describe('rate limiting', () => {
       const spoof = (fake: string) =>
         limited.inject({
           method: 'GET',
-          url: '/healthz',
+          url: '/health/live',
           // The rightmost entry is what the proxy appended; everything left of it
           // came from the client.
           headers: { 'x-forwarded-for': `${fake}, 203.0.113.1` },
@@ -342,8 +342,8 @@ describe('request correlation', () => {
    * unrelated failures a week apart can carry the same id.
    */
   it('stamps a distinct id on every response, not a counter', async () => {
-    const first = await app.inject({ method: 'GET', url: '/healthz' });
-    const second = await app.inject({ method: 'GET', url: '/healthz' });
+    const first = await app.inject({ method: 'GET', url: '/health/live' });
+    const second = await app.inject({ method: 'GET', url: '/health/live' });
 
     for (const res of [first, second]) {
       expect(res.headers['x-request-id']).toMatch(/^req_[0-9a-f]{10}$/);
@@ -353,7 +353,7 @@ describe('request correlation', () => {
 
   /** Successes carry it too: a wrong-looking 200 needs the same handle as a 500. */
   it('stamps successes as well as failures', async () => {
-    const ok = await app.inject({ method: 'GET', url: '/healthz' });
+    const ok = await app.inject({ method: 'GET', url: '/health/live' });
     const missing = await app.inject({ method: 'GET', url: '/v1/nope' });
 
     expect(ok.statusCode).toBeLessThan(400);
@@ -370,7 +370,7 @@ describe('request correlation', () => {
   it('honours a well-formed inbound id', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/healthz',
+      url: '/health/live',
       headers: { 'x-request-id': 'req_abcdef0123' },
     });
     expect(res.headers['x-request-id']).toBe('req_abcdef0123');
@@ -381,7 +381,7 @@ describe('request correlation', () => {
     async (inbound) => {
       const res = await app.inject({
         method: 'GET',
-        url: '/healthz',
+        url: '/health/live',
         headers: { 'x-request-id': inbound },
       });
       expect(res.headers['x-request-id']).toMatch(/^req_[0-9a-f]{10}$/);

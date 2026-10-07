@@ -182,7 +182,7 @@ export async function buildMockRuntime(options: BuildRuntimeOptions): Promise<Fa
   // Cache counters ride along on the health check so Redis command usage is
   // observable per replica without adding a second endpoint. Counters only —
   // no keys or cached values are exposed.
-  app.get('/healthz', async () => ({ status: 'ok', cache: options.cache.stats() }));
+  app.get('/health/live', async () => ({ status: 'ok', cache: options.cache.stats() }));
 
   registerHostedRoutes(app, {
     storage: options.storage,

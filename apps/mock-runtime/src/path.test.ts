@@ -141,7 +141,7 @@ describe('firstHostedSegment', () => {
   });
 
   it('returns null off the hosted prefix', () => {
-    expect(firstHostedSegment('/healthz')).toBeNull();
+    expect(firstHostedSegment('/health/live')).toBeNull();
     expect(firstHostedSegment('/p')).toBeNull();
   });
 
