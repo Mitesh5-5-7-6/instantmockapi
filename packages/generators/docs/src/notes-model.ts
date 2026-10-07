@@ -56,6 +56,7 @@ import {
   isCollectionRelation,
   projectAuth,
   queryFeatures,
+  unknownFieldPolicy,
   type AuthConfig,
   type Entity,
   type EntityQueryFields,
@@ -64,6 +65,7 @@ import {
   type InternalProjectSchema,
   type QueryFeatures,
   type Relation,
+  type UnknownFieldPolicy,
 } from '@instantmockapi/ips';
 
 /* ────────────────────────── the model ────────────────────────── */
@@ -229,6 +231,15 @@ export interface NotesGeneration {
   methods: string[];
   mockRecords: number;
   features: QueryFeatures;
+  /*
+   * What a write does with a body key no field declares.
+   *
+   * In the model rather than read from the config at render time, because an
+   * assistant asked to write a POST cannot guess it and gets it wrong in the
+   * expensive direction: under `reject` an extra property is a 422, not a
+   * tolerated no-op.
+   */
+  unknownFields: UnknownFieldPolicy;
 }
 
 export interface DocumentationModel {
@@ -583,6 +594,7 @@ export function buildDocumentationModel(
       methods: [...config.methods],
       mockRecords: config.mockRecords,
       features,
+      unknownFields: unknownFieldPolicy(config),
     },
   };
 }

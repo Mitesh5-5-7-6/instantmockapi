@@ -206,7 +206,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
    * needs it.
    */
   const startedAt = new Date().toISOString();
-  app.get('/healthz', async () => ({
+  app.get('/health/live', async () => ({
     status: 'ok',
     commit: process.env['RENDER_GIT_COMMIT'] ?? null,
     branch: process.env['RENDER_GIT_BRANCH'] ?? null,

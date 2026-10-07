@@ -52,7 +52,7 @@
  * keyed `Note:` about the format.
  */
 
-import { QUERY_FEATURES } from '@instantmockapi/ips';
+import { FILTER_OPERATORS, QUERY_FEATURES, describeUnknownFields } from '@instantmockapi/ips';
 import type { DocumentationModel, NotesEndpoint, NotesField, NotesRelation } from './notes-model.js';
 import { flattenFields, stringifyDefault } from './notes-model.js';
 
@@ -163,6 +163,176 @@ function renderEndpoint(endpoint: NotesEndpoint): string {
     ...(endpoint.queryParams.length > 0 ? [`query=${endpoint.queryParams.join(',')}`] : []),
     `response=${endpoint.responseShape}`,
   ]);
+}
+
+/* ────────────────────────── the protocol block ──────────────────────────
+ *
+ * Everything below describes how to CALL the API, as opposed to what the API
+ * contains. That distinction is the whole reason this section exists.
+ *
+ * The schema half of this document — entities, fields, endpoints — was already
+ * a faithful description of the project, and it is still not enough to write a
+ * working client from. An assistant handed only that has to guess the response
+ * envelope, the error shape, the query grammar, and whether an extra property
+ * is tolerated. It guesses plausibly and wrongly: a bare array instead of
+ * `data`, `message` instead of `error.message`, `?sort=name:desc` instead of
+ * `?sort=-name`. Every one of those is a fact this platform fixes, and can
+ * therefore state rather than leave to be inferred.
+ *
+ * Rendered per document rather than pasted in as one constant blob, because the
+ * parts that DO vary — which query features are on, what happens to an
+ * undeclared field, each entity's id style — have to be interleaved with the
+ * parts that do not. A block advertising `?search=` to a project with search
+ * switched off would be worse than silence: the runtime rejects an unknown
+ * query parameter with a 400 rather than ignoring it, so the generated client
+ * would fail on its first call.
+ */
+
+/** Pagination and the two response envelopes. */
+function renderResponseShapes(out: string[]): void {
+  out.push('## Response Shapes');
+  out.push(
+    'Note: these envelopes are fixed by the platform and appear nowhere in the entity schemas above.',
+  );
+  out.push(
+    record([
+      'collection',
+      'GET /{entity}',
+      '{ "data": [ ...records ], "meta": { "page": 1, "limit": 20, "total": 0 } }',
+    ]),
+  );
+  // A single record is NOT wrapped. An assistant that assumes symmetry with the
+  // collection envelope writes `response.data.id` and reads undefined, so this
+  // gets its own line rather than a parenthetical.
+  // Methods comma-separated rather than pipe-separated: a literal pipe is legal
+  // here but gets escaped to `GET\|POST`, and this line is read by a human as
+  // often as by a parser.
+  out.push(record(['entity', 'GET,POST,PUT,PATCH /{entity}/{id}', 'the record itself, unwrapped']));
+  out.push(record(['none', 'DELETE /{entity}/{id}', '204 with an empty body']));
+  out.push(
+    record([
+      'index',
+      'GET /',
+      'discovery document: { "data": { kind, version, canonicalUrl, features, unknownFields, entities } }',
+    ]),
+  );
+  out.push('');
+
+  out.push('## Errors');
+  out.push('Note: every failure uses one envelope. There is no second error shape.');
+  // Three fields on every row of this block, matching the status rows below, so
+  // a consumer splitting on the separator reads a consistent arity throughout.
+  out.push(record(['envelope', 'every failure', '{ "error": { "code", "message", "details"? } }']));
+  out.push(
+    record(['details', 'validation failures only', 'array of { "path", "issue" }']),
+  );
+  out.push(
+    record(['400', 'VALIDATION_ERROR', 'malformed query string, or an unknown query parameter']),
+  );
+  out.push(record(['404', 'NOT_FOUND', 'unknown project, entity, or record id']));
+  out.push(record(['405', 'VALIDATION_ERROR', 'method not enabled for this entity']));
+  out.push(record(['409', 'CONFLICT', 'a unique or identity value already exists']));
+  out.push(record(['422', 'VALIDATION_ERROR', 'body failed the field rules; details names each']));
+  out.push('');
+}
+
+/** The query grammar, limited to the features this project switched on. */
+function renderQueryGrammar(model: DocumentationModel, out: string[]): void {
+  const { features } = model.generation;
+
+  out.push('## Query Grammar');
+  out.push(
+    'Note: applies to collection GETs only. An unknown query parameter is rejected with 400, not ignored.',
+  );
+  out.push(record(['page', '?page=1', 'integer, 1-based, default 1']));
+  out.push(record(['limit', '?limit=20', 'integer, default 20, capped by the server']));
+
+  if (!QUERY_FEATURES.some((feature) => features[feature])) {
+    out.push(
+      'Note: no query features are enabled; page and limit are the only accepted parameters.',
+    );
+    out.push('');
+    return;
+  }
+
+  if (features.search) {
+    out.push(record(['search', '?search=term', 'substring match, searchable fields only']));
+  }
+  if (features.filter) {
+    out.push(record(['filter', '?field=value', 'exact match on a queryable field']));
+    // Spelled out because the suffix form is the most-guessed-wrong part of this
+    // grammar: assistants reach for `?price[gte]=` or `?price>=10`.
+    out.push(
+      record([
+        'filter operators',
+        `?field_op=value, op in ${FILTER_OPERATORS.join(',')}`,
+        'example: ?price_gte=10',
+      ]),
+    );
+    out.push(record(['in', '?field_in=a,b,c', 'comma-separated, no spaces']));
+  }
+  if (features.sort) {
+    out.push(record(['sort', '?sort=field or ?sort=-field', 'a leading - is descending']));
+    out.push(record(['sort multiple', '?sort=a,-b', 'comma-separated, applied left to right']));
+  }
+  if (features.include) {
+    out.push(record(['include', '?include=relation', 'expands a relation named in Relationships']));
+  }
+  out.push(
+    'Note: a field is filterable or sortable only if it appears in that endpoint query list above.',
+  );
+  out.push('');
+}
+
+/**
+ * The rules an assistant must follow to produce a request this API accepts.
+ *
+ * Imperatives, not facts. The rest of the document describes the project and
+ * leaves the reader to draw conclusions; these are the conclusions that are
+ * load-bearing and most often missed, so they are stated as instructions rather
+ * than left to be derived correctly under time pressure.
+ */
+function renderWriteRules(model: DocumentationModel, out: string[]): void {
+  const { unknownFields } = model.generation;
+  const identities = model.entities.map(
+    (entity) => `${entity.name}.${entity.identity.field} (${entity.identity.style})`,
+  );
+
+  out.push('## Rules For Generated Code');
+  out.push(
+    record([
+      'undeclared fields',
+      `policy=${unknownFields}`,
+      `a body key no field declares is ${describeUnknownFields(unknownFields)}`,
+    ]),
+  );
+  if (unknownFields === 'reject') {
+    // The consequence, spelled out: this is the policy under which an otherwise
+    // plausible request fails outright rather than degrading quietly.
+    out.push(
+      'Note: do not add properties absent from Fields. One extra property fails the whole request with 422.',
+    );
+  }
+  if (identities.length > 0) {
+    out.push(
+      record([
+        'identity',
+        identities.join(', '),
+        'server-assigned on POST; omit it from create bodies',
+      ]),
+    );
+  }
+  out.push(record(['PUT', 'replaces the whole record', 'omitted optional fields are cleared']));
+  out.push(record(['PATCH', 'merges', 'only the keys sent are validated and changed']));
+  out.push(record(['enums', 'send a listed value verbatim', 'case-sensitive']));
+  out.push(record(['dates', 'ISO-8601 strings', 'not epoch numbers, not Date objects']));
+  out.push(
+    'Note: do not invent endpoints, fields, or enum values. This document is the complete contract; anything absent from it does not exist.',
+  );
+  out.push(
+    'Note: this is a mock API. Records persist until the project is regenerated; it is not durable storage.',
+  );
+  out.push('');
 }
 
 /**
@@ -310,11 +480,25 @@ export function renderAiContext(model: DocumentationModel, options: AiContextOpt
   out.push(scalar('Validators', generation.validators.join(',') || 'none'));
   out.push(scalar('Types', generation.types.join(',') || 'none'));
   out.push(scalar('Mock Records Per Entity', generation.mockRecords));
+  out.push(scalar('Undeclared Fields On Write', generation.unknownFields));
   // The shared vocabulary, not a copy of it: a fifth query feature added to the
   // IPS must appear here without an edit, and a re-declared list would drop it
   // silently.
   const enabled = QUERY_FEATURES.filter((feature) => generation.features[feature]);
   out.push(scalar('Query Features', enabled.join(',') || 'none'));
+  out.push('');
+
+  /*
+   * The protocol sections go last, after the project has been described.
+   *
+   * Order matters for the consumer this is written for: an assistant reading
+   * top to bottom should learn what exists before it learns the rules for
+   * calling it, and the closing "do not invent anything" instruction lands
+   * better as the last thing read than as a preamble already scrolled past.
+   */
+  renderResponseShapes(out);
+  renderQueryGrammar(model, out);
+  renderWriteRules(model, out);
 
   return `${out.join('\n').trimEnd()}\n`;
 }
