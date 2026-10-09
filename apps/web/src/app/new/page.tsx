@@ -16,6 +16,17 @@ import { Button, Card, Icon } from '@instantmockapi/ui';
 
 const CHOICES = [
   {
+    href: '/new/ai',
+    flow: 'ai' as const,
+    title: 'Describe it',
+    tagline: 'Natural-language project creation',
+    points: [
+      'Describe the API you want in plain English',
+      'The app proposes entities, fields and relations',
+      'The generated blueprint still passes through the same validation pipeline',
+    ],
+  },
+  {
     href: '/new/project',
     flow: 'project' as const,
     title: 'Project API',

@@ -41,6 +41,7 @@ import { toProjectDetail, toProjectSummary, toProjectSummaryWithCounts } from '.
 import { parseInputSource } from '../input-parsing.js';
 import { assertProjectQuota, createProjectRecord } from '../project-create.js';
 import { validateGenerationConfig } from '../generation-config.js';
+import { structuredAiProjectFromPrompt } from '../ai-blueprint.js';
 import { buildProjectMetrics } from '../project-metrics-service.js';
 import { recordVersion } from '../version-service.js';
 import {
@@ -247,6 +248,69 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
       });
 
       return reply.status(201).send(toProjectDetail(project));
+    },
+  );
+
+  app.post(
+    '/projects/ai',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['prompt'],
+          additionalProperties: false,
+          properties: {
+            prompt: { type: 'string', minLength: 1, maxLength: 1000 },
+            name: { type: 'string', minLength: 1, maxLength: 120 },
+            kind: { type: 'string', enum: [...PROJECT_KINDS] },
+            slug: { type: 'string', pattern: SLUG_PATTERN.source, maxLength: SLUG_MAX_LENGTH },
+            description: { type: 'string', maxLength: 500 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const authUser = request.authUser;
+      const body = request.body as {
+        prompt: string;
+        name?: string;
+        kind?: ProjectKind;
+        slug?: string;
+        description?: string;
+      };
+
+      await assertProjectQuota(authUser?.sub, authUser?.plan);
+
+      const blueprint = await structuredAiProjectFromPrompt(body.prompt);
+      const created = await createProjectRecord({
+        ownerId: authUser?.sub,
+        prepare: (projectId) => ({
+          name: body.name ?? blueprint.name,
+          kind: body.kind ?? blueprint.kind ?? 'project',
+          slug: body.slug ?? null,
+          description: body.description ?? blueprint.description ?? body.prompt,
+          inputSource: {
+            type: 'builder',
+            raw: JSON.stringify({
+              entities: blueprint.entities,
+              generationConfig: blueprint.generationConfig,
+            }),
+          },
+          ips: parseInputSource(
+            projectId,
+            body.name ?? blueprint.name,
+            'builder',
+            JSON.stringify({
+              entities: blueprint.entities,
+              generationConfig: blueprint.generationConfig,
+            }),
+            config,
+            body.kind ?? blueprint.kind ?? 'project',
+          ),
+        }),
+      });
+
+      return reply.status(201).send(toProjectDetail(created));
     },
   );
 
