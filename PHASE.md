@@ -119,3 +119,43 @@ MongoDB is the source of truth. Redis is disposable infrastructure.
 See INFRASTRUCTURE.md for the whole of it: the cold-start sequence, where
 artifacts actually live, the connection lifecycle, the per-request cost of a
 hosted API, what the request log records, and the scaling path.
+│
+▼
+PHASE 7
+Architecture becomes
+USER
+│
+▼
+Natural Language Input
+│
+┌─────────────┴─────────────┐
+│ │
+English Gujarati
+Hindi Hinglish
+Spanish etc.
+│ │
+└─────────────┬─────────────┘
+▼
+Multilingual AI
+│
+▼
+Structured Blueprint
+│
+▼
+Deterministic Validation
+│
+▼
+Canonical Project Definition
+│
+┌────────────┴────────────┐
+▼ ▼
+Version System Generator
+│
+▼
+Mock Data
+│
+▼
+Seed Validation
+│
+▼
+Hosted API

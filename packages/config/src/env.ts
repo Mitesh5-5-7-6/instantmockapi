@@ -112,6 +112,9 @@ export interface EnvConfig {
   /** Resend API key. Empty ⇒ email is printed to the log instead of sent. */
   readonly resendApiKey: string;
 
+  /** Gemini API key used by the AI project generator. Optional unless the AI workflow is enabled. */
+  readonly geminiApiKey: string;
+
   /** From address for transactional mail, e.g. `InstantMockAPI <no-reply@…>`. */
   readonly emailFrom: string;
 
@@ -267,6 +270,7 @@ export function loadEnvConfig(): EnvConfig {
     webOrigin,
     appUrl: envStr('APP_URL', webOrigin),
     resendApiKey: envStr('RESEND_API_KEY', ''),
+    geminiApiKey: envStr('GEMINI_API_KEY', envStr('GOOGLE_API_KEY', '')),
     emailFrom: envStr('EMAIL_FROM', 'InstantMockAPI <no-reply@instantmockapi.dev>'),
     googleClientId: envStr('GOOGLE_CLIENT_ID', ''),
     googleClientSecret: envStr('GOOGLE_CLIENT_SECRET', ''),

@@ -469,6 +469,20 @@ export function useCreateProject() {
   });
 }
 
+export function useCreateAiProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      prompt: string;
+      name?: string;
+      kind?: 'project' | 'single' | 'auth';
+      slug?: string;
+      description?: string;
+    }) => apiFetch<ProjectDetail>('/v1/projects/ai', { method: 'POST', body: input }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
+  });
+}
+
 export function useGenerate(projectId: string) {
   const queryClient = useQueryClient();
   const invalidateScope = useProjectScopeInvalidator(projectId);
