@@ -94,6 +94,9 @@ function makeRelation(
 function inferProjectName(prompt: string): string {
   const lower = prompt.toLowerCase();
 
+  if (/(school|university|education|student|teacher|classroom)/i.test(lower)) {
+    return 'School Management API';
+  }
   if (/(hospital|clinic|medical)/i.test(lower)) return 'Hospital API';
   if (/(e-?commerce|shop|store|retail|checkout|orders?)/i.test(lower)) return 'E-commerce API';
   if (/(blog|post|article|news)/i.test(lower)) return 'Blog API';
@@ -120,6 +123,19 @@ function inferProjectName(prompt: string): string {
 function inferEntityPlan(prompt: string): string[] {
   const lower = prompt.toLowerCase();
 
+  if (/(school|university|education|student|teacher|classroom)/i.test(lower)) {
+    return [
+      'Student',
+      'Teacher',
+      'Class',
+      'Subject',
+      'Enrollment',
+      'Attendance',
+      'Examination',
+      'Grade',
+      'Guardian',
+    ];
+  }
   if (/(hospital|clinic|medical)/i.test(lower)) {
     return ['Patient', 'Doctor', 'Department', 'Appointment'];
   }
@@ -242,6 +258,74 @@ function entityFields(name: string): Field[] {
       makeField('quantity', 'integer', true),
       makeField('location', 'string', false),
     ],
+    Student: [
+      baseId,
+      makeField('firstName', 'string', true),
+      makeField('lastName', 'string', true),
+      makeField('email', 'string', true, { validation: { email: true } }),
+      makeField('dateOfBirth', 'date', true),
+      makeField('guardianId', 'uuid', false),
+    ],
+    Teacher: [
+      baseId,
+      makeField('firstName', 'string', true),
+      makeField('lastName', 'string', true),
+      makeField('email', 'string', true, { validation: { email: true } }),
+      makeField('department', 'string', false),
+    ],
+    Class: [
+      baseId,
+      makeField('name', 'string', true),
+      makeField('gradeLevel', 'integer', true),
+      makeField('teacherId', 'uuid', true),
+      makeField('academicYear', 'string', true),
+    ],
+    Subject: [
+      baseId,
+      makeField('name', 'string', true),
+      makeField('code', 'string', true),
+      makeField('description', 'string', false),
+    ],
+    Enrollment: [
+      baseId,
+      makeField('studentId', 'uuid', true),
+      makeField('classId', 'uuid', true),
+      makeField('enrolledAt', 'date', true),
+      makeField('status', 'string', true, {
+        validation: { enum: ['active', 'completed', 'withdrawn'] },
+      }),
+    ],
+    Attendance: [
+      baseId,
+      makeField('studentId', 'uuid', true),
+      makeField('classId', 'uuid', true),
+      makeField('date', 'date', true),
+      makeField('status', 'string', true, {
+        validation: { enum: ['present', 'absent', 'late', 'excused'] },
+      }),
+    ],
+    Examination: [
+      baseId,
+      makeField('classId', 'uuid', true),
+      makeField('subjectId', 'uuid', true),
+      makeField('name', 'string', true),
+      makeField('scheduledAt', 'date', true),
+      makeField('maximumScore', 'decimal', true),
+    ],
+    Grade: [
+      baseId,
+      makeField('studentId', 'uuid', true),
+      makeField('examinationId', 'uuid', true),
+      makeField('score', 'decimal', true),
+      makeField('gradedAt', 'date', false),
+    ],
+    Guardian: [
+      baseId,
+      makeField('name', 'string', true),
+      makeField('email', 'string', true, { validation: { email: true } }),
+      makeField('phone', 'string', false),
+      makeField('relationship', 'string', false),
+    ],
   };
 
   return (
@@ -255,6 +339,44 @@ function entityFields(name: string): Field[] {
 
 function entityRelations(entityName: string, targetNames: string[]): Relation[] {
   const relations: Relation[] = [];
+
+  if (entityName === 'Student') {
+    relations.push(makeRelation('guardian', 'belongsTo', 'Guardian', 'guardianId', 'id'));
+    relations.push(makeRelation('enrollments', 'hasMany', 'Enrollment', 'id', 'studentId'));
+    relations.push(makeRelation('attendance', 'hasMany', 'Attendance', 'id', 'studentId'));
+    relations.push(makeRelation('grades', 'hasMany', 'Grade', 'id', 'studentId'));
+  }
+  if (entityName === 'Teacher') {
+    relations.push(makeRelation('classes', 'hasMany', 'Class', 'id', 'teacherId'));
+  }
+  if (entityName === 'Class') {
+    relations.push(makeRelation('teacher', 'belongsTo', 'Teacher', 'teacherId', 'id', true));
+    relations.push(makeRelation('enrollments', 'hasMany', 'Enrollment', 'id', 'classId'));
+    relations.push(makeRelation('attendance', 'hasMany', 'Attendance', 'id', 'classId'));
+    relations.push(makeRelation('examinations', 'hasMany', 'Examination', 'id', 'classId'));
+  }
+  if (entityName === 'Enrollment') {
+    relations.push(makeRelation('student', 'belongsTo', 'Student', 'studentId', 'id', true));
+    relations.push(makeRelation('class', 'belongsTo', 'Class', 'classId', 'id', true));
+  }
+  if (entityName === 'Attendance') {
+    relations.push(makeRelation('student', 'belongsTo', 'Student', 'studentId', 'id', true));
+    relations.push(makeRelation('class', 'belongsTo', 'Class', 'classId', 'id', true));
+  }
+  if (entityName === 'Examination') {
+    relations.push(makeRelation('class', 'belongsTo', 'Class', 'classId', 'id', true));
+    relations.push(makeRelation('subject', 'belongsTo', 'Subject', 'subjectId', 'id', true));
+    relations.push(makeRelation('grades', 'hasMany', 'Grade', 'id', 'examinationId'));
+  }
+  if (entityName === 'Grade') {
+    relations.push(makeRelation('student', 'belongsTo', 'Student', 'studentId', 'id', true));
+    relations.push(
+      makeRelation('examination', 'belongsTo', 'Examination', 'examinationId', 'id', true),
+    );
+  }
+  if (entityName === 'Guardian') {
+    relations.push(makeRelation('students', 'hasMany', 'Student', 'id', 'guardianId'));
+  }
 
   if (entityName === 'Patient') {
     relations.push(
@@ -401,7 +523,7 @@ function normalizeEntity(entity: unknown): Entity | null {
 
 function normalizeGeneratedProject(raw: unknown, fallback: AiBlueprintProject): AiBlueprintProject {
   if (!raw || typeof raw !== 'object') {
-    return fallback;
+    throw new Error('Gemini returned a blueprint that is not an object');
   }
 
   const candidate = raw as Partial<AiBlueprintProject> & {
@@ -410,9 +532,14 @@ function normalizeGeneratedProject(raw: unknown, fallback: AiBlueprintProject): 
     kind?: string;
   };
 
-  const normalizedEntities = Array.isArray(candidate.entities)
-    ? candidate.entities.map(normalizeEntity).filter((entity): entity is Entity => entity !== null)
-    : fallback.entities;
+  if (!Array.isArray(candidate.entities) || candidate.entities.length === 0) {
+    throw new Error('Gemini returned a blueprint without entities');
+  }
+
+  const normalizedEntities = candidate.entities.map(normalizeEntity);
+  if (normalizedEntities.some((entity) => entity === null)) {
+    throw new Error('Gemini returned an invalid entity in the blueprint');
+  }
 
   const normalizedGenerationConfig: GenerationConfig = {
     ...DEFAULT_GENERATION_CONFIG,
@@ -439,7 +566,7 @@ function normalizeGeneratedProject(raw: unknown, fallback: AiBlueprintProject): 
       typeof candidate.description === 'string' && candidate.description.trim().length > 0
         ? candidate.description
         : fallback.description,
-    entities: normalizedEntities.length > 0 ? normalizedEntities : fallback.entities,
+    entities: normalizedEntities as Entity[],
     generationConfig: normalizedGenerationConfig,
   };
 }
@@ -457,11 +584,18 @@ class GeminiProvider implements LLMProvider {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          systemInstruction: {
+            parts: [
+              {
+                text: `You are InstantMockAPI's API architect. Turn the user's request into a complete, domain-specific API blueprint. First identify the domain, actors, business objects, workflows, and relationships; use those to design the schema. Never default to User/Post/Comment/Tag unless the request is genuinely for a blog. For school and university systems, consider students, teachers, classes, subjects, enrollments, attendance, examinations, grades, and guardians, choosing only what fits. Apply the same domain reasoning to healthcare, commerce, finance, HR, real estate, travel, SaaS, and custom domains. Use singular entity names, conventional English field names, supported field types (uuid, string, integer, decimal, boolean, date), appropriate requiredness and validation, and explicit foreign-key fields for every relation. Relations must reference existing entities and fields, use compatible types, and have coherent requiredness. Use only the supplied blueprint shape and supported generation settings; the platform derives endpoints and IDs. Do not add credentials, secrets, roles, or authentication unless explicitly requested. Do not invent unsupported behavior. Return exactly one JSON object, no markdown or explanation. If information is ambiguous, make low-risk conventional assumptions. The application performs canonical validation; do not claim validation has passed.`,
+              },
+            ],
+          },
           contents: [
             {
               parts: [
                 {
-                  text: `You are generating a structured project blueprint for an API builder. Return only valid JSON, with no markdown fences. The object should match this shape: { "kind":"project", "name":"Project Name", "description":"...", "entities":[{ "name":"EntityName", "fields":[{ "name":"id","type":"uuid","required":true,"default":null,"children":[],"validation":{},"meta":{"identity":true} }], "relations":[] }], "generationConfig":{"validators":["zod"],"types":["typescript"],"methods":["GET","POST","PATCH","DELETE"],"mockRecords":20,"features":{"search":true,"filter":true,"sort":true,"include":true},"unknownFields":"reject"} }\n\nUser request: ${input.prompt}`,
+                  text: `Create the blueprint for this project request. Follow the required JSON shape: { "kind":"project", "name":"Project Name", "description":"...", "entities":[{ "name":"EntityName", "description":"...", "fields":[{ "name":"id","type":"uuid","required":true,"default":null,"children":[],"validation":{},"meta":{"identity":true} }], "relations":[{ "name":"relationName", "kind":"belongsTo|hasMany|hasOne", "target":"ExistingEntity", "localField":"existingField", "foreignField":"existingField", "required":false,"onDelete":"restrict|cascade" }] }], "generationConfig":{"validators":["zod"],"types":["typescript"],"methods":["GET","POST","PATCH","DELETE"],"mockRecords":20,"features":{"search":true,"filter":true,"sort":true,"include":true},"unknownFields":"reject"} }. Return only properties supported by this shape. User request: ${input.prompt}`,
                 },
               ],
             },
@@ -502,7 +636,12 @@ export async function structuredAiProjectFromPrompt(prompt: string): Promise<AiB
       prompt: cleanedPrompt || 'Create a simple API.',
     });
     return normalizeGeneratedProject(raw, fallback);
-  } catch {
-    return fallback;
+  } catch (error) {
+    throw new Error(
+      'AI blueprint generation failed. Check the Gemini configuration and try again.',
+      {
+        cause: error,
+      },
+    );
   }
 }

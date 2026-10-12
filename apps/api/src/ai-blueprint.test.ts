@@ -29,6 +29,25 @@ describe('generateAiBlueprint', () => {
     ).toBe(true);
   });
 
+  it('creates a school-specific model instead of the generic blog model', () => {
+    const project = generateAiBlueprint('Make School Management System API schema');
+    const names = project.entities.map((entity) => entity.name);
+
+    expect(project.name).toBe('School Management API');
+    expect(names).toContain('Student');
+    expect(names).toContain('Teacher');
+    expect(names).toContain('Enrollment');
+    expect(names).toContain('Attendance');
+    expect(names).not.toContain('Post');
+    expect(names).not.toContain('Comment');
+    expect(project.entities.find((entity) => entity.name === 'Enrollment')?.relations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ target: 'Student', localField: 'studentId' }),
+        expect.objectContaining({ target: 'Class', localField: 'classId' }),
+      ]),
+    );
+  });
+
   it('falls back to a generic model when the prompt is vague', () => {
     const project = generateAiBlueprint('Create a simple API.');
 
@@ -112,5 +131,42 @@ describe('generateAiBlueprint', () => {
     expect(project.name).toBe('Hospital API');
     expect(project.entities[0]?.name).toBe('Patient');
     expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    const requestBody = JSON.parse(String(mockFetch.mock.calls[0]?.[1]?.body)) as {
+      systemInstruction?: { parts?: Array<{ text?: string }> };
+      contents?: Array<{ parts?: Array<{ text?: string }> }>;
+    };
+    expect(requestBody.systemInstruction?.parts?.[0]?.text).toContain(
+      'Never default to User/Post/Comment/Tag unless the request is genuinely for a blog',
+    );
+    expect(requestBody.contents?.[0]?.parts?.[0]?.text).toContain(
+      'Create a hospital management API with patients, doctors and appointments.',
+    );
+  });
+
+  it('does not silently use the local fallback when Gemini is configured but fails', async () => {
+    process.env.GEMINI_API_KEY = 'test-key';
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network unavailable')));
+
+    await expect(structuredAiProjectFromPrompt('Create a school management API')).rejects.toThrow(
+      'AI blueprint generation failed',
+    );
+  });
+
+  it('rejects a successful Gemini response that has no entities', async () => {
+    process.env.GEMINI_API_KEY = 'test-key';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ text: '{"kind":"project"}' }] } }],
+        }),
+      }),
+    );
+
+    await expect(structuredAiProjectFromPrompt('Create a school management API')).rejects.toThrow(
+      'AI blueprint generation failed',
+    );
   });
 });
