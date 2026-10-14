@@ -90,11 +90,24 @@ export class GeminiProvider implements LLMProvider {
     if (!response.ok) {
       // The body is deliberately not read into the message: it can echo the
       // request, and this message is stored on the proposal.
-      const kind = response.status === 429 || response.status >= 500 ? 'transient' : 'config';
+      const kind =
+        response.status === 408 || response.status === 429 || response.status >= 500
+          ? 'transient'
+          : 'config';
       throw new ProviderError(kind, `The AI provider responded with HTTP ${response.status}`);
     }
 
-    const payload = (await response.json()) as GeminiResponse;
+    // Callers rely on generate() throwing only ProviderError. A malformed or
+    // truncated 200 body (proxy HTML page, timeout mid-read) is an upstream
+    // hiccup worth retrying, so it is classified transient.
+    let payload: GeminiResponse;
+    try {
+      payload = (await response.json()) as GeminiResponse;
+    } catch (cause) {
+      throw new ProviderError('transient', 'The AI provider returned an unreadable response', {
+        cause,
+      });
+    }
     if (payload.promptFeedback?.blockReason) {
       throw new ProviderError('blocked', 'The request was blocked by the AI provider');
     }

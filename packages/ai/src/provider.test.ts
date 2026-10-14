@@ -37,7 +37,7 @@ describe('GeminiProvider', () => {
     expect((fetchImpl.mock.calls[0]![1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
   });
 
-  it.each([429, 500, 503])('treats HTTP %i as transient', async (status) => {
+  it.each([408, 429, 500, 503])('treats HTTP %i as transient', async (status) => {
     await expect(provider(respond(status, {})).generate(request)).rejects.toMatchObject({
       kind: 'transient',
     });
@@ -76,13 +76,40 @@ describe('GeminiProvider', () => {
     await expect(provider(timeout).generate(request)).rejects.toMatchObject({ kind: 'transient' });
   });
 
-  it('treats a prompt block or a safety finish as blocked', async () => {
+  it('treats a prompt block as blocked', async () => {
     await expect(
       provider(respond(200, { promptFeedback: { blockReason: 'SAFETY' } })).generate(request),
     ).rejects.toMatchObject({ kind: 'blocked' });
-    await expect(
-      provider(respond(200, { candidates: [{ finishReason: 'SAFETY' }] })).generate(request),
-    ).rejects.toMatchObject({ kind: 'blocked' });
+  });
+
+  it.each(['SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII'])(
+    'treats finish reason %s as blocked',
+    async (finishReason) => {
+      await expect(
+        provider(respond(200, { candidates: [{ finishReason }] })).generate(request),
+      ).rejects.toMatchObject({ kind: 'blocked' });
+    },
+  );
+
+  it('treats a 200 with a non-JSON body as a transient ProviderError', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response('<html>proxy</html>', { status: 200 }));
+    const error = await provider(fetchImpl)
+      .generate(request)
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error.kind).toBe('transient');
+  });
+
+  it('treats a timeout while reading a 200 body as transient', async () => {
+    const res = new Response('{}', { status: 200 });
+    vi.spyOn(res, 'json').mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+    const error = await provider(vi.fn().mockResolvedValue(res))
+      .generate(request)
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error.kind).toBe('transient');
   });
 
   it('returns an empty string for an empty candidate, leaving it to the repair loop', async () => {
