@@ -63,29 +63,40 @@ OUTPUT
 Exactly one JSON object, no markdown, in this shape:
 {"detectedLanguage":"en","domain":"short english label","recommendedKind":"project","kindRationale":"...","name":"English API Name","description":"...","entities":[{"name":"EntityName","description":"...","fields":[{"name":"id","type":"uuid","required":true,"default":null,"children":[],"validation":{},"meta":{"identity":true}}],"relations":[{"name":"relationName","kind":"belongsTo","target":"OtherEntity","required":true,"onDelete":"restrict"}]}],"generationConfig":{"methods":["GET","POST","PATCH","DELETE"],"mockRecords":20},"authRecommendation":{"recommended":false,"reason":"..."},"assumptions":[],"questions":[]}`;
 
-const WRAPPER_TAGS = /<\s*\/?\s*(user_request|reference_blueprints|hints|response_language)\s*>/gi;
-
-/** Remove anything that could open or close one of our blocks from user-supplied text. */
-function stripTags(text: string): string {
-  return text.replace(WRAPPER_TAGS, '');
+/**
+ * Replace every angle bracket (ASCII and fullwidth) in user-supplied text.
+ * Deleting tags is unsafe: removal can splice the surrounding text into a new
+ * tag ("</user_re</user_request>quest>"). Substitution cannot create one.
+ */
+function neutralise(text: string): string {
+  return text.replace(/[<＜]/g, '‹').replace(/[>＞]/g, '›');
 }
 
+const LANGUAGE_CODE = /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/;
+
 export function buildUserTurn(input: ProposeInput, examples: readonly unknown[] = []): string {
-  const parts = [`<response_language>${input.responseLanguage ?? 'auto'}</response_language>`];
+  // Interpolated unescaped, so only a well-formed language code may reach the tag.
+  const language =
+    input.responseLanguage && LANGUAGE_CODE.test(input.responseLanguage)
+      ? input.responseLanguage
+      : 'auto';
+  const parts = [`<response_language>${language}</response_language>`];
 
   const hints: string[] = [];
-  if (input.hints.name) hints.push(`preferred name: ${stripTags(input.hints.name)}`);
-  if (input.hints.description) hints.push(`description: ${stripTags(input.hints.description)}`);
-  if (input.hints.kind) hints.push(`requested API type: ${input.hints.kind}`);
+  if (input.hints.name) hints.push(`preferred name: ${neutralise(input.hints.name)}`);
+  if (input.hints.description) hints.push(`description: ${neutralise(input.hints.description)}`);
+  if (input.hints.kind === 'project' || input.hints.kind === 'single') {
+    hints.push(`requested API type: ${input.hints.kind}`);
+  }
   if (hints.length > 0) parts.push(`<hints>\n${hints.join('\n')}\n</hints>`);
 
   if (examples.length > 0) {
     parts.push(
-      `<reference_blueprints>\n${stripTags(JSON.stringify(examples))}\n</reference_blueprints>`,
+      `<reference_blueprints>\n${neutralise(JSON.stringify(examples))}\n</reference_blueprints>`,
     );
   }
 
-  parts.push(`<user_request>\n${stripTags(input.prompt)}\n</user_request>`);
+  parts.push(`<user_request>\n${neutralise(input.prompt)}\n</user_request>`);
   return parts.join('\n\n');
 }
 
