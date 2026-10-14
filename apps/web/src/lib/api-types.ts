@@ -765,7 +765,21 @@ export interface DraftCommitResult {
 }
 
 export type AiProposalStatus =
-  'generating' | 'ready' | 'failed' | 'cancelled' | 'committing' | 'committed';
+  'generating' | 'ready' | 'failed' | 'cancelled' | 'committing' | 'committed' | 'superseded';
+
+export interface AiDraftView {
+  revision: number;
+  kind: 'project' | 'single';
+  name: string;
+  description: string;
+  entities: Array<
+    Record<string, unknown> & { name: string; authentication?: EntityAuth; description?: string }
+  >;
+  generationConfig: { methods: string[]; mockRecords: number };
+  authAnswered: boolean;
+  authentication: AuthConfigView | null;
+  savedAt: string;
+}
 
 export interface AiProposalResult {
   detectedLanguage: string;
@@ -774,12 +788,14 @@ export interface AiProposalResult {
   kindRationale: string;
   name: string;
   description: string;
-  entities: Array<{
-    name: string;
-    description?: string;
-    fields: Array<{ name: string; type: string }>;
-    relations?: Array<{ name: string; kind: string; target: string }>;
-  }>;
+  entities: Array<
+    Record<string, unknown> & {
+      name: string;
+      description?: string;
+      fields: Array<{ name: string; type: string }>;
+      relations?: Array<{ name: string; kind: string; target: string }>;
+    }
+  >;
   generationConfig: GenerationConfig;
   authRecommendation: { recommended: boolean; reason: string };
   assumptions: string[];
@@ -798,6 +814,11 @@ export interface AiProposalView {
   geminiCalls: number;
   durationMs: number | null;
   projectId: string | null;
+  draft: AiDraftView | null;
+  translation: { status: 'pending' | 'failed'; language: string; message?: string } | null;
+  parentId: string | null;
+  childId: string | null;
+  clarification: { answers?: string; instruction?: string } | null;
   createdAt: string;
   updatedAt: string;
 }

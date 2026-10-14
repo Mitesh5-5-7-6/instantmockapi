@@ -33,28 +33,16 @@ import {
 import { useCreateProject } from '../../../lib/hooks';
 import { apiFetch } from '../../../lib/api-client';
 import type { AuthMode, GenerationConfig } from '../../../lib/api-types';
-import {
-  builderFieldToIPS,
-  hasEmptyEnum,
-  newEntity,
-  type BuilderEntity,
-  type BuilderField,
-} from '../../../lib/builder';
-import {
-  builderRelationToIPS,
-  pruneForGeneration,
-  relationTargets,
-  relationsPointingAt,
-  validateRelations,
-} from '../../../lib/relations';
+import { hasEmptyEnum, newEntity, type BuilderEntity } from '../../../lib/builder';
+import { relationTargets, relationsPointingAt, validateRelations } from '../../../lib/relations';
 import { EntityCard } from '../../../components/builder/entity-card';
-import { PathIndexBuilder } from '../../../lib/error-paths';
+import { serializeBuilder } from '../../../lib/builder-payload';
 import { normalizeError } from '../../../lib/errors';
 import { notifyFailure } from '../../../lib/toast';
 import { useAction } from '../../../lib/use-action';
 import { ErDiagram, ErLegend } from '../../../components/er-diagram';
 import { AuthStep } from '../../../components/builder/auth-step';
-import { PROJECT_CHOICES, configForChoice } from '../../../lib/auth-onboarding';
+import { PROJECT_CHOICES } from '../../../lib/auth-onboarding';
 import {
   ALL_FEATURES,
   GenerationConfigFields,
@@ -191,68 +179,13 @@ export default function NewProjectPage() {
    * is not declared, so relations into excluded entities go with them.
    */
   const { inputSource, pathIndex } = useMemo(() => {
-    const pruned = pruneForGeneration(entities);
-    const paths = new PathIndexBuilder();
-
-    const raw = pruned.map((entity, entityPosition) =>
-      paths.at('entities', entityPosition, () => {
-        paths.claim(entity.id);
-        const named = entity.fields.filter((field) => field.name.trim());
-        return {
-          name: entity.name.trim(),
-          identity: { field: 'id', style: entity.identityStyle },
-          // Positions claimed while the array is built. Pruning and the
-          // name filter both shift indices, so nothing about the finished
-          // payload reveals which form row a given index came from.
-          fields: named.map((field, offset) =>
-            paths.at('fields', offset, () => {
-              paths.claim(field.id);
-              claimChildPaths(paths, field);
-              return builderFieldToIPS(field);
-            }),
-          ),
-          relations: entity.relations.map((relation, offset) =>
-            paths.at('relations', offset, () => {
-              paths.claim(relation.id);
-              return builderRelationToIPS(relation);
-            }),
-          ),
-        };
-      }),
-    );
-
-    /*
-     * The wizard's authentication answer, stamped onto the entities.
-     *
-     * Stamped here rather than in the payload's `authentication` block alone,
-     * because `COMBINATION` is resolved per entity — and only the pruned list
-     * is sent, so an excluded entity must not carry a stamp for an entity that
-     * will not exist.
-     */
-    const authentication = configForChoice(authMode);
-    const withAuth =
-      authMode === 'COMBINATION'
-        ? raw.map((entity) => ({
-            ...entity,
-            authentication: protectedNames.includes(entity.name)
-              ? ('PROTECTED' as const)
-              : ('PUBLIC' as const),
-          }))
-        : raw;
-
-    return {
-      inputSource: {
-        type: 'builder',
-        raw: {
-          entities: withAuth,
-          generationConfig: config,
-          // Absent when the user declined, which is the same document a
-          // pre-Phase-3 project carries — see `configForChoice`.
-          ...(authentication === null ? {} : { authentication }),
-        },
-      },
-      pathIndex: paths.build(),
-    };
+    const { raw, pathIndex: index } = serializeBuilder({
+      entities,
+      generationConfig: config,
+      authMode,
+      protectedNames,
+    });
+    return { inputSource: { type: 'builder', raw }, pathIndex: index };
   }, [entities, config, authMode, protectedNames]);
 
   async function generate(): Promise<void> {
@@ -507,21 +440,4 @@ export default function NewProjectPage() {
       {error && step < 3 ? <FormError title={error} /> : null}
     </FlowScope>
   );
-}
-
-/**
- * Claim positions for a field's nested children, recursively.
- *
- * `builderFieldToIPS` emits `children` for object and array fields, so a server
- * path can be several levels deep — `entities[0].fields[2].children[0].name`.
- * Without this those resolve only as far as their parent.
- */
-function claimChildPaths(paths: PathIndexBuilder, field: BuilderField): void {
-  const named = field.children.filter((child) => child.name.trim());
-  named.forEach((child, offset) => {
-    paths.at('children', offset, () => {
-      paths.claim(child.id);
-      claimChildPaths(paths, child);
-    });
-  });
 }
