@@ -369,6 +369,7 @@ function AiReview({ id }: { id: string }) {
             onClose={() => setRegenerating(false)}
             proposal={proposal}
             current={state}
+            parentRevision={() => saver.savedRevision()}
             onAdopted={(child) => router.replace(`/new/ai/${child}`)}
           />
         ) : null}

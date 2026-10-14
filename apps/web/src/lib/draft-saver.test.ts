@@ -97,6 +97,20 @@ describe('DraftSaver', () => {
     expect(t.calls[1]!.revision).toBe(5);
   });
 
+  it('reports the revision the server last stored, for adopt', async () => {
+    const t = setup();
+    t.saver.reset(4);
+    expect(t.saver.savedRevision()).toBe(4);
+    t.saver.edit('a');
+    vi.advanceTimersByTime(800);
+    await settle();
+    // Still in flight: the stored draft is the one at 4.
+    expect(t.saver.savedRevision()).toBe(4);
+    t.calls[0]!.done.resolve({ revision: 5 });
+    await settle();
+    expect(t.saver.savedRevision()).toBe(5);
+  });
+
   it('never runs two saves at once, and stays dirty for an edit made mid-flight', async () => {
     const t = setup();
     t.saver.reset(0);

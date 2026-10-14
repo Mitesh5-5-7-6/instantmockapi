@@ -23,12 +23,15 @@ export function RegenerateDialog({
   onClose,
   proposal,
   current,
+  parentRevision,
   onAdopted,
 }: {
   open: boolean;
   onClose: () => void;
   proposal: AiProposalView;
   current: ReviewState;
+  /** The saved revision of the parent draft that `current` is, read when Apply is pressed. */
+  parentRevision: () => number;
   onAdopted: (childId: string) => void;
 }) {
   const [answers, setAnswers] = useState(() =>
@@ -170,7 +173,11 @@ export function RegenerateDialog({
                 run(async () => {
                   const merged = { ...current, entities: mergeEntities(changes, choices) };
                   const { input } = draftInputFor(merged, child.result?.entities ?? []);
-                  await adopt.mutateAsync({ childId: child.id, draft: input });
+                  await adopt.mutateAsync({
+                    childId: child.id,
+                    draft: input,
+                    parentRevision: parentRevision(),
+                  });
                   adopted.current = true;
                   onAdopted(child.id);
                 })

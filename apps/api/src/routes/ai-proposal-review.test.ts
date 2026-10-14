@@ -318,18 +318,79 @@ describe('adopt', () => {
     const { parent, child } = await parentAndReadyChild();
     const res = await post(`/v1/ai/proposals/${child._id}/adopt`, alice.accessToken, {
       draft: draft(),
+      parentRevision: 0,
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().draft.revision).toBe(1);
     expect((await AiProposal.findById(parent._id).lean())!.status).toBe('superseded');
   });
 
-  it('refuses a second adopt', async () => {
+  it('adopts on top of the parent draft revision the dialog was built from', async () => {
+    const { parent, child } = await parentAndReadyChild();
+    await patch(`/v1/ai/proposals/${parent._id}/draft`, alice.accessToken, draftBody());
+    await patch(
+      `/v1/ai/proposals/${parent._id}/draft`,
+      alice.accessToken,
+      draftBody({ revision: 1 }),
+    );
+    const res = await post(`/v1/ai/proposals/${child._id}/adopt`, alice.accessToken, {
+      draft: draft(),
+      parentRevision: 2,
+    });
+    expect(res.statusCode).toBe(200);
+    expect((await AiProposal.findById(parent._id).lean())!.status).toBe('superseded');
+  });
+
+  it.each([
+    ['older than the saved draft', 1],
+    ['0 while the parent has a saved draft', 0],
+  ])(
+    'refuses a parentRevision %s, leaving the parent ready and the child undrafted',
+    async (_label, parentRevision) => {
+      const { parent, child } = await parentAndReadyChild();
+      // Another tab saved the parent twice since this dialog's "mine" was built.
+      await patch(`/v1/ai/proposals/${parent._id}/draft`, alice.accessToken, draftBody());
+      await patch(
+        `/v1/ai/proposals/${parent._id}/draft`,
+        alice.accessToken,
+        draftBody({ revision: 1 }),
+      );
+      const res = await post(`/v1/ai/proposals/${child._id}/adopt`, alice.accessToken, {
+        draft: draft(),
+        parentRevision,
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error.message).toBe(
+        'Your draft changed in another tab; review it before applying.',
+      );
+      const after = (await AiProposal.findById(parent._id).lean())!;
+      expect(after.status).toBe('ready');
+      expect(after.draft?.revision).toBe(2);
+      expect((await AiProposal.findById(child._id).lean())!.draft).toBeNull();
+    },
+  );
+
+  it('requires parentRevision', async () => {
     const { child } = await parentAndReadyChild();
-    await post(`/v1/ai/proposals/${child._id}/adopt`, alice.accessToken, { draft: draft() });
     expect(
       (await post(`/v1/ai/proposals/${child._id}/adopt`, alice.accessToken, { draft: draft() }))
         .statusCode,
+    ).toBe(400);
+  });
+
+  it('refuses a second adopt', async () => {
+    const { child } = await parentAndReadyChild();
+    await post(`/v1/ai/proposals/${child._id}/adopt`, alice.accessToken, {
+      draft: draft(),
+      parentRevision: 0,
+    });
+    expect(
+      (
+        await post(`/v1/ai/proposals/${child._id}/adopt`, alice.accessToken, {
+          draft: draft(),
+          parentRevision: 0,
+        })
+      ).statusCode,
     ).toBe(409);
   });
 
@@ -337,8 +398,12 @@ describe('adopt', () => {
     const { parent, child } = await parentAndReadyChild();
     await AiProposal.updateOne({ _id: parent._id }, { $set: { childId: null } });
     expect(
-      (await post(`/v1/ai/proposals/${child._id}/adopt`, alice.accessToken, { draft: draft() }))
-        .statusCode,
+      (
+        await post(`/v1/ai/proposals/${child._id}/adopt`, alice.accessToken, {
+          draft: draft(),
+          parentRevision: 0,
+        })
+      ).statusCode,
     ).toBe(409);
   });
 

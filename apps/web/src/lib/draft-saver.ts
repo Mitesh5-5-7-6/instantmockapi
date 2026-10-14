@@ -64,6 +64,14 @@ export class DraftSaver<I, R> {
     };
   }
 
+  /**
+   * The revision of the draft the server last stored for this form (0 for none).
+   * Adopt names it so a parent changed by another tab is never superseded unseen.
+   */
+  savedRevision(): number {
+    return this.revision;
+  }
+
   /** Start over from a freshly loaded form whose saved draft has `revision` (0 for none). */
   reset(revision: number): void {
     this.clearTimer();

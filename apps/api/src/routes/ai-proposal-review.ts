@@ -174,9 +174,12 @@ export const aiProposalReviewRoutes: FastifyPluginAsync<AiProposalReviewRouteOpt
         params: idParams,
         body: {
           type: 'object',
-          required: ['draft'],
+          required: ['draft', 'parentRevision'],
           additionalProperties: false,
-          properties: { draft: DRAFT_FIELDS_SCHEMA },
+          properties: {
+            draft: DRAFT_FIELDS_SCHEMA,
+            parentRevision: { type: 'integer', minimum: 0 },
+          },
         },
       },
     },
@@ -195,26 +198,51 @@ export const aiProposalReviewRoutes: FastifyPluginAsync<AiProposalReviewRouteOpt
           'The original proposal changed; this suggestion can no longer be adopted.',
         );
       }
-      const built = buildDraft((request.body as { draft: DraftInput }).draft, config);
+      const body = request.body as { draft: DraftInput; parentRevision: number };
+      const built = buildDraft(body.draft, config);
+      // The parent goes first, and only at the draft revision the merge was built
+      // from: if another tab saved the parent since, adopting would silently drop
+      // those edits, so the user is sent back to review them instead.
+      const superseded = await AiProposal.updateOne(
+        {
+          _id: parent._id,
+          status: 'ready',
+          childId: child._id,
+          ...(body.parentRevision === 0
+            ? { draft: null }
+            : { 'draft.revision': body.parentRevision }),
+        },
+        { $set: { status: 'superseded' } },
+      );
+      if (superseded.matchedCount === 0) {
+        const current = (await AiProposal.findById(parent._id)) ?? parent;
+        if (current.status !== 'ready' || String(current.childId) !== String(child._id)) {
+          return conflict(
+            reply,
+            current,
+            'The original proposal changed; this suggestion can no longer be adopted.',
+          );
+        }
+        return conflict(
+          reply,
+          current,
+          'Your draft changed in another tab; review it before applying.',
+        );
+      }
       const saved = await AiProposal.findOneAndUpdate(
         { _id: child._id, status: 'ready', draft: null },
         { $set: { draft: { ...built.draft, revision: 1, savedAt: new Date() } } },
         { new: true },
       );
       if (!saved) {
+        // Should be unreachable: only adopt writes a child's draft, and it supersedes
+        // the parent first, which a second adopt cannot do again. If it happens the
+        // parent is superseded without a drafted child, so it is logged loudly.
+        logger.error('AI adopt superseded the parent but could not save the child draft', {
+          proposalId: String(child._id),
+          parentId: String(parent._id),
+        });
         return conflict(reply, child, 'This suggestion was already adopted.');
-      }
-      // The child's draft stays saved even if this loses a race: nothing is lost.
-      const superseded = await AiProposal.updateOne(
-        { _id: parent._id, status: 'ready', childId: child._id },
-        { $set: { status: 'superseded' } },
-      );
-      if (superseded.matchedCount === 0) {
-        return conflict(
-          reply,
-          parent,
-          'The original proposal changed; this suggestion can no longer be adopted.',
-        );
       }
       return reply.send({ draft: saved.draft, issues: built.issues });
     },

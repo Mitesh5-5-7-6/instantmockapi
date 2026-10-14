@@ -584,10 +584,19 @@ export function useRegenerateAiProposal(proposalId: string) {
 export function useAdoptAiProposal() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ childId, draft }: { childId: string; draft: AiDraftInput }) =>
+    mutationFn: ({
+      childId,
+      draft,
+      parentRevision,
+    }: {
+      childId: string;
+      draft: AiDraftInput;
+      /** The parent draft revision the merged "mine" side was built from. */
+      parentRevision: number;
+    }) =>
       apiFetch<{ draft: AiDraftView; issues: { path: string; issue: string }[] }>(
         `/v1/ai/proposals/${childId}/adopt`,
-        { method: 'POST', body: { draft } },
+        { method: 'POST', body: { draft, parentRevision } },
       ),
     // The child's review page reads this cache entry; without the draft it would open on a stale view.
     onSuccess: (saved, { childId }) => {
