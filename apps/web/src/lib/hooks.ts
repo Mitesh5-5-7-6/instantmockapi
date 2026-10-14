@@ -578,12 +578,20 @@ export function useRegenerateAiProposal(proposalId: string) {
 }
 
 export function useAdoptAiProposal() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ childId, draft }: { childId: string; draft: AiDraftInput }) =>
       apiFetch<{ draft: AiDraftView; issues: { path: string; issue: string }[] }>(
         `/v1/ai/proposals/${childId}/adopt`,
         { method: 'POST', body: { draft } },
       ),
+    // The child's review page reads this cache entry; without the draft it would open on a stale view.
+    onSuccess: (saved, { childId }) => {
+      queryClient.setQueryData<AiProposalView>(['ai-proposal', childId], (old) =>
+        old ? { ...old, draft: saved.draft } : old,
+      );
+      void queryClient.invalidateQueries({ queryKey: ['ai-proposal', childId] });
+    },
   });
 }
 
