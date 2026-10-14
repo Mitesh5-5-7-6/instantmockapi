@@ -210,6 +210,27 @@ describe('reading proposals', () => {
     expect(body.error.message).toMatch(/timed out/i);
   });
 
+  it('settles a committing proposal stuck over 2 minutes as failed, and leaves a fresh one', async () => {
+    const stuck = await seed(alice.userId, { status: 'committing' });
+    const fresh = await seed(alice.userId, { status: 'committing' });
+    await AiProposal.collection.updateOne(
+      { _id: stuck._id },
+      { $set: { updatedAt: new Date(Date.now() - 3 * 60_000) } },
+    );
+    await AiProposal.collection.updateOne(
+      { _id: fresh._id },
+      { $set: { updatedAt: new Date(Date.now() - 30_000) } },
+    );
+    const body = (await get(`/v1/ai/proposals/${stuck._id}`, alice.accessToken)).json();
+    expect(body.status).toBe('failed');
+    expect(body.error.message).toBe(
+      'Project creation was interrupted. Check your projects list before trying again.',
+    );
+    expect((await get(`/v1/ai/proposals/${fresh._id}`, alice.accessToken)).json().status).toBe(
+      'committing',
+    );
+  });
+
   it('lists only the caller’s proposals, newest first', async () => {
     const older = await seed(alice.userId, { prompt: 'older' });
     await AiProposal.collection.updateOne(
