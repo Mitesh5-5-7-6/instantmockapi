@@ -14,9 +14,10 @@ import {
 } from '../../../lib/hooks';
 import { normalizeError } from '../../../lib/errors';
 import {
-  EXAMPLE_PROMPTS,
   RESPONSE_LANGUAGES,
   defaultResponseLanguage,
+  examplesFor,
+  responseLanguageFor,
   stageLabel,
 } from '../../../lib/ai-proposal';
 
@@ -25,12 +26,10 @@ export default function NewAiPage() {
   const queryClient = useQueryClient();
   const [prompt, setPrompt] = useState('');
   const [name, setName] = useState('');
-  const [language, setLanguage] = useState('en');
+  const [language, setLanguage] = useState(defaultResponseLanguage());
   const [proposalId, setProposalId] = useState<string | null>(null);
   const [kind, setKind] = useState<'project' | 'single' | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => setLanguage(defaultResponseLanguage(navigator.language)), []);
 
   const create = useCreateAiProposal();
   const retry = useRetryAiProposal();
@@ -38,6 +37,10 @@ export default function NewAiPage() {
   const commit = useCommitAiProposal();
   const history = useAiProposals();
   const proposal = useAiProposal(proposalId).data;
+
+  // An error belongs to the view it happened on (e.g. a 409 from cancel); drop it when the
+  // displayed proposal or its status changes.
+  useEffect(() => setError(null), [proposal?.id, proposal?.status]);
 
   async function run(action: () => Promise<unknown>) {
     setError(null);
@@ -53,7 +56,7 @@ export default function NewAiPage() {
       const view = await create.mutateAsync({
         prompt: prompt.trim(),
         name: name.trim() || undefined,
-        responseLanguage: language,
+        responseLanguage: responseLanguageFor(language),
       });
       setKind(null);
       setProposalId(view.id);
@@ -247,7 +250,7 @@ export default function NewAiPage() {
   }
 
   // ── Describe (also shown after cancel) ──────────────────────
-  const examples = EXAMPLE_PROMPTS[language] ?? EXAMPLE_PROMPTS['en'] ?? [];
+  const examples = examplesFor(language);
   return (
     <div className="ui-stack" style={{ gap: 'var(--space-6)', maxWidth: '760px' }}>
       <div className="ui-stack" style={{ gap: 'var(--space-2)' }}>

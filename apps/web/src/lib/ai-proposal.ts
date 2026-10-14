@@ -11,15 +11,18 @@ export function isSettled(status: string): boolean {
   return status !== 'generating' && status !== 'committing';
 }
 
-/** TanStack `refetchInterval`: quick at first, gentler once a generation is clearly slow. */
+/**
+ * TanStack `refetchInterval`: quick at first, gentler once a generation is clearly slow.
+ * Measured from `updatedAt`, not `createdAt`, so a retried proposal starts fast again.
+ */
 export function pollInterval(
-  view: { status: string; createdAt: string } | undefined,
+  view: { status: string; updatedAt: string } | undefined,
   now: number = Date.now(),
 ): number | false {
   if (!view || isSettled(view.status)) {
     return false;
   }
-  return now - Date.parse(view.createdAt) < FAST_WINDOW_MS ? FAST_POLL_MS : SLOW_POLL_MS;
+  return now - Date.parse(view.updatedAt) < FAST_WINDOW_MS ? FAST_POLL_MS : SLOW_POLL_MS;
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -35,6 +38,7 @@ export function stageLabel(stage: string | null): string {
 
 /** Languages the explanations can be written in. Identifiers are always English. */
 export const RESPONSE_LANGUAGES = [
+  { code: 'auto', label: 'Same as my prompt' },
   { code: 'en', label: 'English' },
   { code: 'hi', label: 'हिन्दी (Hindi)' },
   { code: 'gu', label: 'ગુજરાતી (Gujarati)' },
@@ -43,9 +47,24 @@ export const RESPONSE_LANGUAGES = [
   { code: 'de', label: 'Deutsch' },
 ] as const;
 
-export function defaultResponseLanguage(browserLanguage: string | undefined): string {
-  const primary = (browserLanguage ?? '').split('-')[0]?.toLowerCase() ?? '';
-  return RESPONSE_LANGUAGES.some((language) => language.code === primary) ? primary : 'en';
+/** `auto` sends no language, so the server answers in the language of the prompt. */
+export function defaultResponseLanguage(): string {
+  return 'auto';
+}
+
+/** The value for the API's `responseLanguage`: nothing when the user left it on `auto`. */
+export function responseLanguageFor(selection: string): string | undefined {
+  return selection === 'auto' ? undefined : selection;
+}
+
+/** Examples for the chips: the English ones, plus one from every other language when on `auto`. */
+export function examplesFor(selection: string): string[] {
+  if (selection !== 'auto') {
+    return EXAMPLE_PROMPTS[selection] ?? EXAMPLE_PROMPTS['en'] ?? [];
+  }
+  return Object.entries(EXAMPLE_PROMPTS).flatMap(([code, list]) =>
+    code === 'en' ? list : list.slice(0, 1),
+  );
 }
 
 /**

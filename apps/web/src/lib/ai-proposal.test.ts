@@ -1,25 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EXAMPLE_PROMPTS,
   RESPONSE_LANGUAGES,
   defaultResponseLanguage,
+  examplesFor,
   isSettled,
   pollInterval,
+  responseLanguageFor,
   stageLabel,
 } from './ai-proposal';
 
 describe('pollInterval', () => {
   const created = '2026-10-13T10:00:00.000Z';
   const t0 = Date.parse(created);
+  // The view's updatedAt is what the helper measures from.
   it('polls every 2s for the first 30s, then every 5s, while generating', () => {
-    expect(pollInterval({ status: 'generating', createdAt: created }, t0 + 1_000)).toBe(2_000);
-    expect(pollInterval({ status: 'generating', createdAt: created }, t0 + 31_000)).toBe(5_000);
+    expect(pollInterval({ status: 'generating', updatedAt: created }, t0 + 1_000)).toBe(2_000);
+    expect(pollInterval({ status: 'generating', updatedAt: created }, t0 + 31_000)).toBe(5_000);
+  });
+  it('restarts the fast window when a retry bumps updatedAt', () => {
+    const retriedAt = new Date(t0 + 3_600_000).toISOString();
+    expect(
+      pollInterval({ status: 'generating', updatedAt: retriedAt }, t0 + 3_600_000 + 1_000),
+    ).toBe(2_000);
   });
   it('also polls while committing', () => {
-    expect(pollInterval({ status: 'committing', createdAt: created }, t0 + 1_000)).toBe(2_000);
+    expect(pollInterval({ status: 'committing', updatedAt: created }, t0 + 1_000)).toBe(2_000);
   });
   it('stops polling once settled or when there is no data', () => {
     for (const status of ['ready', 'failed', 'cancelled', 'committed']) {
-      expect(pollInterval({ status, createdAt: created }, t0)).toBe(false);
+      expect(pollInterval({ status, updatedAt: created }, t0)).toBe(false);
     }
     expect(pollInterval(undefined)).toBe(false);
   });
@@ -41,15 +51,25 @@ describe('stageLabel', () => {
   });
 });
 
-describe('defaultResponseLanguage', () => {
-  it('uses the browser language when supported, else English', () => {
-    expect(defaultResponseLanguage('gu-IN')).toBe('gu');
-    expect(defaultResponseLanguage('xx-YY')).toBe('en');
-    expect(defaultResponseLanguage(undefined)).toBe('en');
+describe('response language', () => {
+  it('defaults to "same as my prompt", offered first', () => {
+    expect(defaultResponseLanguage()).toBe('auto');
+    expect(RESPONSE_LANGUAGES[0]).toEqual({ code: 'auto', label: 'Same as my prompt' });
   });
   it('offers the spec languages', () => {
     expect(RESPONSE_LANGUAGES.map((l) => l.code)).toEqual(
-      expect.arrayContaining(['en', 'hi', 'gu', 'es', 'fr', 'de']),
+      expect.arrayContaining(['auto', 'en', 'hi', 'gu', 'es', 'fr', 'de']),
     );
+  });
+  it('sends no responseLanguage for auto, and the code otherwise', () => {
+    expect(responseLanguageFor('auto')).toBeUndefined();
+    expect(responseLanguageFor('gu')).toBe('gu');
+  });
+  it('shows English plus one example per other language on auto', () => {
+    const examples = examplesFor('auto');
+    expect(examples).toEqual(expect.arrayContaining(EXAMPLE_PROMPTS['en']!));
+    expect(examples).toContain(EXAMPLE_PROMPTS['gu']![0]);
+    expect(examples).toHaveLength(Object.values(EXAMPLE_PROMPTS).length + 1);
+    expect(examplesFor('gu')).toEqual(EXAMPLE_PROMPTS['gu']);
   });
 });
