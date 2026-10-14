@@ -13,3 +13,12 @@ export {
 } from './sanitize.js';
 export { toBuilderShape, validateShape, type BuilderShape } from './shape.js';
 export { PROMPT_VERSION, SYSTEM_PROMPT, buildRepairTurn, buildUserTurn } from './prompt.js';
+export {
+  GeminiProvider,
+  ProviderError,
+  type GeminiProviderOptions,
+  type LLMProvider,
+  type LLMRequest,
+  type LLMTurn,
+  type ProviderErrorKind,
+} from './provider.js';
