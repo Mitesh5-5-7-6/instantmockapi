@@ -366,6 +366,9 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
         // removeAdditional), this one rejects `authentication` outright. The field decides who
         // can read a project, and SP2 reintroduces it deliberately; until then a client that
         // sends it must hear that it was not applied rather than assume it was.
+        // `blueprint.authentication` and entity-level `authentication` are silently dropped by
+        // `toBuilderShape` (platform-owned fields); only the top-level field is rejected loudly,
+        // because it is the one a client would send deliberately.
         const body = request.body;
         if (typeof body === 'object' && body !== null && !Array.isArray(body)) {
           if ('authentication' in body) {

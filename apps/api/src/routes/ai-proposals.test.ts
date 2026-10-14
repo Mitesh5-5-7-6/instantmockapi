@@ -19,6 +19,7 @@ import { AiProposal, Project, mongoose } from '@instantmockapi/db';
 
 const { Types } = mongoose;
 import { fakeOutputJson } from '@instantmockapi/ai';
+import { getPlanConfig } from '@instantmockapi/config';
 import {
   authHeader,
   buildTestServer,
@@ -231,6 +232,18 @@ describe('reading proposals', () => {
     );
   });
 
+  it('paginates history: page 2 of limit 1 is the second-newest', async () => {
+    const older = await seed(alice.userId, { prompt: 'older' });
+    await AiProposal.collection.updateOne(
+      { _id: older._id },
+      { $set: { createdAt: new Date(Date.now() - 60_000) } },
+    );
+    await seed(alice.userId, { prompt: 'newer' });
+    const body = (await get('/v1/ai/proposals?page=2&limit=1', alice.accessToken)).json();
+    expect(body.data.map((p: { prompt: string }) => p.prompt)).toEqual(['older']);
+    expect(body.meta).toMatchObject({ page: 2, limit: 1, total: 2 });
+  });
+
   it('lists only the caller’s proposals, newest first', async () => {
     const older = await seed(alice.userId, { prompt: 'older' });
     await AiProposal.collection.updateOne(
@@ -384,6 +397,28 @@ describe('commit', () => {
     expect(res.statusCode).toBe(201);
     const stored = await Project.findOne().lean();
     expect(stored!.description!.length).toBeLessThanOrEqual(500);
+  });
+
+  it('refuses to commit when the plan quota is full, leaving the proposal ready', async () => {
+    const max = getPlanConfig('free').maxProjects;
+    const ownerId = new Types.ObjectId(alice.userId);
+    for (let index = 0; index < max; index++) {
+      await Project.create({
+        ownerId,
+        name: `Existing ${index}`,
+        status: 'active',
+        inputSource: { type: 'json', raw: '{}' },
+        ips: { projectId: 'x', version: 1, entities: [], generationConfig: {} },
+        generationConfig: { validators: [], types: [], methods: ['GET'], mockRecords: 1 },
+        currentVersion: 1,
+      });
+    }
+    const doc = await seed(alice.userId);
+    const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken);
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('PLAN_LIMIT_EXCEEDED');
+    expect((await AiProposal.findById(doc._id))!.status).toBe('ready');
+    expect(await Project.countDocuments()).toBe(max);
   });
 
   it('cannot commit another user’s proposal', async () => {
