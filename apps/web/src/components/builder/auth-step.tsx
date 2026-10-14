@@ -29,7 +29,12 @@ import {
 export interface AuthStepProps {
   /** §1's two options, or §2's three. */
   choices: readonly AuthChoice[];
-  mode: AuthMode;
+  /**
+   * `null` means the question has not been answered, so no option is selected
+   * (the AI review page asks without pre-selecting; the wizard always passes a
+   * value).
+   */
+  mode: AuthMode | null;
   onMode: (mode: AuthMode) => void;
   /** Entity names, in the order the model declares them. */
   entities: readonly { name: string }[];
@@ -53,17 +58,20 @@ export function AuthStep({
   showEntityPicker = true,
 }: AuthStepProps) {
   const named = entities.filter((entity) => entity.name.trim() !== '');
-  const preview = previewEndpoints({
-    mode,
-    entities: named,
-    protectedNames,
-    methods,
-    // The wizard always generates the full Auth API; turning individual
-    // endpoints off is an Auth-tab refinement, not a first-run decision.
-    signup: true,
-    refreshToken: true,
-  });
-  const warning = emptySelectionWarning(mode, protectedNames.length);
+  const preview =
+    mode === null
+      ? []
+      : previewEndpoints({
+          mode,
+          entities: named,
+          protectedNames,
+          methods,
+          // The wizard always generates the full Auth API; turning individual
+          // endpoints off is an Auth-tab refinement, not a first-run decision.
+          signup: true,
+          refreshToken: true,
+        });
+  const warning = mode === null ? null : emptySelectionWarning(mode, protectedNames.length);
 
   return (
     <Card className="ui-stack">
@@ -126,7 +134,9 @@ export function AuthStep({
       {/* §1's "show a proper endpoints": the answer made concrete. */}
       <div className="ui-stack ui-stack--tight">
         <h3>What you will get</h3>
-        <p className="ui-meta">{describeChoice(mode, protectedNames.length, named.length)}</p>
+        {mode !== null ? (
+          <p className="ui-meta">{describeChoice(mode, protectedNames.length, named.length)}</p>
+        ) : null}
         <ul className="ui-stack" style={{ gap: 'var(--space-1)', listStyle: 'none', padding: 0 }}>
           {preview.map((endpoint) => (
             <li

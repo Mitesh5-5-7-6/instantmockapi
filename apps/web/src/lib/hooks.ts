@@ -19,7 +19,9 @@ import {
   type AuthState,
 } from './api-client';
 import { pollInterval } from './ai-proposal';
+import type { AiDraftInput } from './review-state';
 import type {
+  AiDraftView,
   AiProposalSummary,
   AiProposalView,
   ApiUser,
@@ -533,12 +535,67 @@ export function useCommitAiProposal() {
       proposalId: string;
       kind?: 'project' | 'single';
       name?: string;
+      slug?: string;
+      description?: string;
     }) =>
       apiFetch<ProjectDetail>(`/v1/ai/proposals/${proposalId}/commit`, { method: 'POST', body }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
       void queryClient.invalidateQueries({ queryKey: ['ai-proposals'] });
     },
+  });
+}
+
+export function useSaveAiDraft(proposalId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: AiDraftInput & { revision: number }) =>
+      apiFetch<{ draft: AiDraftView; issues: { path: string; issue: string }[] }>(
+        `/v1/ai/proposals/${proposalId}/draft`,
+        { method: 'PATCH', body: input },
+      ),
+    onSuccess: (saved) => {
+      queryClient.setQueryData<AiProposalView>(['ai-proposal', proposalId], (old) =>
+        old ? { ...old, draft: saved.draft } : old,
+      );
+    },
+  });
+}
+
+export function useRegenerateAiProposal(proposalId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { answers?: string; instruction?: string }) =>
+      apiFetch<AiProposalView>(`/v1/ai/proposals/${proposalId}/regenerate`, {
+        method: 'POST',
+        body: input,
+      }),
+    onSuccess: (child) => {
+      queryClient.setQueryData(['ai-proposal', child.id], child);
+      void queryClient.invalidateQueries({ queryKey: ['ai-proposal', proposalId] });
+    },
+  });
+}
+
+export function useAdoptAiProposal() {
+  return useMutation({
+    mutationFn: ({ childId, draft }: { childId: string; draft: AiDraftInput }) =>
+      apiFetch<{ draft: AiDraftView; issues: { path: string; issue: string }[] }>(
+        `/v1/ai/proposals/${childId}/adopt`,
+        { method: 'POST', body: { draft } },
+      ),
+  });
+}
+
+export function useTranslateAiProposal(proposalId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (language: string) =>
+      apiFetch<AiProposalView>(`/v1/ai/proposals/${proposalId}/translate`, {
+        method: 'POST',
+        body: { language },
+      }),
+    onSuccess: (view) => queryClient.setQueryData(['ai-proposal', view.id], view),
   });
 }
 
