@@ -1,7 +1,17 @@
 'use client';
 
-import type { Dispatch } from 'react';
-import { Badge, Card, Field, Input, Note, Select, Textarea } from '@instantmockapi/ui';
+import { useState, type Dispatch } from 'react';
+import {
+  Badge,
+  Button,
+  Card,
+  Field,
+  Input,
+  Modal,
+  Note,
+  Select,
+  Textarea,
+} from '@instantmockapi/ui';
 import type { AiProposalResult, AiProposalView } from '../../lib/api-types';
 import { RESPONSE_LANGUAGES } from '../../lib/ai-proposal';
 import type { ReviewAction, ReviewState } from '../../lib/review-state';
@@ -21,6 +31,7 @@ export function OverviewCard({
   translation: AiProposalView['translation'];
   onLanguage: (language: string) => void;
 }) {
+  const [confirmSingle, setConfirmSingle] = useState(false);
   const languages = RESPONSE_LANGUAGES.filter((option) => option.code !== 'auto');
   return (
     <Card className="ui-stack">
@@ -44,13 +55,12 @@ export function OverviewCard({
           value={state.kind}
           onChange={(e) => {
             const value = e.target.value as 'project' | 'single';
+            // Dropping relationships is destructive, so ask in a Modal first (browser dialogs are banned).
             if (
               value === 'single' &&
-              state.entities.some((entity) => entity.relations.length > 0) &&
-              !window.confirm(
-                'Single APIs have no relationships. Remove them? (Undo brings them back.)',
-              )
+              state.entities.some((entity) => entity.relations.length > 0)
             ) {
+              setConfirmSingle(true);
               return;
             }
             dispatch({ type: 'kind', value });
@@ -105,6 +115,28 @@ export function OverviewCard({
           </ul>
         </div>
       ) : null}
+      <Modal
+        open={confirmSingle}
+        onClose={() => setConfirmSingle(false)}
+        title="Switch to a single API?"
+      >
+        <div className="ui-stack">
+          <p>Single APIs have no relationships. Remove them? (Undo brings them back.)</p>
+          <div className="ui-row">
+            <Button
+              onClick={() => {
+                setConfirmSingle(false);
+                dispatch({ type: 'kind', value: 'single' });
+              }}
+            >
+              Remove relationships
+            </Button>
+            <Button variant="secondary" onClick={() => setConfirmSingle(false)}>
+              Keep project
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </Card>
   );
 }
