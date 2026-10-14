@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { Badge, Button, Card, Field, FormError, Input, Select, Textarea } from '@instantmockapi/ui';
 import {
   useAiProposal,
@@ -21,6 +22,7 @@ import {
 
 export default function NewAiPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [prompt, setPrompt] = useState('');
   const [name, setName] = useState('');
   const [language, setLanguage] = useState('en');
@@ -57,19 +59,33 @@ export default function NewAiPage() {
       setProposalId(view.id);
     });
 
-  const backToEditor = () => {
+  // Always restore the prompt: the editor may be empty or stale (e.g. the proposal was opened from history).
+  const backToEditor = (promptToRestore: string) => {
+    setPrompt(promptToRestore);
     setProposalId(null);
     setKind(null);
   };
 
+  // A committed proposal already owns a project (opened from history, or a commit that raced).
+  const committedProjectId = proposal?.status === 'committed' ? proposal.projectId : null;
+  useEffect(() => {
+    if (committedProjectId) router.push(`/projects/${committedProjectId}`);
+  }, [committedProjectId, router]);
+
   const createProject = () =>
     run(async () => {
       if (!proposal) return;
-      const project = await commit.mutateAsync({
-        proposalId: proposal.id,
-        kind: kind ?? undefined,
-      });
-      router.push(`/projects/${project.id}`);
+      try {
+        const project = await commit.mutateAsync({
+          proposalId: proposal.id,
+          kind: kind ?? undefined,
+        });
+        router.push(`/projects/${project.id}`);
+      } catch (caught) {
+        // A 409 may mean it was already committed: refresh so the effect above can redirect.
+        void queryClient.invalidateQueries({ queryKey: ['ai-proposal', proposal.id] });
+        throw caught;
+      }
     });
 
   // ── Generating ──────────────────────────────────────────────
@@ -91,7 +107,7 @@ export default function NewAiPage() {
                 onClick={() =>
                   run(async () => {
                     await cancel.mutateAsync(proposal.id);
-                    backToEditor();
+                    backToEditor(proposal.prompt);
                   })
                 }
               >
@@ -99,6 +115,7 @@ export default function NewAiPage() {
               </Button>
             </div>
           ) : null}
+          {error ? <FormError title={error} /> : null}
         </Card>
       </div>
     );
@@ -131,8 +148,7 @@ export default function NewAiPage() {
             <Button
               variant="secondary"
               onClick={() => {
-                setPrompt(proposal.prompt);
-                backToEditor();
+                backToEditor(proposal.prompt);
               }}
             >
               Edit prompt
@@ -216,8 +232,7 @@ export default function NewAiPage() {
           <Button
             variant="secondary"
             onClick={() => {
-              setPrompt(proposal.prompt);
-              backToEditor();
+              backToEditor(proposal.prompt);
             }}
           >
             Start over

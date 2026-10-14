@@ -16,7 +16,7 @@ export function pollInterval(
   view: { status: string; createdAt: string } | undefined,
   now: number = Date.now(),
 ): number | false {
-  if (!view || view.status !== 'generating') {
+  if (!view || isSettled(view.status)) {
     return false;
   }
   return now - Date.parse(view.createdAt) < FAST_WINDOW_MS ? FAST_POLL_MS : SLOW_POLL_MS;

@@ -14,6 +14,9 @@ describe('pollInterval', () => {
     expect(pollInterval({ status: 'generating', createdAt: created }, t0 + 1_000)).toBe(2_000);
     expect(pollInterval({ status: 'generating', createdAt: created }, t0 + 31_000)).toBe(5_000);
   });
+  it('also polls while committing', () => {
+    expect(pollInterval({ status: 'committing', createdAt: created }, t0 + 1_000)).toBe(2_000);
+  });
   it('stops polling once settled or when there is no data', () => {
     for (const status of ['ready', 'failed', 'cancelled', 'committed']) {
       expect(pollInterval({ status, createdAt: created }, t0)).toBe(false);
