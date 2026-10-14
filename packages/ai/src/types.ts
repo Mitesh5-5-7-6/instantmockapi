@@ -8,7 +8,7 @@ export type ProposalKind = 'project' | 'single';
 export interface ProposalMeta {
   /** BCP-47 primary tag of the prompt, or `und` when the model gave nothing usable. */
   detectedLanguage: string;
-  /** Short English label, e.g. "hospital management". Sub-project 3's retrieval key. */
+  /** Short English label, e.g. "event volunteer scheduling". Sub-project 3's retrieval key. */
   domain: string;
   recommendedKind: ProposalKind;
   kindRationale: string;

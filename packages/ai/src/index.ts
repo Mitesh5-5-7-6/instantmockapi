@@ -11,3 +11,4 @@ export {
   sanitizeMeta,
   PROSE_MAX,
 } from './sanitize.js';
+export { toBuilderShape, validateShape, type BuilderShape } from './shape.js';
