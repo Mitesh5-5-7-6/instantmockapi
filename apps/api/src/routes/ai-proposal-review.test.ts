@@ -137,9 +137,21 @@ describe('PATCH /v1/ai/proposals/:id/draft', () => {
 
   it('answers 409 when the proposal is no longer ready', async () => {
     const doc = await seedReady(alice.userId, { status: 'committed' });
-    expect(
-      (await patch(`/v1/ai/proposals/${doc._id}/draft`, alice.accessToken, draftBody())).statusCode,
-    ).toBe(409);
+    const res = await patch(`/v1/ai/proposals/${doc._id}/draft`, alice.accessToken, draftBody());
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.status).toBe('committed');
+  });
+
+  it('bumps the revision on each save and rejects a repeat of a stale one', async () => {
+    const url = `/v1/ai/proposals/${(await seedReady(alice.userId))._id}/draft`;
+    const first = await patch(url, alice.accessToken, draftBody({ revision: 0 }));
+    expect(first.json().draft.revision).toBe(1);
+    const second = await patch(url, alice.accessToken, draftBody({ revision: 1 }));
+    expect(second.statusCode).toBe(200);
+    expect(second.json().draft.revision).toBe(2);
+    const stale = await patch(url, alice.accessToken, draftBody({ revision: 1 }));
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json().draft.revision).toBe(2);
   });
 
   it('is owner-scoped', async () => {
@@ -190,9 +202,26 @@ describe('PATCH /v1/ai/proposals/:id/draft', () => {
     });
   });
 
-  it('expires a translation pending for over 10 minutes when read', async () => {
+  it('expires a translation by its own requestedAt, even after recent autosaves', async () => {
     const doc = await seedReady(alice.userId, {
-      translation: { status: 'pending', language: 'gu' },
+      translation: {
+        status: 'pending',
+        language: 'gu',
+        requestedAt: new Date(Date.now() - 11 * 60_000),
+      },
+    });
+    expect(
+      (await get(`/v1/ai/proposals/${doc._id}`, alice.accessToken)).json().translation,
+    ).toMatchObject({ status: 'failed', language: 'gu' });
+  });
+
+  it('keeps a recently requested translation pending despite an old updatedAt', async () => {
+    const doc = await seedReady(alice.userId, {
+      translation: {
+        status: 'pending',
+        language: 'gu',
+        requestedAt: new Date(Date.now() - 60_000),
+      },
     });
     await AiProposal.collection.updateOne(
       { _id: doc._id },
@@ -200,6 +229,6 @@ describe('PATCH /v1/ai/proposals/:id/draft', () => {
     );
     expect(
       (await get(`/v1/ai/proposals/${doc._id}`, alice.accessToken)).json().translation,
-    ).toMatchObject({ status: 'failed', language: 'gu' });
+    ).toMatchObject({ status: 'pending' });
   });
 });

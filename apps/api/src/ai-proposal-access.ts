@@ -100,10 +100,17 @@ export async function expireIfStuck(doc: IAiProposal): Promise<IAiProposal> {
   if (
     doc.status === 'ready' &&
     doc.translation?.status === 'pending' &&
-    doc.updatedAt.getTime() <= Date.now() - STUCK_AFTER_MS
+    (doc.translation.requestedAt ?? doc.updatedAt).getTime() <= Date.now() - STUCK_AFTER_MS
   ) {
+    // Own clock, not updatedAt: every draft autosave bumps updatedAt, which would
+    // postpone expiry indefinitely. The language guards against a newer request.
     const expired = await AiProposal.findOneAndUpdate(
-      { _id: doc._id, status: 'ready', 'translation.status': 'pending', updatedAt: doc.updatedAt },
+      {
+        _id: doc._id,
+        status: 'ready',
+        'translation.status': 'pending',
+        'translation.language': doc.translation.language,
+      },
       {
         $set: {
           translation: {

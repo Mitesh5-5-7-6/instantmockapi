@@ -100,9 +100,16 @@ export interface IAiProposal extends Omit<Document, 'model'> {
   /**
    * In-flight or failed prose translation. Null when idle; a successful
    * translation is written into `result` and clears this, so only the
-   * states that need the UI's attention are stored.
+   * states that need the UI's attention are stored. `requestedAt` is the
+   * translation's own clock: lazy expiry measures from it, because draft
+   * autosaves keep bumping `updatedAt`.
    */
-  translation: { status: 'pending' | 'failed'; language: string; message?: string } | null;
+  translation: {
+    status: 'pending' | 'failed';
+    language: string;
+    message?: string;
+    requestedAt?: Date;
+  } | null;
   /** The proposal this one was regenerated from, so the chain can be walked back. */
   parentId: Types.ObjectId | null;
   /** Set when this proposal is superseded by a regeneration; points at its successor. */
