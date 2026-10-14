@@ -3,7 +3,7 @@
 > **Source spec:** [PHASE7_SPEC.md](PHASE7_SPEC.md) (Intelligent Multilingual AI API Builder with Persistent Learning Memory).
 > It supersedes the earlier [/phase7.md](../phase7.md) wherever the two disagree.
 >
-> **Status:** Stage A (audit) complete. Sub-project 1 fully designed. Sub-projects 2–5 scoped; each still needs its own design review before implementation.
+> **Status:** Stage A complete. **Sub-project 1 implemented** on `feat/phase7-sp1-ai-core` (plan: [SP1_PLAN.md](SP1_PLAN.md)). Sub-projects 2–5 scoped; each needs its own design review.
 >
 > **Rule from the spec (§18):** never ship more than one sub-project in a single change. Each sub-project ends with its tests green, a review, and a merge before the next one starts.
 
