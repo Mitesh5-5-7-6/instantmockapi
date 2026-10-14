@@ -53,7 +53,6 @@ interface CommitBody {
   name?: string;
   slug?: string;
   description?: string;
-  blueprint?: { entities: unknown[]; generationConfig?: unknown };
 }
 
 export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = async (
@@ -238,14 +237,6 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
             name: { type: 'string', minLength: 1, maxLength: 120 },
             slug: { type: 'string', pattern: SLUG_PATTERN.source, maxLength: SLUG_MAX_LENGTH },
             description: { type: 'string', maxLength: 500 },
-            // `authentication` is deliberately not accepted in SP1. The auth question arrives
-            // in Sub-project 2, which must also add this file to ALLOWED in
-            // packages/ips/src/auth-invariants.test.ts.
-            blueprint: {
-              type: 'object',
-              required: ['entities'],
-              properties: { entities: { type: 'array' } },
-            },
           },
         },
       },
@@ -254,24 +245,17 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
         request.body ??= {};
         // Unlike the other routes, which silently strip unknown fields (Fastify's ajv
         // removeAdditional), this one rejects `authentication` outright. The field decides who
-        // can read a project, and SP2 reintroduces it deliberately; until then a client that
-        // sends it must hear that it was not applied rather than assume it was.
-        // `blueprint.authentication` and entity-level `authentication` are silently dropped by
-        // `toBuilderShape` (platform-owned fields); only the top-level field is rejected loudly,
-        // because it is the one a client would send deliberately.
+        // can read a project, and it comes only from the saved, reviewed draft; a client that
+        // sends it here must hear that it was not applied rather than assume it was.
         const body = request.body;
         if (typeof body === 'object' && body !== null && !Array.isArray(body)) {
           if ('authentication' in body) {
             done(
               new AppError({
                 code: 'VALIDATION_ERROR',
-                message: 'authentication is not accepted on AI proposal commit yet',
-                details: [
-                  {
-                    path: 'authentication',
-                    issue: 'not accepted until the authentication step ships (Sub-project 2)',
-                  },
-                ],
+                message:
+                  'authentication is not accepted on commit; set authentication in the draft',
+                details: [{ path: 'authentication', issue: 'set authentication in the draft' }],
               }),
             );
             return;
@@ -294,16 +278,25 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
         });
       }
 
+      // "Always ask" (SP2 §5.2): the auth answer lives only in the reviewed draft.
+      if (!owned.draft || owned.draft.authAnswered !== true) {
+        throw new AppError({
+          code: 'VALIDATION_ERROR',
+          message: 'Answer the authentication question first',
+          details: [{ path: 'authentication', issue: 'Answer the authentication question first' }],
+        });
+      }
+
       await assertProjectQuota(sub, request.authUser?.plan);
 
       // The claim is the double-commit guard: only one request can move
       // ready → committing; the loser sees the new status and gets a 409.
       const claimed = await AiProposal.findOneAndUpdate(
-        { _id: owned._id, status: 'ready', result: { $ne: null } },
+        { _id: owned._id, status: 'ready', 'draft.authAnswered': true },
         { $set: { status: 'committing' } },
         { new: true },
       );
-      if (!claimed || !claimed.result) {
+      if (!claimed || !claimed.draft) {
         const current = (await AiProposal.findById(owned._id)) ?? owned;
         return conflict(
           reply,
@@ -317,20 +310,20 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
       // Captured so the failure path can tell whether the project was persisted.
       let createdId: string | null = null;
       try {
-        const result = claimed.result;
+        const draft = claimed.draft;
         const shape = toBuilderShape(
-          body.blueprint ?? {
-            entities: result.entities,
-            generationConfig: result.generationConfig,
-          },
+          { entities: draft.entities, generationConfig: draft.generationConfig },
           newProjectGenerationConfig(config.defaultMockRecords),
           { maxMockRecords: config.maxMockRecords },
+          { keepEntityAuth: true },
         );
-        const kind = body.kind ?? claimed.hints?.kind ?? result.recommendedKind;
-        const name = body.name?.trim() || result.name;
+        const kind = body.kind ?? draft.kind;
+        const name = body.name?.trim() || draft.name || claimed.result?.name || 'Generated API';
         const raw = JSON.stringify({
           entities: shape.entities,
           generationConfig: shape.generationConfig,
+          // A pass-through of the reviewed answer; IPS validates it in parseInputSource.
+          ...(draft.authentication ? { authentication: draft.authentication } : {}),
         });
 
         const created = await createProjectRecord({
@@ -342,10 +335,10 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
               kind,
               slug: body.slug ?? null,
               // Project.description has maxlength 500; a 1000-char prompt fallback would 500 on save.
-              description: (body.description ?? (result.description || claimed.prompt)).slice(
-                0,
-                500,
-              ),
+              description: (
+                body.description ??
+                (draft.description || claimed.result?.description || claimed.prompt)
+              ).slice(0, 500),
               inputSource: { type: 'builder', raw },
               ips: parseInputSource(projectId, name, 'builder', raw, config, kind),
             };

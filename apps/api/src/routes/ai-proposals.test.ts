@@ -62,6 +62,33 @@ function get(url: string, token: string) {
   return app.inject({ method: 'GET', url, headers: authHeader(token) });
 }
 
+function readyDraft(over: Record<string, unknown> = {}) {
+  const result = JSON.parse(fakeOutputJson(['Alpha', 'Beta']));
+  return {
+    revision: 1,
+    kind: 'project',
+    name: 'Test API',
+    description: 'test description',
+    entities: result.entities,
+    generationConfig: { methods: ['GET', 'POST', 'PATCH', 'DELETE'], mockRecords: 20 },
+    authAnswered: true,
+    authentication: null,
+    savedAt: new Date(),
+    ...over,
+  };
+}
+
+const AUTH = (mode: string) => ({
+  mode,
+  signup: true,
+  signin: true,
+  refreshToken: true,
+  cookieAuth: false,
+  accessTokenExpiresIn: '15m',
+  refreshTokenExpiresIn: '7d',
+  userFields: [],
+});
+
 async function seed(ownerId: string, extra: Record<string, unknown> = {}) {
   return AiProposal.create({
     ownerId,
@@ -71,6 +98,7 @@ async function seed(ownerId: string, extra: Record<string, unknown> = {}) {
     status: 'ready',
     stage: null,
     result: JSON.parse(fakeOutputJson(['Alpha', 'Beta'])),
+    draft: readyDraft(),
     ...extra,
   });
 }
@@ -289,8 +317,8 @@ describe('retry and cancel', () => {
 });
 
 describe('commit', () => {
-  it('creates a project, preferring the user kind hint over the recommendation', async () => {
-    const doc = await seed(alice.userId, { hints: { kind: 'single' } });
+  it('creates a project from the draft, with body overrides winning', async () => {
+    const doc = await seed(alice.userId, { draft: readyDraft({ kind: 'single' }) });
     const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken);
     expect(res.statusCode).toBe(201);
     const project = res.json();
@@ -309,11 +337,13 @@ describe('commit', () => {
     expect(res.json()).toMatchObject({ kind: 'project', name: 'Renamed' });
   });
 
-  it('answers 422 for an invalid edited blueprint and returns the proposal to ready', async () => {
-    const doc = await seed(alice.userId);
-    const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken, {
-      blueprint: { entities: [{ name: 'Bad', fields: [{ name: 'id', type: 'nonsense' }] }] },
+  it('answers 422 for an invalid draft and returns the proposal to ready', async () => {
+    const doc = await seed(alice.userId, {
+      draft: readyDraft({
+        entities: [{ name: 'Bad', fields: [{ name: 'id', type: 'nonsense' }] }],
+      }),
     });
+    const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken);
     expect(res.statusCode).toBe(422);
     expect((await AiProposal.findById(doc._id).lean())!.status).toBe('ready');
     expect(await Project.countDocuments()).toBe(0);
@@ -325,7 +355,67 @@ describe('commit', () => {
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error.code).toBe('VALIDATION_ERROR');
+    expect(res.json().error.message).toContain('set authentication in the draft');
     expect(await Project.countDocuments()).toBe(0);
+  });
+
+  it('refuses to commit without a draft', async () => {
+    const doc = await seed(alice.userId, { draft: null });
+    const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken);
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details[0].path).toBe('authentication');
+    expect(await Project.countDocuments()).toBe(0);
+  });
+
+  it('refuses to commit until the authentication question is answered', async () => {
+    const doc = await seed(alice.userId, { draft: readyDraft({ authAnswered: false }) });
+    expect((await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken)).statusCode).toBe(
+      422,
+    );
+    expect((await AiProposal.findById(doc._id).lean())!.status).toBe('ready');
+  });
+
+  it('creates an ALL_PROTECTED project from the draft auth answer', async () => {
+    const doc = await seed(alice.userId, {
+      draft: readyDraft({ authentication: AUTH('ALL_PROTECTED') }),
+    });
+    const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken);
+    expect(res.statusCode).toBe(201);
+    const project = await Project.findById(res.json().id).lean();
+    expect((project!.ips as { authentication?: { mode: string } }).authentication?.mode).toBe(
+      'ALL_PROTECTED',
+    );
+  });
+
+  it('creates a COMBINATION project with the per-entity stamps', async () => {
+    const result = JSON.parse(fakeOutputJson(['Alpha', 'Beta']));
+    const doc = await seed(alice.userId, {
+      draft: readyDraft({
+        authentication: AUTH('COMBINATION'),
+        entities: [
+          { ...result.entities[0], authentication: 'PROTECTED' },
+          { ...result.entities[1], authentication: 'PUBLIC' },
+        ],
+      }),
+    });
+    const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken);
+    expect(res.statusCode).toBe(201);
+    const ips = (await Project.findById(res.json().id).lean())!.ips as {
+      entities: { name: string; authentication?: string }[];
+    };
+    expect(ips.entities.map((e) => e.authentication)).toEqual(['PROTECTED', 'PUBLIC']);
+  });
+
+  it('keeps entity descriptions from the draft in the created project (Review Focus #5)', async () => {
+    const result = JSON.parse(fakeOutputJson(['Alpha']));
+    const doc = await seed(alice.userId, {
+      draft: readyDraft({ entities: [{ ...result.entities[0], description: 'Alpha things' }] }),
+    });
+    const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken);
+    const ips = (await Project.findById(res.json().id).lean())!.ips as {
+      entities: { description?: string }[];
+    };
+    expect(ips.entities[0]!.description).toBe('Alpha things');
   });
 
   it('does not 500 when the commit body is a JSON primitive', async () => {
@@ -392,7 +482,11 @@ describe('commit', () => {
   it('caps a long prompt used as the description fallback', async () => {
     const result = JSON.parse(fakeOutputJson(['Alpha']));
     result.description = '';
-    const doc = await seed(alice.userId, { prompt: 'p'.repeat(900), result });
+    const doc = await seed(alice.userId, {
+      prompt: 'p'.repeat(900),
+      result,
+      draft: readyDraft({ description: '' }),
+    });
     const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken);
     expect(res.statusCode).toBe(201);
     const stored = await Project.findOne().lean();
