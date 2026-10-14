@@ -233,6 +233,9 @@ importers:
 
   apps/workers:
     dependencies:
+      '@instantmockapi/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
       '@instantmockapi/config':
         specifier: workspace:*
         version: link:../../packages/config
