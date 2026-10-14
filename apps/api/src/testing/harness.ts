@@ -11,6 +11,7 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import { createMemoryStorage, type MemoryStorage } from '@instantmockapi/storage';
 import {
+  AiProposal,
   ApiLog,
   Artifact,
   AuthToken,
@@ -76,6 +77,7 @@ export async function clearDb(): Promise<void> {
       MockSession,
       MockAuthSecret,
       ApiLog,
+      AiProposal,
     ].map((model) => model.deleteMany({})),
   );
 }

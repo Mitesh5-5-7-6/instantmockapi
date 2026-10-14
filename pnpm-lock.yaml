@@ -394,6 +394,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@instantmockapi/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@instantmockapi/config':
         specifier: workspace:*
         version: link:../config
