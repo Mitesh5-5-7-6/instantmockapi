@@ -16,12 +16,13 @@ export function isSettled(status: string): boolean {
  * Measured from `updatedAt`, not `createdAt`, so a retried proposal starts fast again.
  */
 export function pollInterval(
-  view: { status: string; updatedAt: string } | undefined,
+  view: { status: string; updatedAt: string; translation?: { status: string } | null } | undefined,
   now: number = Date.now(),
 ): number | false {
-  if (!view || isSettled(view.status)) {
-    return false;
-  }
+  if (!view) return false;
+  // A ready proposal is still "moving" while its prose is being translated.
+  const translating = view.translation?.status === 'pending';
+  if (isSettled(view.status) && !translating) return false;
   return now - Date.parse(view.updatedAt) < FAST_WINDOW_MS ? FAST_POLL_MS : SLOW_POLL_MS;
 }
 

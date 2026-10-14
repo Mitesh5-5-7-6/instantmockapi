@@ -73,3 +73,15 @@ describe('response language', () => {
     expect(examplesFor('gu')).toEqual(EXAMPLE_PROMPTS['gu']);
   });
 });
+
+it('keeps polling a ready proposal while a translation is pending', () => {
+  const now = Date.parse('2026-10-14T10:00:10.000Z');
+  const view = {
+    status: 'ready',
+    updatedAt: '2026-10-14T10:00:00.000Z',
+    translation: { status: 'pending' },
+  };
+  expect(pollInterval(view, now)).toBe(2_000);
+  expect(pollInterval({ ...view, translation: { status: 'failed' } }, now)).toBe(false);
+  expect(pollInterval({ ...view, translation: null }, now)).toBe(false);
+});
