@@ -112,7 +112,10 @@ export interface IAiProposal extends Omit<Document, 'model'> {
   } | null;
   /** The proposal this one was regenerated from, so the chain can be walked back. */
   parentId: Types.ObjectId | null;
-  /** Set when this proposal is superseded by a regeneration; points at its successor. */
+  /**
+   * The latest regeneration of this proposal (set on every regenerate; the parent
+   * is superseded only when it is adopted).
+   */
   childId: Types.ObjectId | null;
   /** What the user told the model when regenerating: answers to its questions and/or a free instruction. */
   clarification: { answers?: string; instruction?: string } | null;

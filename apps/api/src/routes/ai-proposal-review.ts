@@ -1,6 +1,6 @@
 /**
- * AI proposal review routes (Phase 7 SP2): draft autosave, and later in this
- * sub-project regenerate, adopt and translate. Owner-scoped like the SP1 routes.
+ * AI proposal review routes (Phase 7 SP2): draft autosave, regenerate, adopt and
+ * translate. Owner-scoped like the SP1 routes.
  */
 import type { FastifyPluginAsync } from 'fastify';
 import type { EnvConfig } from '@instantmockapi/config';
