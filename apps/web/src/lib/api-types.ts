@@ -763,3 +763,50 @@ export interface DraftCommitResult {
   reason?: 'no-changes';
   analysis: DraftAnalysis;
 }
+
+export type AiProposalStatus =
+  'generating' | 'ready' | 'failed' | 'cancelled' | 'committing' | 'committed';
+
+export interface AiProposalResult {
+  detectedLanguage: string;
+  domain: string;
+  recommendedKind: 'project' | 'single';
+  kindRationale: string;
+  name: string;
+  description: string;
+  entities: Array<{
+    name: string;
+    description?: string;
+    fields: Array<{ name: string; type: string }>;
+    relations?: Array<{ name: string; kind: string; target: string }>;
+  }>;
+  generationConfig: GenerationConfig;
+  authRecommendation: { recommended: boolean; reason: string };
+  assumptions: string[];
+  questions: string[];
+}
+
+export interface AiProposalView {
+  id: string;
+  status: AiProposalStatus;
+  stage: 'queued' | 'generating' | 'repairing' | 'validating' | null;
+  prompt: string;
+  hints: { name?: string; kind?: 'project' | 'single'; description?: string };
+  responseLanguage: string | null;
+  result: AiProposalResult | null;
+  error: { code: string; message: string; details?: Array<{ path: string; issue: string }> } | null;
+  geminiCalls: number;
+  durationMs: number | null;
+  projectId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiProposalSummary {
+  id: string;
+  status: AiProposalStatus;
+  prompt: string;
+  name: string | null;
+  projectId: string | null;
+  createdAt: string;
+}
