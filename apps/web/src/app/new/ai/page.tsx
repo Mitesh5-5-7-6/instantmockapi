@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, Card, Field, FormError, Input, Select, Textarea } from '@instantmockapi/ui';
 import {
   useAiProposal,
@@ -19,9 +19,20 @@ import {
   stageLabel,
 } from '../../../lib/ai-proposal';
 
+// useSearchParams needs a Suspense boundary for the static build.
 export default function NewAiPage() {
+  return (
+    <Suspense fallback={<div className="ui-skeleton" />}>
+      <NewAi />
+    </Suspense>
+  );
+}
+
+function NewAi() {
   const router = useRouter();
-  const [prompt, setPrompt] = useState('');
+  const searchParams = useSearchParams();
+  // Read once: the review page of a cancelled proposal sends its prompt back here (spec §7).
+  const [prompt, setPrompt] = useState(() => searchParams.get('prompt') ?? '');
   const [name, setName] = useState('');
   const [language, setLanguage] = useState(defaultResponseLanguage());
   const [proposalId, setProposalId] = useState<string | null>(null);

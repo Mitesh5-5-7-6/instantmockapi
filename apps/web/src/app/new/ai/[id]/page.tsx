@@ -24,6 +24,7 @@ import {
   type SeenProse,
 } from '../../../../lib/review-session';
 import { DraftSaver, type SaverSnapshot } from '../../../../lib/draft-saver';
+import { REVIEW_PROPOSAL_QUERY } from '../../../../lib/ai-proposal';
 import { OverviewCard } from '../../../../components/ai-review/overview-card';
 import { ModelSection } from '../../../../components/ai-review/model-section';
 import { EndpointsSection } from '../../../../components/ai-review/endpoints-section';
@@ -55,7 +56,7 @@ export default function AiReviewPage({ params }: { params: Promise<{ id: string 
 
 function AiReview({ id }: { id: string }) {
   const router = useRouter();
-  const query = useAiProposal(id);
+  const query = useAiProposal(id, REVIEW_PROPOSAL_QUERY);
   const proposal = query.data;
   const save = useSaveAiDraft(id);
   const translate = useTranslateAiProposal(id);
@@ -154,16 +155,23 @@ function AiReview({ id }: { id: string }) {
     [state, entities],
   );
 
-  // Every saved change (edit, undo, translation) goes to autosave once.
+  // Every saved change (edit, undo, translation) goes to autosave once. Held while
+  // Create runs: the proposal is 'committing', so a save would 409 and turn a failed
+  // commit into a false "changed in another tab". A change made meanwhile (a
+  // translation landing) is saved once Create gives up, since its seq is still unhandled.
   useEffect(() => {
-    if (!draft || session.editSeq === handledSeq.current) return;
+    if (!draft || creating || session.editSeq === handledSeq.current) return;
     handledSeq.current = session.editSeq;
     saver.edit(draft);
-  }, [session.editSeq, draft, saver]);
+  }, [session.editSeq, draft, saver, creating]);
 
+  // The form is read-only while Create runs (see the fieldset below); this also drops
+  // anything dispatched in the moment before it re-renders disabled.
   const dispatch = useCallback(
-    (action: ReviewAction) => dispatchSession({ type: 'edit', action }),
-    [],
+    (action: ReviewAction) => {
+      if (!creating) dispatchSession({ type: 'edit', action });
+    },
+    [creating],
   );
 
   const resolved = useMemo(() => resolveDetails(issues.list, issues.pathIndex), [issues]);
@@ -231,12 +239,12 @@ function AiReview({ id }: { id: string }) {
     }
   }
 
-  function back(message: string) {
+  function back(message: string, href = '/new/ai') {
     return (
       <div className="ui-stack" style={{ maxWidth: '760px' }}>
         <Note variant="info">{message}</Note>
         <div>
-          <Button variant="secondary" onClick={() => router.push('/new/ai')}>
+          <Button variant="secondary" onClick={() => router.push(href)}>
             Back to the AI builder
           </Button>
         </div>
@@ -258,7 +266,11 @@ function AiReview({ id }: { id: string }) {
       (proposal.status === 'committed' && projectId);
     if (redirecting) return <div className="ui-skeleton" />;
     return proposal.status === 'cancelled'
-      ? back(`This proposal was cancelled. Your prompt was: “${proposal.prompt}”`)
+      ? // Spec §7: back to the builder with the prompt kept, ready to edit and generate again.
+        back(
+          'This proposal was cancelled.',
+          `/new/ai?prompt=${encodeURIComponent(proposal.prompt)}`,
+        )
       : back(`This proposal is not ready to review (${proposal.status}).`);
   }
   if (!loaded || !state || !proposal.result) return <div className="ui-skeleton" />;
@@ -283,46 +295,59 @@ function AiReview({ id }: { id: string }) {
             </Button>
           </Note>
         ) : null}
-        <OverviewCard
-          state={state}
-          dispatch={dispatch}
-          result={result}
-          language={proposal.responseLanguage ?? result.detectedLanguage}
-          translation={proposal.translation}
-          onLanguage={(next) =>
-            translate.mutate(next, {
-              onError: (cause) => setError(normalizeError(cause).title),
-            })
-          }
-        />
-        <ModelSection
-          state={state}
-          dispatch={dispatch}
-          fieldErrors={resolved.mapped}
-          unmapped={resolved.unmapped}
-        />
-        <EndpointsSection state={state} dispatch={dispatch} />
-        <AuthSection state={state} dispatch={dispatch} recommendation={result.authRecommendation} />
-        {aiEntities ? <ChangesPanel original={aiEntities} current={state.entities} /> : null}
-        <ActionBar
-          saveStatus={saveState.status}
-          canUndo={session.history.past.length > 0}
-          canCreate={canCreate}
-          creating={creating}
-          onUndo={() => dispatchSession({ type: 'undo' })}
-          onShowChanges={() => setShowChanges((v) => !v)}
-          onRegenerate={() => {
-            setError(null);
-            // The server revises the saved draft, so it must hold the latest edits first.
-            void saver.flush().then(
-              () => setRegenerating(true),
-              (cause: unknown) =>
-                setError(normalizeError(cause).title || 'Your changes could not be saved.'),
-            );
-          }}
-          onCreate={() => void create()}
-          onRetrySave={() => void saver.flush().catch(() => undefined)}
-        />
+        {/* A disabled fieldset makes every control inside read-only while Create runs. */}
+        <fieldset
+          disabled={creating}
+          className="ui-stack"
+          style={{ gap: 'var(--space-6)', border: 0, padding: 0, margin: 0, minWidth: 0 }}
+        >
+          <OverviewCard
+            state={state}
+            dispatch={dispatch}
+            result={result}
+            language={proposal.responseLanguage ?? result.detectedLanguage}
+            translation={proposal.translation}
+            onLanguage={(next) =>
+              translate.mutate(next, {
+                onError: (cause) => setError(normalizeError(cause).title),
+              })
+            }
+          />
+          <ModelSection
+            state={state}
+            dispatch={dispatch}
+            fieldErrors={resolved.mapped}
+            unmapped={resolved.unmapped}
+          />
+          <EndpointsSection state={state} dispatch={dispatch} />
+          <AuthSection
+            state={state}
+            dispatch={dispatch}
+            recommendation={result.authRecommendation}
+          />
+          {aiEntities ? <ChangesPanel original={aiEntities} current={state.entities} /> : null}
+          <ActionBar
+            saveStatus={saveState.status}
+            canUndo={session.history.past.length > 0}
+            canCreate={canCreate}
+            creating={creating}
+            onUndo={() => {
+              if (!creating) dispatchSession({ type: 'undo' });
+            }}
+            onShowChanges={() => setShowChanges((v) => !v)}
+            onRegenerate={() => {
+              setError(null);
+              // The server revises the saved draft, so it must hold the latest edits first.
+              void saver.flush().then(
+                () => setRegenerating(true),
+                (cause: unknown) =>
+                  setError(normalizeError(cause).title || 'Your changes could not be saved.'),
+              );
+            }}
+            onCreate={() => void create()}
+            onRetrySave={() => void saver.flush().catch(() => undefined)}
+          />
+        </fieldset>
         {state.authMode === null ? (
           <p className="ui-meta">Answer the authentication question to create the API.</p>
         ) : null}

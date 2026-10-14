@@ -119,6 +119,12 @@ export class DraftSaver<I, R> {
     // `inflight` is set in the same synchronous step as the checks above, so a
     // second caller that was also waiting sees it and waits again.
     const revision = this.revision;
+    const fail = (cause: unknown, conflict: boolean) => {
+      failed = true;
+      this.failure = cause;
+      this.status = conflict ? 'conflict' : 'error';
+      if (conflict) this.clearTimer();
+    };
     // Through a microtask so a `write` that throws synchronously still lands in
     // the failure branch instead of escaping with `status` stuck on 'saving'.
     const attempt: Promise<void> = Promise.resolve()
@@ -126,22 +132,32 @@ export class DraftSaver<I, R> {
       .then(
         (result) => {
           if (epoch !== this.epoch) return;
-          this.revision = this.options.revisionOf(result);
+          // The handlers are caller code; a throw in one must not reject `attempt`
+          // (the wait loop and `inflight` rely on it settling quietly), so it is
+          // reported as a failed save instead.
+          try {
+            // The server stored this save, so its revision is ours even if the
+            // page then fails to take the result in: a retry must not conflict.
+            this.revision = this.options.revisionOf(result);
+            this.options.onSaved(result, input);
+          } catch (cause) {
+            fail(cause, false);
+            return;
+          }
           this.savedSeq = seq;
           this.status = 'saved';
           this.failure = null;
-          this.options.onSaved(result, input);
         },
         (cause: unknown) => {
           if (epoch !== this.epoch) return;
-          failed = true;
-          this.failure = cause;
-          if (this.options.isConflict(cause)) {
-            this.status = 'conflict';
-            this.clearTimer();
-            this.options.onConflict?.();
-          } else {
-            this.status = 'error';
+          const conflict = this.options.isConflict(cause);
+          fail(cause, conflict);
+          if (conflict) {
+            try {
+              this.options.onConflict?.();
+            } catch {
+              // The banner comes from `status`; a failed refetch hook changes nothing.
+            }
           }
         },
       )

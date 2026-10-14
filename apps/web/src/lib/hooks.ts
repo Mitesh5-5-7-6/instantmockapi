@@ -491,12 +491,16 @@ export function useCreateAiProposal() {
   });
 }
 
-export function useAiProposal(proposalId: string | null) {
+export function useAiProposal(
+  proposalId: string | null,
+  options: { refetchOnMount?: 'always' } = {},
+) {
   return useQuery({
     queryKey: ['ai-proposal', proposalId],
     queryFn: () => apiFetch<AiProposalView>(`/v1/ai/proposals/${proposalId}`),
     enabled: proposalId !== null,
     refetchInterval: (query) => pollInterval(query.state.data),
+    ...options,
   });
 }
 

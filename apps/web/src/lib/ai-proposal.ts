@@ -83,3 +83,11 @@ export const EXAMPLE_PROMPTS: Record<string, string[]> = {
   fr: ['Créez une API de commerce électronique avec des produits et des commandes.'],
   de: ['Erstelle eine API für eine Krankenhausverwaltung.'],
 };
+
+/**
+ * Query options for the review page's proposal. The page initialises its form only from a
+ * fetch made after it mounted (a cached view can predate the saved draft), so the mount
+ * fetch must happen even when the cache is fresh — and it always is when /new/ai has just
+ * replaced to the page, inside the app-wide staleTime.
+ */
+export const REVIEW_PROPOSAL_QUERY = { refetchOnMount: 'always' } as const;

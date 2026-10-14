@@ -18,7 +18,7 @@ function deferred<T>() {
 
 class Conflict extends Error {}
 
-function setup() {
+function setup(options: { failOnSaved?: Error } = {}) {
   const calls: { input: string; revision: number; done: ReturnType<typeof deferred<Saved>> }[] = [];
   const saved: { result: Saved; input: string }[] = [];
   const snapshots: SaverSnapshot[] = [];
@@ -32,7 +32,10 @@ function setup() {
     },
     revisionOf: (result) => result.revision,
     isConflict: (error) => error instanceof Conflict,
-    onSaved: (result, input) => saved.push({ result, input }),
+    onSaved: (result, input) => {
+      if (options.failOnSaved) throw options.failOnSaved;
+      saved.push({ result, input });
+    },
     onConflict: () => {
       conflicts += 1;
     },
@@ -257,5 +260,24 @@ describe('DraftSaver', () => {
     // The stale request's conflict belongs to the old form and is ignored.
     expect(t.conflicts()).toBe(0);
     expect(t.calls[1]).toMatchObject({ input: 'new', revision: 9 });
+  });
+
+  it('treats a throw in the success handler as a failed save, and keeps working', async () => {
+    const boom = new Error('handler broke');
+    const t = setup({ failOnSaved: boom });
+    t.saver.reset(0);
+    t.saver.edit('a');
+    const flushed = t.saver.flush();
+    await settle();
+    t.calls[0]!.done.resolve({ revision: 1 });
+    await expect(flushed).rejects.toBe(boom);
+    expect(t.last()).toEqual({ status: 'error', dirty: true, pending: false });
+
+    // The in-flight slot was released, so a retry is sent rather than waiting forever.
+    const retried = t.saver.flush().catch(() => undefined);
+    await settle();
+    expect(t.calls).toHaveLength(2);
+    t.calls[1]!.done.resolve({ revision: 2 });
+    await retried;
   });
 });
