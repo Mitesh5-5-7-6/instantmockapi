@@ -103,6 +103,23 @@ describe('processAiProposalJob', () => {
     expect(after).toMatchObject({ status: 'cancelled', result: null });
   });
 
+  it('stops after a cancel and does not pay for the repair call', async () => {
+    const doc = await generating();
+    const scripted = createScriptedProvider('not json at all', fakeOutputJson(['Alpha']));
+    const provider: LLMProvider = {
+      model: scripted.model,
+      async generate(request) {
+        const text = await scripted.generate(request);
+        // Cancelled while call 1 is in flight; its answer is invalid, so a repair would follow.
+        await AiProposal.updateOne({ _id: doc._id }, { $set: { status: 'cancelled' } });
+        return text;
+      },
+    };
+    const after = await run(doc._id, provider);
+    expect(scripted.calls).toHaveLength(1);
+    expect(after).toMatchObject({ status: 'cancelled', result: null });
+  });
+
   it('does nothing for a proposal that is not generating', async () => {
     const doc = await generating({ status: 'ready' });
     const provider = createScriptedProvider();

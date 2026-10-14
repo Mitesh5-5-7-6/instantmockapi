@@ -19,6 +19,18 @@ export interface AiProposalDeps {
 }
 
 /**
+ * Thrown from a stage write that matched nothing: the proposal was cancelled,
+ * retried or deleted while the model was working. Internal; it only unwinds
+ * `proposeBlueprint` so a repair call is not paid for a result nobody can use.
+ */
+class ProposalSuperseded extends Error {
+  constructor() {
+    super('AI proposal was superseded while generating');
+    this.name = 'ProposalSuperseded';
+  }
+}
+
+/**
  * Turn a `generating` proposal into `ready` or `failed`.
  *
  * Throws only for transient provider errors, so BullMQ's retry policy applies to
@@ -67,26 +79,39 @@ export async function processAiProposalJob(
 
   const provider =
     deps.provider ?? new GeminiProvider({ apiKey: config.geminiApiKey, model: config.geminiModel });
-  const outcome = await proposeBlueprint(
-    {
-      prompt: proposal.prompt,
-      hints: {
-        ...(proposal.hints?.name ? { name: proposal.hints.name } : {}),
-        ...(proposal.hints?.description ? { description: proposal.hints.description } : {}),
-        ...(proposal.hints?.kind ? { kind: proposal.hints.kind } : {}),
+  let outcome: Awaited<ReturnType<typeof proposeBlueprint>>;
+  try {
+    outcome = await proposeBlueprint(
+      {
+        prompt: proposal.prompt,
+        hints: {
+          ...(proposal.hints?.name ? { name: proposal.hints.name } : {}),
+          ...(proposal.hints?.description ? { description: proposal.hints.description } : {}),
+          ...(proposal.hints?.kind ? { kind: proposal.hints.kind } : {}),
+        },
+        responseLanguage: proposal.responseLanguage,
       },
-      responseLanguage: proposal.responseLanguage,
-    },
-    {
-      provider,
-      generationDefaults: newProjectGenerationConfig(config.defaultMockRecords),
-      maxDepth: config.maxNestingDepth,
-      maxMockRecords: config.maxMockRecords,
-      onStage: async (stage) => {
-        await AiProposal.updateOne(pending, { $set: { stage } });
+      {
+        provider,
+        generationDefaults: newProjectGenerationConfig(config.defaultMockRecords),
+        maxDepth: config.maxNestingDepth,
+        maxMockRecords: config.maxMockRecords,
+        onStage: async (stage) => {
+          const written = await AiProposal.updateOne(pending, { $set: { stage } });
+          if (written.matchedCount === 0) {
+            throw new ProposalSuperseded();
+          }
+        },
       },
-    },
-  );
+    );
+  } catch (error) {
+    // Only this signal ends the job quietly; any other error (e.g. a transient provider
+    // failure) must still propagate so BullMQ keeps retrying it.
+    if (error instanceof ProposalSuperseded) {
+      return;
+    }
+    throw error;
+  }
 
   const durationMs = Date.now() - started;
   const provenance = { model: provider.model, promptVersion: PROMPT_VERSION };
