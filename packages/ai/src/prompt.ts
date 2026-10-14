@@ -1,4 +1,5 @@
 import type { ErrorDetail } from '@instantmockapi/shared';
+import { isRecord } from './sanitize.js';
 import type { ProposeInput } from './types.js';
 
 /**
@@ -100,7 +101,7 @@ export function buildUserTurn(input: ProposeInput, examples: readonly unknown[] 
 
   if (input.currentBlueprint && input.currentBlueprint.length > 0) {
     parts.push(
-      `<current_blueprint>\n${neutralise(JSON.stringify(input.currentBlueprint))}\n</current_blueprint>`,
+      `<current_blueprint>\n${neutralise(blueprintText(input.currentBlueprint))}\n</current_blueprint>`,
     );
   }
   const clarifications: string[] = [];
@@ -116,6 +117,55 @@ export function buildUserTurn(input: ProposeInput, examples: readonly unknown[] 
 
   parts.push(`<user_request>\n${neutralise(input.prompt)}\n</user_request>`);
   return parts.join('\n\n');
+}
+
+/** Longest `<current_blueprint>` body, in characters: a giant draft must not crowd out the request. */
+export const BLUEPRINT_MAX_CHARS = 64_000;
+const TRUNCATED_NOTE = '\n(blueprint truncated)';
+
+/** The listed keys of each record in a list; anything that is not a list becomes an empty one. */
+function pickEach(value: unknown, keys: readonly string[]): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(isRecord)
+    .map((item) =>
+      Object.fromEntries(keys.filter((key) => key in item).map((key) => [key, item[key]])),
+    );
+}
+
+/** The structure the model must revise, without prose or validation detail. */
+function reduceEntity(entity: unknown): Record<string, unknown> {
+  if (!isRecord(entity)) return {};
+  return {
+    name: entity['name'],
+    fields: pickEach(entity['fields'], ['name', 'type', 'required']),
+    relations: pickEach(entity['relations'], ['name', 'kind', 'target']),
+  };
+}
+
+/**
+ * The blueprint as sent: whole when it fits, else reduced to its structure, else
+ * the reduced entities that fit plus a note. Measured before neutralising, which
+ * swaps characters one for one and so keeps the length.
+ */
+function blueprintText(blueprint: readonly unknown[]): string {
+  const whole = JSON.stringify(blueprint);
+  if (whole.length <= BLUEPRINT_MAX_CHARS) return whole;
+  const reduced = blueprint.map(reduceEntity);
+  const compact = JSON.stringify(reduced);
+  if (compact.length <= BLUEPRINT_MAX_CHARS) return compact;
+  // The longest prefix of entities whose array, plus the note, fits.
+  const budget = BLUEPRINT_MAX_CHARS - TRUNCATED_NOTE.length;
+  const kept: string[] = [];
+  let length = 2; // the brackets
+  for (const entity of reduced) {
+    const text = JSON.stringify(entity);
+    const next = length + text.length + (kept.length > 0 ? 1 : 0);
+    if (next > budget) break;
+    kept.push(text);
+    length = next;
+  }
+  return `[${kept.join(',')}]${TRUNCATED_NOTE}`;
 }
 
 /** Maximum issues sent back; more than this rarely helps and inflates the prompt. */
