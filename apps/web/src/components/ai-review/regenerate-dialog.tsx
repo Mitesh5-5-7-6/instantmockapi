@@ -34,9 +34,10 @@ export function RegenerateDialog({
   parentRevision: () => number;
   onAdopted: (childId: string) => void;
 }) {
-  const [answers, setAnswers] = useState(() =>
-    (proposal.result?.questions ?? []).map((q) => `${q}\n→ `).join('\n'),
-  );
+  // Starts empty: pre-filling it with the questions would send them back as
+  // "answers" from a user who typed nothing.
+  const [answers, setAnswers] = useState('');
+  const questions = proposal.result?.questions ?? [];
   const [instruction, setInstruction] = useState('');
   const [childId, setChildId] = useState<string | null>(proposal.childId);
   const [choices, setChoices] = useState<Record<string, MergeChoice>>({});
@@ -92,11 +93,25 @@ export function RegenerateDialog({
     <Modal open={open} onClose={close} title="Regenerate suggestion">
       {!childId ? (
         <div className="ui-stack">
+          {questions.length > 0 ? (
+            <div className="ui-stack">
+              <p className="ui-meta">The AI asked:</p>
+              <ul>
+                {questions.map((question, i) => (
+                  <li key={i}>{question}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           <Textarea
             value={answers}
-            rows={6}
+            rows={questions.length > 0 ? 6 : 3}
             maxLength={1000}
-            placeholder="Answers to the questions (optional)"
+            placeholder={
+              questions.length > 0
+                ? 'Answer any of the questions above (optional)'
+                : 'Anything the AI should know? (optional)'
+            }
             onChange={(e) => setAnswers(e.target.value)}
           />
           <Textarea
