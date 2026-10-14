@@ -8,5 +8,10 @@ export {
   generateIdempotencyKey,
   enqueueGenerationJob,
   createGenerationWorker,
+  AI_QUEUE_NAME,
+  getAiProposalQueue,
+  enqueueAiProposalJob,
+  createAiProposalWorker,
   type GenerationJobPayload,
+  type AiProposalJobPayload,
 } from './queue.js';
