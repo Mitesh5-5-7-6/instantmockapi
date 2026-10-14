@@ -21,6 +21,7 @@ import type { Mailer } from './email.js';
 import { authRoutes } from './routes/auth.js';
 import { projectRoutes } from './routes/projects.js';
 import { aiProposalRoutes } from './routes/ai-proposals.js';
+import { aiProposalReviewRoutes } from './routes/ai-proposal-review.js';
 import { generationRoutes } from './routes/generation.js';
 import { draftRoutes } from './routes/drafts.js';
 import { jobRoutes } from './routes/jobs.js';
@@ -219,6 +220,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await app.register(authRoutes, { prefix: '/v1', config, mailer: options.mailer });
   await app.register(projectRoutes, { prefix: '/v1', config });
   await app.register(aiProposalRoutes, { prefix: '/v1', config });
+  await app.register(aiProposalReviewRoutes, { prefix: '/v1', config });
   await app.register(generationRoutes, { prefix: '/v1', config });
   await app.register(draftRoutes, { prefix: '/v1', config });
   await app.register(jobRoutes, {

@@ -11,8 +11,21 @@ export {
   sanitizeMeta,
   PROSE_MAX,
 } from './sanitize.js';
-export { toBuilderShape, validateShape, type BuilderShape, type ShapeLimits } from './shape.js';
-export { PROMPT_VERSION, SYSTEM_PROMPT, buildRepairTurn, buildUserTurn } from './prompt.js';
+export {
+  toBuilderShape,
+  validateShape,
+  type BuilderShape,
+  type ShapeLimits,
+  type ShapeOptions,
+} from './shape.js';
+export {
+  LANGUAGE_CODE,
+  PROMPT_VERSION,
+  SYSTEM_PROMPT,
+  buildRepairTurn,
+  buildUserTurn,
+  neutralise,
+} from './prompt.js';
 export {
   GeminiProvider,
   ProviderError,
@@ -29,3 +42,13 @@ export {
   type ProposeOutcome,
 } from './propose.js';
 export { createScriptedProvider, fakeOutputJson } from './testing.js';
+export {
+  TRANSLATE_PROMPT,
+  buildTranslateTurn,
+  proseOf,
+  readTranslation,
+  translateProse,
+  withProse,
+  type ProposalProse,
+  type TranslateOutcome,
+} from './translate.js';

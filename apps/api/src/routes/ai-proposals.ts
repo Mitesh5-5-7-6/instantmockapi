@@ -6,7 +6,7 @@
  * request. Every route is owner-scoped; another user's proposal is a 404.
  */
 
-import type { FastifyPluginAsync, FastifyReply } from 'fastify';
+import type { FastifyPluginAsync } from 'fastify';
 import {
   AppError,
   SLUG_MAX_LENGTH,
@@ -16,7 +16,7 @@ import {
   logger,
 } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
-import { AiProposal, Project, mongoose, type IAiProposal } from '@instantmockapi/db';
+import { AiProposal, Project, type IAiProposal } from '@instantmockapi/db';
 import { enqueueAiProposalJob } from '@instantmockapi/queue';
 import { PROMPT_VERSION, toBuilderShape } from '@instantmockapi/ai';
 import { newProjectGenerationConfig } from '@instantmockapi/ips';
@@ -25,32 +25,20 @@ import { assertProjectQuota, createProjectRecord } from '../project-create.js';
 import { toProjectDetail } from '../serializers.js';
 import { listEnvelope, parsePagination } from '../pagination.js';
 import { toAiProposalSummary, toAiProposalView } from '../ai-proposal-serializers.js';
+import {
+  AI_PROPOSAL_LIMIT,
+  KINDS,
+  assertProposalBudget,
+  conflict,
+  expireIfStuck,
+  idParams,
+  loadOwnedProposal,
+  type ProposalKindInput,
+} from '../ai-proposal-access.js';
 
 export interface AiProposalRouteOptions {
   config: EnvConfig;
 }
-
-/**
- * Burst guard only. The plugin's counter is per route and per instance (and
- * resets on a restart), so on its own it cannot enforce an hourly budget; the
- * Mongo-backed `assertProposalBudget` below is the real, shared limit.
- */
-const AI_PROPOSAL_LIMIT = { max: 20, timeWindow: 60 * 60_000 };
-
-/** Model runs per user per hour. Each run costs one or two model calls, so this is a cost guard. */
-export const AI_RUNS_PER_HOUR = 20;
-
-/** A job cannot legitimately run this long; past it, the proposal was lost (e.g. Redis restarted). */
-const STUCK_AFTER_MS = 10 * 60_000;
-
-const KINDS = ['project', 'single'] as const;
-type ProposalKindInput = (typeof KINDS)[number];
-
-const idParams = {
-  type: 'object',
-  required: ['id'],
-  properties: { id: { type: 'string', maxLength: 64 } },
-} as const;
 
 interface CreateBody {
   prompt: string;
@@ -65,105 +53,6 @@ interface CommitBody {
   name?: string;
   slug?: string;
   description?: string;
-  blueprint?: { entities: unknown[]; generationConfig?: unknown };
-}
-
-function notFound(): AppError {
-  return new AppError({ code: 'NOT_FOUND', message: 'Proposal not found' });
-}
-
-/**
- * Refuse when the owner has already started `AI_RUNS_PER_HOUR` runs in the last
- * hour. Counts `runs` (retries included) over proposals whose current run
- * started in the window, so creating and retrying share one budget across all
- * instances.
- */
-async function assertProposalBudget(ownerId: string): Promise<void> {
-  const hourAgo = new Date(Date.now() - 60 * 60_000);
-  const [usage] = await AiProposal.aggregate<{ runs: number }>([
-    { $match: { ownerId: new mongoose.Types.ObjectId(ownerId), runStartedAt: { $gte: hourAgo } } },
-    { $group: { _id: null, runs: { $sum: '$runs' } } },
-  ]);
-  if ((usage?.runs ?? 0) >= AI_RUNS_PER_HOUR) {
-    throw new AppError({
-      code: 'RATE_LIMIT_EXCEEDED',
-      message: `You have reached the limit of ${AI_RUNS_PER_HOUR} AI generations per hour. Please try again later.`,
-    });
-  }
-}
-
-async function loadOwnedProposal(id: string, ownerId: string): Promise<IAiProposal> {
-  if (!mongoose.isValidObjectId(id)) {
-    throw notFound();
-  }
-  const doc = await AiProposal.findOne({ _id: id, ownerId });
-  if (!doc) {
-    throw notFound();
-  }
-  return doc;
-}
-
-/** Project creation is a handful of writes; past this, the request that claimed it is gone. */
-const COMMIT_STUCK_AFTER_MS = 2 * 60_000;
-
-/** Lazy expiry: settle a lost job on read instead of running a sweeper. */
-async function expireIfStuck(doc: IAiProposal): Promise<IAiProposal> {
-  if (doc.status === 'committing') {
-    if (doc.updatedAt.getTime() > Date.now() - COMMIT_STUCK_AFTER_MS) {
-      return doc;
-    }
-    // Goes to `failed`, not back to `ready`: no project id is recorded before the
-    // save, so we cannot tell whether the project exists, and `ready` would let a
-    // second commit create a duplicate. `failed` allows a retry or a new proposal
-    // after the user has checked their projects list.
-    const interrupted = await AiProposal.findOneAndUpdate(
-      { _id: doc._id, status: 'committing', updatedAt: doc.updatedAt },
-      {
-        $set: {
-          status: 'failed',
-          stage: null,
-          error: {
-            code: 'AI_GENERATION_FAILED',
-            message:
-              'Project creation was interrupted. Check your projects list before trying again.',
-            details: [],
-          },
-        },
-      },
-      { new: true },
-    );
-    return interrupted ?? (await AiProposal.findById(doc._id)) ?? doc;
-  }
-  if (doc.status !== 'generating' || doc.updatedAt.getTime() > Date.now() - STUCK_AFTER_MS) {
-    return doc;
-  }
-  const expired = await AiProposal.findOneAndUpdate(
-    { _id: doc._id, status: 'generating', updatedAt: doc.updatedAt },
-    {
-      $set: {
-        status: 'failed',
-        stage: null,
-        error: {
-          code: 'AI_GENERATION_FAILED',
-          message: 'Generation timed out. Please retry.',
-          details: [],
-        },
-      },
-    },
-    { new: true },
-  );
-  return expired ?? (await AiProposal.findById(doc._id)) ?? doc;
-}
-
-function conflict(reply: FastifyReply, doc: IAiProposal, message: string) {
-  return reply.status(409).send({
-    error: {
-      code: 'CONFLICT',
-      message,
-      status: doc.status,
-      ...(doc.projectId ? { projectId: String(doc.projectId) } : {}),
-    },
-  });
 }
 
 export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = async (
@@ -332,6 +221,13 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
     if (!doc) {
       return conflict(reply, owned, 'This proposal can no longer be cancelled.');
     }
+    if (doc.parentId) {
+      // "Keep my draft": the parent stops pointing at a suggestion that no longer exists.
+      await AiProposal.updateOne(
+        { _id: doc.parentId, childId: doc._id, status: 'ready' },
+        { $set: { childId: null } },
+      );
+    }
     return reply.send(toAiProposalView(doc));
   });
 
@@ -348,14 +244,6 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
             name: { type: 'string', minLength: 1, maxLength: 120 },
             slug: { type: 'string', pattern: SLUG_PATTERN.source, maxLength: SLUG_MAX_LENGTH },
             description: { type: 'string', maxLength: 500 },
-            // `authentication` is deliberately not accepted in SP1. The auth question arrives
-            // in Sub-project 2, which must also add this file to ALLOWED in
-            // packages/ips/src/auth-invariants.test.ts.
-            blueprint: {
-              type: 'object',
-              required: ['entities'],
-              properties: { entities: { type: 'array' } },
-            },
           },
         },
       },
@@ -364,24 +252,17 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
         request.body ??= {};
         // Unlike the other routes, which silently strip unknown fields (Fastify's ajv
         // removeAdditional), this one rejects `authentication` outright. The field decides who
-        // can read a project, and SP2 reintroduces it deliberately; until then a client that
-        // sends it must hear that it was not applied rather than assume it was.
-        // `blueprint.authentication` and entity-level `authentication` are silently dropped by
-        // `toBuilderShape` (platform-owned fields); only the top-level field is rejected loudly,
-        // because it is the one a client would send deliberately.
+        // can read a project, and it comes only from the saved, reviewed draft; a client that
+        // sends it here must hear that it was not applied rather than assume it was.
         const body = request.body;
         if (typeof body === 'object' && body !== null && !Array.isArray(body)) {
           if ('authentication' in body) {
             done(
               new AppError({
                 code: 'VALIDATION_ERROR',
-                message: 'authentication is not accepted on AI proposal commit yet',
-                details: [
-                  {
-                    path: 'authentication',
-                    issue: 'not accepted until the authentication step ships (Sub-project 2)',
-                  },
-                ],
+                message:
+                  'authentication is not accepted on commit; set authentication in the draft',
+                details: [{ path: 'authentication', issue: 'set authentication in the draft' }],
               }),
             );
             return;
@@ -404,16 +285,28 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
         });
       }
 
+      // "Always ask" (SP2 §5.2): the auth answer lives only in the reviewed draft.
+      // Only for a ready proposal: any other status falls through to the claim below and
+      // keeps SP1's 409 (with the projectId when committed).
+      if (owned.status === 'ready' && (!owned.draft || owned.draft.authAnswered !== true)) {
+        throw new AppError({
+          code: 'VALIDATION_ERROR',
+          message: 'Answer the authentication question first',
+          details: [{ path: 'authentication', issue: 'Answer the authentication question first' }],
+        });
+      }
+
       await assertProjectQuota(sub, request.authUser?.plan);
 
       // The claim is the double-commit guard: only one request can move
       // ready → committing; the loser sees the new status and gets a 409.
+      // `draft.authAnswered` repeats the pre-check so a race can never commit an unanswered draft.
       const claimed = await AiProposal.findOneAndUpdate(
-        { _id: owned._id, status: 'ready', result: { $ne: null } },
+        { _id: owned._id, status: 'ready', 'draft.authAnswered': true },
         { $set: { status: 'committing' } },
         { new: true },
       );
-      if (!claimed || !claimed.result) {
+      if (!claimed || !claimed.draft) {
         const current = (await AiProposal.findById(owned._id)) ?? owned;
         return conflict(
           reply,
@@ -427,20 +320,20 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
       // Captured so the failure path can tell whether the project was persisted.
       let createdId: string | null = null;
       try {
-        const result = claimed.result;
+        const draft = claimed.draft;
         const shape = toBuilderShape(
-          body.blueprint ?? {
-            entities: result.entities,
-            generationConfig: result.generationConfig,
-          },
+          { entities: draft.entities, generationConfig: draft.generationConfig },
           newProjectGenerationConfig(config.defaultMockRecords),
           { maxMockRecords: config.maxMockRecords },
+          { keepEntityAuth: true },
         );
-        const kind = body.kind ?? claimed.hints?.kind ?? result.recommendedKind;
-        const name = body.name?.trim() || result.name;
+        const kind = body.kind ?? draft.kind;
+        const name = body.name?.trim() || draft.name || claimed.result?.name || 'Generated API';
         const raw = JSON.stringify({
           entities: shape.entities,
           generationConfig: shape.generationConfig,
+          // A pass-through of the reviewed answer; IPS validates it in parseInputSource.
+          ...(draft.authentication ? { authentication: draft.authentication } : {}),
         });
 
         const created = await createProjectRecord({
@@ -452,10 +345,10 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
               kind,
               slug: body.slug ?? null,
               // Project.description has maxlength 500; a 1000-char prompt fallback would 500 on save.
-              description: (body.description ?? (result.description || claimed.prompt)).slice(
-                0,
-                500,
-              ),
+              description: (
+                body.description ??
+                (draft.description || claimed.result?.description || claimed.prompt)
+              ).slice(0, 500),
               inputSource: { type: 'builder', raw },
               ips: parseInputSource(projectId, name, 'builder', raw, config, kind),
             };

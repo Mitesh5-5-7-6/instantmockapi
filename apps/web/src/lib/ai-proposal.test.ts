@@ -1,10 +1,14 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   EXAMPLE_PROMPTS,
+  REVIEW_PROPOSAL_QUERY,
   RESPONSE_LANGUAGES,
   defaultResponseLanguage,
   examplesFor,
   isSettled,
+  languageOptions,
   pollInterval,
   responseLanguageFor,
   stageLabel,
@@ -71,5 +75,48 @@ describe('response language', () => {
     expect(examples).toContain(EXAMPLE_PROMPTS['gu']![0]);
     expect(examples).toHaveLength(Object.values(EXAMPLE_PROMPTS).length + 1);
     expect(examplesFor('gu')).toEqual(EXAMPLE_PROMPTS['gu']);
+  });
+});
+
+it('keeps polling a ready proposal while a translation is pending', () => {
+  const now = Date.parse('2026-10-14T10:00:10.000Z');
+  const view = {
+    status: 'ready',
+    updatedAt: '2026-10-14T10:00:00.000Z',
+    translation: { status: 'pending' },
+  };
+  expect(pollInterval(view, now)).toBe(2_000);
+  expect(pollInterval({ ...view, translation: { status: 'failed' } }, now)).toBe(false);
+  expect(pollInterval({ ...view, translation: null }, now)).toBe(false);
+});
+
+describe('the review page query', () => {
+  // The review page initialises only from a fetch made after it mounts. /new/ai replaces to
+  // it straight after the fetch that saw 'ready', inside the app-wide 10 s staleTime, so
+  // without always no mount fetch happens and the page waits forever.
+  it('always refetches on mount', () => {
+    expect(REVIEW_PROPOSAL_QUERY.refetchOnMount).toBe('always');
+  });
+
+  // A source scan (vitest here has no DOM, so the page cannot be rendered): the constant is
+  // only a guard if the page actually passes it.
+  it('is the one the review page passes', () => {
+    const page = readFileSync(join(process.cwd(), 'src/app/new/ai/[id]/page.tsx'), 'utf8');
+    expect(page).toContain('useAiProposal(id, REVIEW_PROPOSAL_QUERY)');
+  });
+});
+
+describe('languageOptions', () => {
+  const listed = RESPONSE_LANGUAGES.filter((option) => option.code !== 'auto');
+
+  it('offers the listed languages, without auto, when the current one is listed', () => {
+    expect(languageOptions('en')).toEqual(listed);
+    expect(languageOptions('gu').map((option) => option.code)).not.toContain('auto');
+  });
+
+  it.each(['mr', 'ja', 'en-US'])('puts an unlisted current language (%s) first', (code) => {
+    const options = languageOptions(code);
+    expect(options[0]).toEqual({ code, label: `${code} (current)` });
+    expect(options.slice(1)).toEqual(listed);
   });
 });

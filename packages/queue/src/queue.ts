@@ -35,6 +35,10 @@ export const AI_QUEUE_NAME = 'ai-proposal-jobs';
 export interface AiProposalJobPayload {
   proposalId: string;
   run: number;
+  /** A missing kind means propose, so jobs queued before SP2 still run. */
+  kind?: 'propose' | 'translate';
+  /** Target language of a translate job. */
+  language?: string;
 }
 
 export const QUEUE_NAME = 'generation-jobs';
@@ -119,6 +123,21 @@ export async function enqueueAiProposalJob(
     AI_QUEUE_NAME,
     { proposalId, run },
     { jobId: `${proposalId}-${run}` },
+  )) as Job<AiProposalJobPayload>;
+}
+
+/** Translate jobs get their own id per request (`-t<n>`) so a retried translation is a new job. */
+export async function enqueueAiTranslateJob(
+  proposalId: string,
+  run: number,
+  translation: number,
+  language: string,
+): Promise<Job<AiProposalJobPayload>> {
+  logger.info('Enqueuing AI translate job', { proposalId, translation, language });
+  return (await getAiProposalQueue().add(
+    AI_QUEUE_NAME,
+    { proposalId, run, kind: 'translate', language },
+    { jobId: `${proposalId}-t${translation}` },
   )) as Job<AiProposalJobPayload>;
 }
 
@@ -362,7 +381,7 @@ export function createAiProposalWorker(
   return buildWorker(
     AI_QUEUE_NAME,
     'AI proposal',
-    (payload) => ({ proposalId: payload.proposalId }),
+    (payload) => ({ proposalId: payload.proposalId, kind: payload.kind ?? 'propose' }),
     handler,
     options,
   );

@@ -263,6 +263,21 @@ const ALLOWED: Record<string, string> = {
     "validates the raw value's shape before it is ever resolved — a shape check, not a protection decision",
   'packages/ips/src/types.ts': 'declares the field',
   /*
+   * The AI review draft (Phase 7 SP2). `buildDraft` copies the user's answer to
+   * "Does this API require authentication?" from the request onto the stored
+   * draft, which commit later hands to the builder adapter. Nothing here compares
+   * it to a protection value.
+   */
+  'apps/api/src/ai-draft.ts':
+    'copies the review form’s auth answer onto the stored draft; makes no protection decision',
+  /*
+   * Commit from the reviewed draft (Phase 7 SP2). The route hands the draft's auth
+   * block to the builder adapter via `parseInputSource`, which validates it.
+   * Nothing here compares it to a protection value.
+   */
+  'apps/api/src/routes/ai-proposals.ts':
+    'passes the reviewed draft’s auth block to the builder adapter; makes no protection decision',
+  /*
    * The client's mirror of this module.
    *
    * `apps/web` may not import `@instantmockapi/ips` (`web-must-not-import-server`),

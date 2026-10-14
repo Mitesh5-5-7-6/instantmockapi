@@ -22,6 +22,11 @@ export function toAiProposalView(doc: IAiProposal) {
     geminiCalls: doc.geminiCalls,
     durationMs: doc.durationMs,
     projectId: doc.projectId ? String(doc.projectId) : null,
+    draft: doc.draft,
+    translation: doc.translation,
+    parentId: doc.parentId ? String(doc.parentId) : null,
+    childId: doc.childId ? String(doc.childId) : null,
+    clarification: doc.clarification,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };
