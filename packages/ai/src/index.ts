@@ -12,3 +12,4 @@ export {
   PROSE_MAX,
 } from './sanitize.js';
 export { toBuilderShape, validateShape, type BuilderShape } from './shape.js';
+export { PROMPT_VERSION, SYSTEM_PROMPT, buildRepairTurn, buildUserTurn } from './prompt.js';
