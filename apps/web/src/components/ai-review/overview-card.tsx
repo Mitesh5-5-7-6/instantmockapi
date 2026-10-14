@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   Field,
+  FormError,
   Input,
   Modal,
   Note,
@@ -13,7 +14,7 @@ import {
   Textarea,
 } from '@instantmockapi/ui';
 import type { AiProposalResult, AiProposalView } from '../../lib/api-types';
-import { RESPONSE_LANGUAGES } from '../../lib/ai-proposal';
+import { languageOptions } from '../../lib/ai-proposal';
 import type { ReviewAction, ReviewState } from '../../lib/review-state';
 
 export function OverviewCard({
@@ -22,6 +23,7 @@ export function OverviewCard({
   result,
   language,
   translation,
+  translateError,
   onLanguage,
 }: {
   state: ReviewState;
@@ -29,10 +31,12 @@ export function OverviewCard({
   result: AiProposalResult;
   language: string;
   translation: AiProposalView['translation'];
+  /** Why the last translate request failed (e.g. the hourly limit), shown by the select. */
+  translateError: string | null;
   onLanguage: (language: string) => void;
 }) {
   const [confirmSingle, setConfirmSingle] = useState(false);
-  const languages = RESPONSE_LANGUAGES.filter((option) => option.code !== 'auto');
+  const current = translation?.status === 'pending' ? translation.language : language;
   return (
     <Card className="ui-stack">
       <Field label="API name">
@@ -74,17 +78,15 @@ export function OverviewCard({
         <Badge>Recommended: {result.recommendedKind}</Badge> {result.kindRationale}
       </p>
       <Field label="Explain the result in">
-        <Select
-          value={translation?.status === 'pending' ? translation.language : language}
-          onChange={(e) => onLanguage(e.target.value)}
-        >
-          {languages.map((option) => (
+        <Select value={current} onChange={(e) => onLanguage(e.target.value)}>
+          {languageOptions(current).map((option) => (
             <option key={option.code} value={option.code}>
               {option.label}
             </option>
           ))}
         </Select>
       </Field>
+      {translateError ? <FormError title={translateError} /> : null}
       {translation?.status === 'pending' ? (
         <p className="ui-meta" role="status">
           Translating…

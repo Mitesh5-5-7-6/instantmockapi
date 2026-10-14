@@ -8,6 +8,7 @@ import {
   defaultResponseLanguage,
   examplesFor,
   isSettled,
+  languageOptions,
   pollInterval,
   responseLanguageFor,
   stageLabel,
@@ -102,5 +103,20 @@ describe('the review page query', () => {
   it('is the one the review page passes', () => {
     const page = readFileSync(join(process.cwd(), 'src/app/new/ai/[id]/page.tsx'), 'utf8');
     expect(page).toContain('useAiProposal(id, REVIEW_PROPOSAL_QUERY)');
+  });
+});
+
+describe('languageOptions', () => {
+  const listed = RESPONSE_LANGUAGES.filter((option) => option.code !== 'auto');
+
+  it('offers the listed languages, without auto, when the current one is listed', () => {
+    expect(languageOptions('en')).toEqual(listed);
+    expect(languageOptions('gu').map((option) => option.code)).not.toContain('auto');
+  });
+
+  it.each(['mr', 'ja', 'en-US'])('puts an unlisted current language (%s) first', (code) => {
+    const options = languageOptions(code);
+    expect(options[0]).toEqual({ code, label: `${code} (current)` });
+    expect(options.slice(1)).toEqual(listed);
   });
 });

@@ -310,11 +310,12 @@ function AiReview({ id }: { id: string }) {
             result={result}
             language={proposal.responseLanguage ?? result.detectedLanguage}
             translation={proposal.translation}
-            onLanguage={(next) =>
-              translate.mutate(next, {
-                onError: (cause) => setError(normalizeError(cause).title),
-              })
+            translateError={
+              translate.error
+                ? normalizeError(translate.error).title || 'Could not translate the explanation.'
+                : null
             }
+            onLanguage={(next) => translate.mutate(next)}
           />
           <ModelSection
             state={state}

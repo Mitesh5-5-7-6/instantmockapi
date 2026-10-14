@@ -48,6 +48,21 @@ export const RESPONSE_LANGUAGES = [
   { code: 'de', label: 'Deutsch' },
 ] as const;
 
+/**
+ * The review page's "Explain the result in" choices. The proposal can already be
+ * in a language the list lacks (auto-detected `mr`, or `en-US`); it is offered
+ * first as itself so the select shows the truth and every listed language is a
+ * real change, never a no-op that only looks selected.
+ */
+export function languageOptions(current: string): { code: string; label: string }[] {
+  const listed = RESPONSE_LANGUAGES.filter((option) => option.code !== 'auto').map(
+    ({ code, label }) => ({ code, label }),
+  );
+  return listed.some((option) => option.code === current)
+    ? listed
+    : [{ code: current, label: `${current} (current)` }, ...listed];
+}
+
 /** `auto` sends no language, so the server answers in the language of the prompt. */
 export function defaultResponseLanguage(): string {
   return 'auto';
