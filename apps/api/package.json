@@ -15,6 +15,7 @@
     "@fastify/cookie": "^11.1.2",
     "@fastify/cors": "^11.3.0",
     "@fastify/rate-limit": "^10.2.1",
+    "@instantmockapi/ai": "workspace:*",
     "@instantmockapi/auth": "workspace:*",
     "@instantmockapi/config": "workspace:*",
     "@instantmockapi/db": "workspace:*",

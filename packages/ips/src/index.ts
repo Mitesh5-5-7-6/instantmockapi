@@ -244,3 +244,4 @@ export {
   type BuildBlueprintOptions,
   type NormalizeBlueprintOptions,
 } from './blueprint.js';
+export { newProjectGenerationConfig } from './generation-defaults.js';

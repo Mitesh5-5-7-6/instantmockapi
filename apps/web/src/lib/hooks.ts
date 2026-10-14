@@ -18,7 +18,10 @@ import {
   subscribeJobStream,
   type AuthState,
 } from './api-client';
+import { pollInterval } from './ai-proposal';
 import type {
+  AiProposalSummary,
+  AiProposalView,
   ApiUser,
   ArtifactContent,
   ArtifactListMeta,
@@ -469,17 +472,73 @@ export function useCreateProject() {
   });
 }
 
-export function useCreateAiProject() {
+export function useCreateAiProposal() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: {
       prompt: string;
       name?: string;
-      kind?: 'project' | 'single' | 'auth';
-      slug?: string;
+      kind?: 'project' | 'single';
       description?: string;
-    }) => apiFetch<ProjectDetail>('/v1/projects/ai', { method: 'POST', body: input }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
+      responseLanguage?: string;
+    }) => apiFetch<AiProposalView>('/v1/ai/proposals', { method: 'POST', body: input }),
+    onSuccess: (view) => {
+      queryClient.setQueryData(['ai-proposal', view.id], view);
+      void queryClient.invalidateQueries({ queryKey: ['ai-proposals'] });
+    },
+  });
+}
+
+export function useAiProposal(proposalId: string | null) {
+  return useQuery({
+    queryKey: ['ai-proposal', proposalId],
+    queryFn: () => apiFetch<AiProposalView>(`/v1/ai/proposals/${proposalId}`),
+    enabled: proposalId !== null,
+    refetchInterval: (query) => pollInterval(query.state.data),
+  });
+}
+
+export function useAiProposals() {
+  return useQuery({
+    queryKey: ['ai-proposals'],
+    queryFn: () => apiFetch<ListEnvelope<AiProposalSummary>>('/v1/ai/proposals?limit=8'),
+  });
+}
+
+function useAiProposalAction(action: 'retry' | 'cancel') {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (proposalId: string) =>
+      apiFetch<AiProposalView>(`/v1/ai/proposals/${proposalId}/${action}`, {
+        method: 'POST',
+        body: {},
+      }),
+    onSuccess: (view) => {
+      queryClient.setQueryData(['ai-proposal', view.id], view);
+      void queryClient.invalidateQueries({ queryKey: ['ai-proposals'] });
+    },
+  });
+}
+
+export const useRetryAiProposal = () => useAiProposalAction('retry');
+export const useCancelAiProposal = () => useAiProposalAction('cancel');
+
+export function useCommitAiProposal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      proposalId,
+      ...body
+    }: {
+      proposalId: string;
+      kind?: 'project' | 'single';
+      name?: string;
+    }) =>
+      apiFetch<ProjectDetail>(`/v1/ai/proposals/${proposalId}/commit`, { method: 'POST', body }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+      void queryClient.invalidateQueries({ queryKey: ['ai-proposals'] });
+    },
   });
 }
 

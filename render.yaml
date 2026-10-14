@@ -94,6 +94,12 @@ services:
       # single-service deployment — see INFRASTRUCTURE.md "Two logical services".
       - key: RUN_WORKER_IN_PROCESS
         value: 'false'
+      # The API only checks the key is present before queueing an AI proposal
+      # (503 otherwise); the worker is the one that calls Gemini.
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
 
   # ── Hosted mock runtime (apps/mock-runtime) ────────────────────────────────
   # The service that answers every generated API. Separate from the platform API
@@ -144,4 +150,11 @@ services:
       - key: HOSTED_BASE_URL
         sync: false
       - key: WORKER_CONCURRENCY
+        value: '2'
+      # AI proposals are generated here, so the worker owns the provider call.
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: AI_WORKER_CONCURRENCY
         value: '2'

@@ -7,3 +7,8 @@
  */
 
 export { processGenerationJob, settleExhaustedJob, type ProcessorDeps } from './processor.js';
+export {
+  processAiProposalJob,
+  settleExhaustedAiProposal,
+  type AiProposalDeps,
+} from './ai-proposal-processor.js';

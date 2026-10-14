@@ -24,6 +24,7 @@
     "@instantmockapi/shared": "workspace:*",
     "@instantmockapi/config": "workspace:*",
     "@instantmockapi/ips": "workspace:*",
+    "@instantmockapi/ai": "workspace:*",
     "@instantmockapi/db": "workspace:*",
     "@instantmockapi/registry": "workspace:*",
     "@instantmockapi/queue": "workspace:*",

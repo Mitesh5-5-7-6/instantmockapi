@@ -50,6 +50,16 @@ export {
 } from './models/mockAuthSecret.js';
 export { ApiLog, USER_AGENT_MAX_LENGTH, type IApiLog, type ApiLogShape } from './models/apiLog.js';
 
+/** AI proposals (Phase 7 SP1): operational, owner-scoped, 30-day TTL. */
+export {
+  AiProposal,
+  AI_PROPOSAL_TTL_SECONDS,
+  AI_PROPOSAL_RAW_OUTPUT_MAX,
+  type IAiProposal,
+  type AiProposalStatus,
+  type AiProposalStage,
+} from './models/aiProposal.js';
+
 // Export Queries
 export {
   findExpiredProjects,
