@@ -3,7 +3,7 @@
 > **Source spec:** [PHASE7_SPEC.md](PHASE7_SPEC.md) (Intelligent Multilingual AI API Builder with Persistent Learning Memory).
 > It supersedes the earlier [/phase7.md](../phase7.md) wherever the two disagree.
 >
-> **Status:** Stage A complete. **Sub-project 1 implemented** on `feat/phase7-sp1-ai-core` (plan: [SP1_PLAN.md](SP1_PLAN.md)). Sub-projects 2–5 scoped; each needs its own design review.
+> **Status:** Stage A complete. **Sub-project 1 is implemented** on `feat/phase7-sp1-ai-core` (plan: [SP1_PLAN.md](SP1_PLAN.md)); the manual Gemini check (an English and a Gujarati prompt, prompt → Create → Generate) is pending. Sub-projects 2–5 scoped; each needs its own design review.
 >
 > **Rule from the spec (§18):** never ship more than one sub-project in a single change. Each sub-project ends with its tests green, a review, and a merge before the next one starts.
 
@@ -396,6 +396,7 @@ Example prompts in the editor are shown in the selected UI language (§2). They 
   - `AI_WORKER_CONCURRENCY`
   - `AI_PROPOSAL_RATE_LIMIT`
   - `AI_PROPOSAL_TTL_DAYS` (default 30)
+- **Deviation:** `AI_PROPOSAL_TTL_DAYS` and `AI_PROPOSAL_RATE_LIMIT` were kept as code constants, not env keys. The TTL is fixed because changing `expireAfterSeconds` on an existing index conflicts with autoIndex; the rate limit is the Mongo-enforced `AI_RUNS_PER_HOUR` (20).
 - `GEMINI_API_KEY` / `GOOGLE_API_KEY` are read by both the API (to check the key is configured) and the worker (for calls). **Never** expose them to `apps/web`.
 
 ### 5.3 SP1 tests
