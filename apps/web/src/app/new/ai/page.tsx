@@ -2,13 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQueryClient } from '@tanstack/react-query';
-import { Badge, Button, Card, Field, FormError, Input, Select, Textarea } from '@instantmockapi/ui';
+import { Button, Card, Field, FormError, Input, Select, Textarea } from '@instantmockapi/ui';
 import {
   useAiProposal,
   useAiProposals,
   useCancelAiProposal,
-  useCommitAiProposal,
   useCreateAiProposal,
   useRetryAiProposal,
 } from '../../../lib/hooks';
@@ -23,18 +21,15 @@ import {
 
 export default function NewAiPage() {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const [prompt, setPrompt] = useState('');
   const [name, setName] = useState('');
   const [language, setLanguage] = useState(defaultResponseLanguage());
   const [proposalId, setProposalId] = useState<string | null>(null);
-  const [kind, setKind] = useState<'project' | 'single' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const create = useCreateAiProposal();
   const retry = useRetryAiProposal();
   const cancel = useCancelAiProposal();
-  const commit = useCommitAiProposal();
   const history = useAiProposals();
   const proposal = useAiProposal(proposalId).data;
 
@@ -58,7 +53,6 @@ export default function NewAiPage() {
         name: name.trim() || undefined,
         responseLanguage: responseLanguageFor(language),
       });
-      setKind(null);
       setProposalId(view.id);
     });
 
@@ -66,7 +60,6 @@ export default function NewAiPage() {
   const backToEditor = (promptToRestore: string) => {
     setPrompt(promptToRestore);
     setProposalId(null);
-    setKind(null);
   };
 
   // A committed proposal already owns a project (opened from history, or a commit that raced).
@@ -75,21 +68,12 @@ export default function NewAiPage() {
     if (committedProjectId) router.push(`/projects/${committedProjectId}`);
   }, [committedProjectId, router]);
 
-  const createProject = () =>
-    run(async () => {
-      if (!proposal) return;
-      try {
-        const project = await commit.mutateAsync({
-          proposalId: proposal.id,
-          kind: kind ?? undefined,
-        });
-        router.push(`/projects/${project.id}`);
-      } catch (caught) {
-        // A 409 may mean it was already committed: refresh so the effect above can redirect.
-        void queryClient.invalidateQueries({ queryKey: ['ai-proposal', proposal.id] });
-        throw caught;
-      }
-    });
+  // A ready proposal is reviewed on its own page (SP2 §6.4); replace, so Back skips this state.
+  useEffect(() => {
+    if (proposal?.status === 'ready') router.replace(`/new/ai/${proposal.id}`);
+  }, [proposal?.status, proposal?.id, router]);
+
+  if (proposal?.status === 'ready') return <div className="ui-skeleton" />;
 
   // ── Generating ──────────────────────────────────────────────
   if (proposal && (proposal.status === 'generating' || proposal.status === 'committing')) {
@@ -169,86 +153,6 @@ export default function NewAiPage() {
     );
   }
 
-  // ── Ready: minimal summary (the full review editor is Sub-project 2) ──
-  if (proposal && proposal.status === 'ready' && proposal.result) {
-    const result = proposal.result;
-    const chosenKind = kind ?? proposal.hints.kind ?? result.recommendedKind;
-    return (
-      <div className="ui-stack" style={{ gap: 'var(--space-6)', maxWidth: '760px' }}>
-        <div className="ui-stack" style={{ gap: 'var(--space-2)' }}>
-          <h1>{result.name}</h1>
-          <p className="ui-meta">{result.description}</p>
-        </div>
-
-        <Card className="ui-stack">
-          <Field label="API type">
-            <Select
-              value={chosenKind}
-              onChange={(event) => setKind(event.target.value as 'project' | 'single')}
-            >
-              <option value="project">Project — several related resources</option>
-              <option value="single">Single — one focused resource</option>
-            </Select>
-          </Field>
-          <p className="ui-meta">
-            <Badge>Recommended: {result.recommendedKind}</Badge> {result.kindRationale}
-          </p>
-        </Card>
-
-        <Card className="ui-stack">
-          <h2>Entities ({result.entities.length})</h2>
-          <ul>
-            {result.entities.map((entity) => (
-              <li key={entity.name}>
-                <strong>{entity.name}</strong> — {entity.fields.length} fields
-                {entity.description ? (
-                  <span className="ui-meta"> · {entity.description}</span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </Card>
-
-        {result.assumptions.length > 0 ? (
-          <Card className="ui-stack">
-            <h2>Assumptions</h2>
-            <ul>
-              {result.assumptions.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </Card>
-        ) : null}
-
-        {result.questions.length > 0 ? (
-          <Card className="ui-stack">
-            <h2>Questions to consider</h2>
-            <ul>
-              {result.questions.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </Card>
-        ) : null}
-
-        <div className="ui-row" style={{ justifyContent: 'flex-end', gap: 'var(--space-3)' }}>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              backToEditor(proposal.prompt);
-            }}
-          >
-            Start over
-          </Button>
-          <Button onClick={createProject} disabled={commit.isPending}>
-            {commit.isPending ? 'Creating…' : 'Create API'}
-          </Button>
-        </div>
-        {error ? <FormError title={error} /> : null}
-      </div>
-    );
-  }
-
   // ── Describe (also shown after cancel) ──────────────────────
   const examples = examplesFor(language);
   return (
@@ -313,9 +217,13 @@ export default function NewAiPage() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() =>
-                    item.status === 'cancelled' ? setPrompt(item.prompt) : setProposalId(item.id)
-                  }
+                  onClick={() => {
+                    if (item.status === 'cancelled') setPrompt(item.prompt);
+                    // The review page follows a superseded proposal to its adopted child.
+                    else if (item.status === 'ready' || item.status === 'superseded')
+                      router.push(`/new/ai/${item.id}`);
+                    else setProposalId(item.id);
+                  }}
                 >
                   {item.name ?? item.prompt.slice(0, 80)}
                 </Button>{' '}
