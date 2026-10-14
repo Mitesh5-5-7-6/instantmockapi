@@ -5,8 +5,24 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { EnvConfig } from '@instantmockapi/config';
 import { AiProposal } from '@instantmockapi/db';
-import { conflict, idParams, loadOwnedProposal } from '../ai-proposal-access.js';
+import { AppError, getErrorMessage, logger } from '@instantmockapi/shared';
+import { PROMPT_VERSION } from '@instantmockapi/ai';
+import { enqueueAiProposalJob, enqueueAiTranslateJob } from '@instantmockapi/queue';
+import {
+  AI_PROPOSAL_LIMIT,
+  assertProposalBudget,
+  conflict,
+  idParams,
+  loadOwnedProposal,
+} from '../ai-proposal-access.js';
+import { toAiProposalView } from '../ai-proposal-serializers.js';
 import { DRAFT_FIELDS_SCHEMA, buildDraft, type DraftInput } from '../ai-draft.js';
+
+const LANGUAGE_PATTERN = '^[a-z]{2,3}(-[A-Za-z]{2,4})?$';
+const withEmptyBody = (request: { body: unknown }, _reply: unknown, done: () => void) => {
+  request.body ??= {};
+  done();
+};
 
 export interface AiProposalReviewRouteOptions {
   config: EnvConfig;
@@ -63,6 +79,201 @@ export const aiProposalReviewRoutes: FastifyPluginAsync<AiProposalReviewRouteOpt
         });
       }
       return reply.send({ draft: saved.draft, issues: built.issues });
+    },
+  );
+
+  app.post(
+    '/ai/proposals/:id/regenerate',
+    {
+      config: { rateLimit: AI_PROPOSAL_LIMIT },
+      preValidation: withEmptyBody,
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            answers: { type: 'string', maxLength: 1000 },
+            instruction: { type: 'string', maxLength: 500 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const sub = request.authUser?.sub ?? '';
+      const body = request.body as { answers?: string; instruction?: string };
+      const parent = await loadOwnedProposal(id, sub);
+      if (parent.status !== 'ready') {
+        return conflict(reply, parent, 'Only a ready proposal can be regenerated.');
+      }
+      if (parent.childId) {
+        const running = await AiProposal.findOne({ _id: parent.childId, status: 'generating' });
+        if (running) {
+          return conflict(reply, parent, 'A regeneration is already running.');
+        }
+      }
+      await assertProposalBudget(sub);
+      const answers = body.answers?.trim();
+      const instruction = body.instruction?.trim();
+      const child = await AiProposal.create({
+        ownerId: sub,
+        prompt: parent.prompt,
+        hints: { ...(parent.toObject().hints ?? {}) },
+        responseLanguage: parent.responseLanguage,
+        model: config.geminiModel,
+        promptVersion: PROMPT_VERSION,
+        parentId: parent._id,
+        clarification:
+          answers || instruction
+            ? { ...(answers ? { answers } : {}), ...(instruction ? { instruction } : {}) }
+            : null,
+      });
+      const linked = await AiProposal.updateOne(
+        { _id: parent._id, status: 'ready' },
+        { $set: { childId: child._id } },
+      );
+      if (linked.matchedCount === 0) {
+        await AiProposal.updateOne(
+          { _id: child._id },
+          { $set: { status: 'cancelled', stage: null } },
+        );
+        return conflict(reply, parent, 'Only a ready proposal can be regenerated.');
+      }
+      try {
+        await enqueueAiProposalJob(String(child._id), child.runs);
+      } catch (cause) {
+        logger.error('Could not enqueue AI regenerate job', {
+          proposalId: String(child._id),
+          error: getErrorMessage(cause),
+        });
+        const message = 'Could not start generation. Please retry.';
+        await AiProposal.updateOne(
+          { _id: child._id, status: 'generating' },
+          {
+            $set: {
+              status: 'failed',
+              stage: null,
+              error: { code: 'AI_GENERATION_FAILED', message, details: [] },
+            },
+          },
+        );
+        throw new AppError({ code: 'AI_GENERATION_FAILED', message, statusCode: 503 });
+      }
+      return reply.status(202).send(toAiProposalView(child));
+    },
+  );
+
+  app.post(
+    '/ai/proposals/:id/adopt',
+    {
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object',
+          required: ['draft'],
+          additionalProperties: false,
+          properties: { draft: DRAFT_FIELDS_SCHEMA },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const sub = request.authUser?.sub ?? '';
+      const child = await loadOwnedProposal(id, sub);
+      if (child.status !== 'ready' || !child.parentId) {
+        return conflict(reply, child, 'Only a ready regeneration can be adopted.');
+      }
+      const parent = await AiProposal.findOne({ _id: child.parentId, ownerId: sub });
+      if (!parent || parent.status !== 'ready' || String(parent.childId) !== String(child._id)) {
+        return conflict(
+          reply,
+          parent ?? child,
+          'The original proposal changed; this suggestion can no longer be adopted.',
+        );
+      }
+      const built = buildDraft((request.body as { draft: DraftInput }).draft, config);
+      const saved = await AiProposal.findOneAndUpdate(
+        { _id: child._id, status: 'ready', draft: null },
+        { $set: { draft: { ...built.draft, revision: 1, savedAt: new Date() } } },
+        { new: true },
+      );
+      if (!saved) {
+        return conflict(reply, child, 'This suggestion was already adopted.');
+      }
+      // The child's draft stays saved even if this loses a race: nothing is lost.
+      const superseded = await AiProposal.updateOne(
+        { _id: parent._id, status: 'ready', childId: child._id },
+        { $set: { status: 'superseded' } },
+      );
+      if (superseded.matchedCount === 0) {
+        return conflict(
+          reply,
+          parent,
+          'The original proposal changed; this suggestion can no longer be adopted.',
+        );
+      }
+      return reply.send({ draft: saved.draft, issues: built.issues });
+    },
+  );
+
+  app.post(
+    '/ai/proposals/:id/translate',
+    {
+      config: { rateLimit: AI_PROPOSAL_LIMIT },
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object',
+          required: ['language'],
+          additionalProperties: false,
+          properties: { language: { type: 'string', pattern: LANGUAGE_PATTERN } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const sub = request.authUser?.sub ?? '';
+      const { language } = request.body as { language: string };
+      const owned = await loadOwnedProposal(id, sub);
+      if (owned.status !== 'ready' || !owned.result) {
+        return conflict(reply, owned, 'Only a ready proposal can be translated.');
+      }
+      const current = owned.responseLanguage ?? owned.result.detectedLanguage;
+      if (language === current && !owned.translation) {
+        return reply.send(toAiProposalView(owned));
+      }
+      await assertProposalBudget(sub);
+      const doc = await AiProposal.findOneAndUpdate(
+        { _id: owned._id, status: 'ready' },
+        {
+          // requestedAt is the expiry clock; autosaves bump updatedAt so it cannot be used.
+          $set: {
+            translation: { status: 'pending', language, requestedAt: new Date() },
+            runStartedAt: new Date(),
+          },
+          $inc: { translations: 1 },
+        },
+        { new: true },
+      );
+      if (!doc) {
+        return conflict(reply, owned, 'Only a ready proposal can be translated.');
+      }
+      try {
+        await enqueueAiTranslateJob(String(doc._id), doc.runs, doc.translations, language);
+      } catch (cause) {
+        logger.error('Could not enqueue AI translate job', {
+          proposalId: String(doc._id),
+          error: getErrorMessage(cause),
+        });
+        const message = 'Could not start translation. Please retry.';
+        await AiProposal.updateOne(
+          { _id: doc._id, status: 'ready', 'translation.language': language },
+          { $set: { translation: { status: 'failed', language, message } } },
+        );
+        throw new AppError({ code: 'AI_GENERATION_FAILED', message, statusCode: 503 });
+      }
+      return reply.status(202).send(toAiProposalView(doc));
     },
   );
 };
