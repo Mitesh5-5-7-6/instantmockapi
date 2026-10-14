@@ -31,11 +31,14 @@ export interface AiProposalRouteOptions {
 }
 
 /**
- * Twenty proposals an hour per user. Each one costs one or two model calls, so
- * this is a cost guard as much as an abuse guard. Keyed by the global generator
- * (the verified user id, else the IP).
+ * Burst guard only. The plugin's counter is per route and per instance (and
+ * resets on a restart), so on its own it cannot enforce an hourly budget; the
+ * Mongo-backed `assertProposalBudget` below is the real, shared limit.
  */
 const AI_PROPOSAL_LIMIT = { max: 20, timeWindow: 60 * 60_000 };
+
+/** Model runs per user per hour. Each run costs one or two model calls, so this is a cost guard. */
+export const AI_RUNS_PER_HOUR = 20;
 
 /** A job cannot legitimately run this long; past it, the proposal was lost (e.g. Redis restarted). */
 const STUCK_AFTER_MS = 10 * 60_000;
@@ -67,6 +70,26 @@ interface CommitBody {
 
 function notFound(): AppError {
   return new AppError({ code: 'NOT_FOUND', message: 'Proposal not found' });
+}
+
+/**
+ * Refuse when the owner has already started `AI_RUNS_PER_HOUR` runs in the last
+ * hour. Counts `runs` (retries included) over proposals whose current run
+ * started in the window, so creating and retrying share one budget across all
+ * instances.
+ */
+async function assertProposalBudget(ownerId: string): Promise<void> {
+  const hourAgo = new Date(Date.now() - 60 * 60_000);
+  const [usage] = await AiProposal.aggregate<{ runs: number }>([
+    { $match: { ownerId: new mongoose.Types.ObjectId(ownerId), runStartedAt: { $gte: hourAgo } } },
+    { $group: { _id: null, runs: { $sum: '$runs' } } },
+  ]);
+  if ((usage?.runs ?? 0) >= AI_RUNS_PER_HOUR) {
+    throw new AppError({
+      code: 'RATE_LIMIT_EXCEEDED',
+      message: `You have reached the limit of ${AI_RUNS_PER_HOUR} AI generations per hour. Please try again later.`,
+    });
+  }
 }
 
 async function loadOwnedProposal(id: string, ownerId: string): Promise<IAiProposal> {
@@ -184,6 +207,8 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
         });
       }
 
+      await assertProposalBudget(request.authUser?.sub ?? '');
+
       const doc = await AiProposal.create({
         ownerId: request.authUser?.sub,
         prompt,
@@ -241,6 +266,7 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const owned = await loadOwnedProposal(id, request.authUser?.sub ?? '');
+      await assertProposalBudget(request.authUser?.sub ?? '');
       const doc = await AiProposal.findOneAndUpdate(
         { _id: owned._id, status: 'failed' },
         {
@@ -252,6 +278,7 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
             result: null,
             durationMs: null,
             geminiCalls: 0,
+            runStartedAt: new Date(),
           },
           $inc: { runs: 1 },
         },

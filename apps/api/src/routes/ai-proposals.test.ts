@@ -130,6 +130,61 @@ describe('POST /v1/ai/proposals', () => {
   });
 });
 
+describe('hourly AI budget', () => {
+  // Two proposals whose runs sum to 20 (12 + 8).
+  async function seedBudget(ownerId: string, runStartedAt: Date) {
+    await seed(ownerId, { runs: 12, runStartedAt });
+    await seed(ownerId, { runs: 8, runStartedAt });
+  }
+
+  it('answers 429 at the limit and stores and queues nothing', async () => {
+    await seedBudget(alice.userId, new Date());
+    const res = await post('/v1/ai/proposals', alice.accessToken, { prompt: 'one more' });
+    expect(res.statusCode).toBe(429);
+    expect(res.json().error.code).toBe('RATE_LIMIT_EXCEEDED');
+    expect(await AiProposal.countDocuments()).toBe(2);
+    expect(enqueueAiProposalJob).not.toHaveBeenCalled();
+  });
+
+  it('allows it again once the runs are two hours old', async () => {
+    await seedBudget(alice.userId, new Date(Date.now() - 2 * 60 * 60_000));
+    const res = await post('/v1/ai/proposals', alice.accessToken, { prompt: 'fresh hour' });
+    expect(res.statusCode).toBe(202);
+  });
+
+  it('refuses a retry at the limit', async () => {
+    await seedBudget(alice.userId, new Date());
+    const failed = await seed(alice.userId, {
+      status: 'failed',
+      result: null,
+      runs: 0,
+      error: { code: 'AI_GENERATION_FAILED', message: 'm', details: [] },
+    });
+    const res = await post(`/v1/ai/proposals/${failed._id}/retry`, alice.accessToken);
+    expect(res.statusCode).toBe(429);
+    expect(enqueueAiProposalJob).not.toHaveBeenCalled();
+    expect((await AiProposal.findById(failed._id))!.status).toBe('failed');
+  });
+
+  it('restarts the hour window for a retried run', async () => {
+    const failed = await seed(alice.userId, {
+      status: 'failed',
+      result: null,
+      runStartedAt: new Date(Date.now() - 3 * 60 * 60_000),
+      error: { code: 'AI_GENERATION_FAILED', message: 'm', details: [] },
+    });
+    await post(`/v1/ai/proposals/${failed._id}/retry`, alice.accessToken);
+    const stored = await AiProposal.findById(failed._id);
+    expect(stored!.runStartedAt.getTime()).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  it('does not count another user’s runs', async () => {
+    await seedBudget(bob.userId, new Date());
+    const res = await post('/v1/ai/proposals', alice.accessToken, { prompt: 'mine' });
+    expect(res.statusCode).toBe(202);
+  });
+});
+
 describe('reading proposals', () => {
   it('returns the owner their proposal and 404 to anyone else or for a malformed id', async () => {
     const doc = await seed(alice.userId);

@@ -60,6 +60,13 @@ export interface IAiProposal extends Omit<Document, 'model'> {
    * so a retry needs a fresh id.
    */
   runs: number;
+  /**
+   * When the current run was queued: creation time, reset on every retry. The
+   * hourly cost budget sums `runs` over proposals whose run started in the
+   * last hour; keyed on `createdAt` alone, retrying an old proposal would cost
+   * model calls without ever counting against the budget.
+   */
+  runStartedAt: Date;
   projectId: Types.ObjectId | null;
   committedAt: Date | null;
   createdAt: Date;
@@ -88,6 +95,7 @@ const aiProposalSchema = new Schema<IAiProposal>(
     geminiCalls: { type: Number, default: 0 },
     durationMs: { type: Number, default: null },
     runs: { type: Number, default: 1 },
+    runStartedAt: { type: Date, default: () => new Date() },
     projectId: { type: Schema.Types.ObjectId, ref: 'Project', default: null },
     committedAt: { type: Date, default: null },
   },
@@ -96,6 +104,9 @@ const aiProposalSchema = new Schema<IAiProposal>(
 
 // Prompt history: one owner, newest first. Equality field before the sort field.
 aiProposalSchema.index({ ownerId: 1, createdAt: -1 });
+
+// Hourly budget check: one owner, recent runs.
+aiProposalSchema.index({ ownerId: 1, runStartedAt: -1 });
 
 // TTL. Must stay single-field and separate from the index above — a TTL index
 // cannot be compound, so "consolidating" the two would silently disable expiry.
