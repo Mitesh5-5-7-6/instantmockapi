@@ -19,7 +19,7 @@ import type { EnvConfig } from '@instantmockapi/config';
 import { AiProposal, Project, mongoose, type IAiProposal } from '@instantmockapi/db';
 import { enqueueAiProposalJob } from '@instantmockapi/queue';
 import { PROMPT_VERSION, toBuilderShape } from '@instantmockapi/ai';
-import { newProjectGenerationConfig, type AuthConfig } from '@instantmockapi/ips';
+import { newProjectGenerationConfig } from '@instantmockapi/ips';
 import { parseInputSource } from '../input-parsing.js';
 import { assertProjectQuota, createProjectRecord } from '../project-create.js';
 import { toProjectDetail } from '../serializers.js';
@@ -63,7 +63,6 @@ interface CommitBody {
   slug?: string;
   description?: string;
   blueprint?: { entities: unknown[]; generationConfig?: unknown };
-  authentication?: AuthConfig;
 }
 
 function notFound(): AppError {
@@ -293,18 +292,32 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
             name: { type: 'string', minLength: 1, maxLength: 120 },
             slug: { type: 'string', pattern: SLUG_PATTERN.source, maxLength: SLUG_MAX_LENGTH },
             description: { type: 'string', maxLength: 500 },
+            // `authentication` is deliberately not accepted in SP1. The auth question arrives
+            // in Sub-project 2, which must also add this file to ALLOWED in
+            // packages/ips/src/auth-invariants.test.ts.
             blueprint: {
               type: 'object',
               required: ['entities'],
               properties: { entities: { type: 'array' } },
             },
-            authentication: { type: 'object' },
           },
         },
       },
       // A commit with no body is the ordinary case; see drafts.ts for why this is needed.
       preValidation: (request, _reply, done) => {
         request.body ??= {};
+        // Fastify's ajv strips unknown properties instead of rejecting them, so
+        // `additionalProperties: false` alone would silently ignore this field. Raise the
+        // same validation error ajv would, so the error handler answers 400 as usual.
+        if ('authentication' in (request.body as object)) {
+          done(
+            Object.assign(new Error('body must not have property authentication'), {
+              validation: [{ instancePath: '/authentication', message: 'is not accepted' }],
+              validationContext: 'body',
+            }) as never,
+          );
+          return;
+        }
         done();
       },
     },
@@ -358,7 +371,6 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
         const raw = JSON.stringify({
           entities: shape.entities,
           generationConfig: shape.generationConfig,
-          ...(body.authentication ? { authentication: body.authentication } : {}),
         });
 
         const created = await createProjectRecord({

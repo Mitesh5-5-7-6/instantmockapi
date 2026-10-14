@@ -229,6 +229,14 @@ describe('commit', () => {
     expect((await AiProposal.findById(doc._id).lean())!.status).toBe('ready');
     expect(await Project.countDocuments()).toBe(0);
   });
+  it('rejects an authentication property with 400 and creates no project', async () => {
+    const doc = await seed(alice.userId);
+    const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken, {
+      authentication: { type: 'none' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(await Project.countDocuments()).toBe(0);
+  });
 
   it('creates exactly one project when two commits race', async () => {
     const doc = await seed(alice.userId);
