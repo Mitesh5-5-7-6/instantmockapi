@@ -40,4 +40,8 @@ export interface ProposeInput {
   hints: { name?: string; kind?: ProposalKind; description?: string };
   /** BCP-47 tag the prose should be written in; null means "same as the prompt". */
   responseLanguage: string | null;
+  /** Regenerate only: the user's answers to the AI's questions and/or an extra instruction. */
+  clarification?: { answers?: string; instruction?: string } | null;
+  /** Regenerate only: the blueprint being revised (the parent's draft entities, or its result's). */
+  currentBlueprint?: readonly unknown[] | null;
 }

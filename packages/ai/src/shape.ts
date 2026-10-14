@@ -1,6 +1,7 @@
 import { AppError, HTTP_METHODS, type ErrorDetail, type ProjectKind } from '@instantmockapi/shared';
 import {
   validateIPS,
+  type AuthConfig,
   type Entity,
   type Field,
   type FieldMeta,
@@ -28,6 +29,15 @@ export interface ShapeLimits {
  */
 const PROPOSABLE_META = ['unique', 'identity', 'searchable'] as const;
 
+export interface ShapeOptions {
+  /**
+   * Keep an entity's `PROTECTED`/`PUBLIC` stamp. Set for a user's reviewed draft
+   * (their "some endpoints protected" answer); never for model output, where
+   * authentication is the user's decision, not the AI's.
+   */
+  keepEntityAuth?: boolean;
+}
+
 const asString = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
@@ -46,15 +56,16 @@ export function toBuilderShape(
   raw: unknown,
   defaults: GenerationConfig,
   limits?: ShapeLimits,
+  options: ShapeOptions = {},
 ): BuilderShape {
   const source = isRecord(raw) ? raw : {};
   return {
-    entities: asArray(source['entities']).map(toEntity),
+    entities: asArray(source['entities']).map((entity) => toEntity(entity, options)),
     generationConfig: toGenerationConfig(source['generationConfig'], defaults, limits),
   };
 }
 
-function toEntity(raw: unknown): Entity {
+function toEntity(raw: unknown, options: ShapeOptions): Entity {
   const entity = isRecord(raw) ? raw : {};
   const description = cleanProse(entity['description']);
   return {
@@ -65,6 +76,10 @@ function toEntity(raw: unknown): Entity {
       ? { identity: entity['identity'] as unknown as NonNullable<Entity['identity']> }
       : {}),
     ...(description ? { description } : {}),
+    ...(options.keepEntityAuth &&
+    (entity['authentication'] === 'PROTECTED' || entity['authentication'] === 'PUBLIC')
+      ? { authentication: entity['authentication'] }
+      : {}),
   };
 }
 
@@ -141,13 +156,14 @@ export function validateShape(
   shape: BuilderShape,
   kind: ProjectKind | undefined,
   maxDepth: number,
+  authentication?: AuthConfig,
 ): ErrorDetail[] {
   const parsed = parseBuilderPayload(
     'proposal',
     'proposal',
     shape.entities,
     shape.generationConfig,
-    undefined,
+    authentication,
     kind,
   );
   if (!parsed.ok) {

@@ -135,3 +135,13 @@ describe('proposeBlueprint', () => {
     expect(provider.calls[0]!.turns[0]!.text).toContain('<reference_blueprints>');
   });
 });
+
+it('passes regenerate context into the user turn', async () => {
+  const provider = createScriptedProvider(fakeOutputJson(['Thing']));
+  await proposeBlueprint(
+    { ...input, currentBlueprint: [{ name: 'Old' }], clarification: { answers: 'yes' } },
+    deps(provider),
+  );
+  expect(provider.calls[0]!.turns[0]!.text).toContain('<current_blueprint>');
+  expect(provider.calls[0]!.turns[0]!.text).toContain('<clarifications>');
+});
