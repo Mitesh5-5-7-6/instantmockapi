@@ -3,11 +3,14 @@
 
 import { logger, getErrorMessage } from '@instantmockapi/shared';
 import { connectDB, disconnectDB } from '@instantmockapi/db';
-import { closeQueue, createGenerationWorker } from '@instantmockapi/queue';
+import { closeQueue, createAiProposalWorker, createGenerationWorker } from '@instantmockapi/queue';
 import { createStorage } from '@instantmockapi/storage';
 import { processGenerationJob, settleExhaustedJob } from './processor.js';
+import { processAiProposalJob, settleExhaustedAiProposal } from './ai-proposal-processor.js';
 
 const WORKER_CONCURRENCY = Number.parseInt(process.env['WORKER_CONCURRENCY'] ?? '2', 10);
+// Separate concurrency: AI jobs are I/O-bound waits on Gemini, generation is CPU-bound.
+const AI_CONCURRENCY = Number.parseInt(process.env['AI_WORKER_CONCURRENCY'] ?? '2', 10);
 
 async function main(): Promise<void> {
   await connectDB();
@@ -21,6 +24,12 @@ async function main(): Promise<void> {
   });
   logger.info('Worker host running', { concurrency: WORKER_CONCURRENCY });
 
+  const aiWorker = createAiProposalWorker((payload) => processAiProposalJob(payload), {
+    concurrency: Number.isNaN(AI_CONCURRENCY) ? 2 : AI_CONCURRENCY,
+    onExhausted: settleExhaustedAiProposal,
+  });
+  logger.info('AI proposal worker running', { concurrency: AI_CONCURRENCY });
+
   let shuttingDown = false;
   const shutdown = (signal: string) => {
     if (shuttingDown) {
@@ -29,7 +38,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     logger.info('Worker host shutting down', { signal });
     void (async () => {
-      await worker.close();
+      await Promise.all([worker.close(), aiWorker.close()]);
       await closeQueue();
       await disconnectDB();
       process.exit(0);

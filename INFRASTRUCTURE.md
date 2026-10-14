@@ -115,6 +115,10 @@ works. The consequence follows directly and is easy to miss — **a scaled-out A
 deployment**, so anything that would be unsafe with several workers is already reachable with one
 service and two replicas.
 
+The worker host and the embedded API worker now also run an `ai-proposal-jobs` worker. It adds one
+more idle BullMQ poller against Redis (budget for it on a metered plan), and both the worker host
+and an API running `RUN_WORKER_IN_PROCESS=true` need `GEMINI_API_KEY`.
+
 ---
 
 ## Hosted API performance

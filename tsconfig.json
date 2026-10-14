@@ -7,6 +7,7 @@
       "@instantmockapi/config": ["packages/config/src/index.ts"],
       "@instantmockapi/cache": ["packages/cache/src/index.ts"],
       "@instantmockapi/ips": ["packages/ips/src/index.ts"],
+      "@instantmockapi/ai": ["packages/ai/src/index.ts"],
       "@instantmockapi/parsers": ["packages/parsers/src/index.ts"],
       "@instantmockapi/queue": ["packages/queue/src/index.ts"],
       "@instantmockapi/registry": ["packages/registry/src/index.ts"],

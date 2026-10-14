@@ -4,9 +4,14 @@
 import { logger, getErrorMessage } from '@instantmockapi/shared';
 import { loadEnvConfig } from '@instantmockapi/config';
 import { connectDB, disconnectDB } from '@instantmockapi/db';
-import { closeQueue, createGenerationWorker } from '@instantmockapi/queue';
+import { closeQueue, createAiProposalWorker, createGenerationWorker } from '@instantmockapi/queue';
 import { createStorage } from '@instantmockapi/storage';
-import { processGenerationJob, settleExhaustedJob } from '@instantmockapi/workers';
+import {
+  processAiProposalJob,
+  processGenerationJob,
+  settleExhaustedAiProposal,
+  settleExhaustedJob,
+} from '@instantmockapi/workers';
 import { buildServer } from './server.js';
 
 // Single-service deployments (free PaaS tiers) run the generator DAG in this
@@ -37,6 +42,13 @@ async function main(): Promise<void> {
     logger.info('Embedded generation worker started', { concurrency: EMBEDDED_CONCURRENCY });
   }
 
+  const aiWorker = RUN_WORKER_IN_PROCESS
+    ? createAiProposalWorker((payload) => processAiProposalJob(payload), {
+        concurrency: 1,
+        onExhausted: settleExhaustedAiProposal,
+      })
+    : null;
+
   await app.listen({ port: config.apiPort, host: '0.0.0.0' });
   logger.info('Platform API listening', { port: config.apiPort, env: config.nodeEnv });
 
@@ -51,7 +63,7 @@ async function main(): Promise<void> {
       await app.close();
       // Must precede closeQueue(): the worker shares the queue's Redis
       // connection, and draining in-flight jobs needs it still open.
-      await worker?.close();
+      await Promise.all([worker?.close(), aiWorker?.close()]);
       await closeQueue();
       await disconnectDB();
       process.exit(0);

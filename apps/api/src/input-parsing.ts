@@ -6,16 +6,14 @@
 
 import {
   AppError,
-  HTTP_METHODS,
   type InputSourceType,
   type ProjectKind,
   type Result,
 } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
 import {
-  ALL_QUERY_FEATURES,
-  NEW_PROJECT_UNKNOWN_FIELDS,
   materializeRelations,
+  newProjectGenerationConfig,
   validateIPS,
   type AuthConfig,
   type Entity,
@@ -25,25 +23,7 @@ import {
 import { parseBuilderPayload, parseJSONPayload, parseSwaggerSpec } from '@instantmockapi/parsers';
 
 function defaultGenerationConfig(env: EnvConfig): GenerationConfig {
-  return {
-    validators: ['zod'],
-    types: ['typescript'],
-    methods: [...HTTP_METHODS],
-    mockRecords: env.defaultMockRecords,
-    // On by default, for the same reason every HTTP method is: a fresh project
-    // should expose the whole surface, and the wizard turns things off.
-    features: { ...ALL_QUERY_FEATURES },
-    /*
-     * Strict from the first request — `reject`, not the `allow` that an absent
-     * setting resolves to.
-     *
-     * A mock API earns its keep by catching the mismatch between a client and a
-     * schema, and a body carrying an undeclared field is exactly that. Storing
-     * it silently is the one answer that teaches nothing. Loosening to `allow`
-     * or `strip` is a setting away; not being told at all is not recoverable.
-     */
-    unknownFields: NEW_PROJECT_UNKNOWN_FIELDS,
-  };
+  return newProjectGenerationConfig(env.defaultMockRecords);
 }
 
 function parseBuilderRaw(

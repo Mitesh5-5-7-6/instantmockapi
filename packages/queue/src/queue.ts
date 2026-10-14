@@ -16,6 +16,26 @@ export interface GenerationJobPayload {
 
 let redisInstance: Redis | null = null;
 let jobQueueInstance: Queue | null = null;
+let aiQueueInstance: Queue | null = null;
+
+/**
+ * AI proposals get their own queue, not a job type on `generation-jobs`.
+ *
+ * A Gemini call takes 10–80 s; sharing the generation queue would let a burst
+ * of prompts stall every project's generation behind them, and the two need
+ * different retry policies.
+ */
+export const AI_QUEUE_NAME = 'ai-proposal-jobs';
+
+/**
+ * `run` lets a job tell its own run from a later retry of the same document
+ * (retry reuses the proposal, runs++), so a stale job cannot settle or
+ * overwrite the active run.
+ */
+export interface AiProposalJobPayload {
+  proposalId: string;
+  run: number;
+}
 
 export const QUEUE_NAME = 'generation-jobs';
 
@@ -67,6 +87,41 @@ export function getJobQueue(): Queue {
   return jobQueueInstance;
 }
 
+export function getAiProposalQueue(): Queue {
+  if (aiQueueInstance) {
+    return aiQueueInstance;
+  }
+  aiQueueInstance = new Queue(AI_QUEUE_NAME, {
+    connection: getRedisConnection(),
+    defaultJobOptions: {
+      // Only transient provider errors throw (rate limit, 5xx, timeout); final
+      // failures are written to Mongo by the handler, which then returns.
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 10_000 },
+      removeOnComplete: true,
+      removeOnFail: { count: 100 },
+    },
+  });
+  return aiQueueInstance;
+}
+
+/**
+ * Job id `${proposalId}-${run}`: the same run enqueued twice dedupes (a double
+ * submit), and a retry — a new run — is a new job even though the failed one is
+ * still in Redis. No colon: BullMQ reserves it in custom ids.
+ */
+export async function enqueueAiProposalJob(
+  proposalId: string,
+  run: number,
+): Promise<Job<AiProposalJobPayload>> {
+  logger.info('Enqueuing AI proposal job', { proposalId, run });
+  return (await getAiProposalQueue().add(
+    AI_QUEUE_NAME,
+    { proposalId, run },
+    { jobId: `${proposalId}-${run}` },
+  )) as Job<AiProposalJobPayload>;
+}
+
 /**
  * Closes the Queue connection.
  */
@@ -74,6 +129,10 @@ export async function closeQueue(): Promise<void> {
   if (jobQueueInstance) {
     await jobQueueInstance.close();
     jobQueueInstance = null;
+  }
+  if (aiQueueInstance) {
+    await aiQueueInstance.close();
+    aiQueueInstance = null;
   }
   if (redisInstance) {
     await redisInstance.quit();
@@ -202,10 +261,23 @@ export interface GenerationWorkerOptions {
   onExhausted?: (payload: GenerationJobPayload, error: Error) => Promise<void>;
 }
 
-export function createGenerationWorker(
-  handler: (payload: GenerationJobPayload) => Promise<void>,
-  options: GenerationWorkerOptions = {},
-): Worker<GenerationJobPayload> {
+interface WorkerFactoryOptions<T> {
+  concurrency?: number;
+  onExhausted?: (payload: T, error: Error) => Promise<void>;
+}
+
+/**
+ * Shared by every queue so they all get the same polling budget and the same
+ * "final attempt spent" hook. `describe` supplies the identifiers that go on the
+ * "picked up" log line (e.g. `projectId` for generation jobs).
+ */
+function buildWorker<T>(
+  queueName: string,
+  label: string,
+  describe: (payload: T) => Record<string, unknown>,
+  handler: (payload: T) => Promise<void>,
+  options: WorkerFactoryOptions<T>,
+): Worker<T> {
   const config = loadEnvConfig();
 
   // Idle polling — not cache traffic — is what actually consumes a free Redis
@@ -229,17 +301,17 @@ export function createGenerationWorker(
     stalledInterval: config.queueStalledIntervalMs,
   };
 
-  const worker = new Worker<GenerationJobPayload>(
-    QUEUE_NAME,
+  const worker = new Worker<T>(
+    queueName,
     async (job) => {
-      logger.info('Generation job picked up', { jobId: job.id, projectId: job.data.projectId });
+      logger.info(`${label} job picked up`, { jobId: job.id, ...describe(job.data) });
       await handler(job.data);
     },
     workerOptions,
   );
 
   worker.on('failed', (job, error) => {
-    logger.error('Generation job failed', { jobId: job?.id, error: error.message });
+    logger.error(`${label} job failed`, { jobId: job?.id, error: error.message });
     if (!job) {
       return;
     }
@@ -260,7 +332,7 @@ export function createGenerationWorker(
     // Detached: this runs inside an event handler, so a rejection here must not
     // become an unhandled rejection that takes the worker process down.
     void settle(job.data, error).catch((cause: unknown) => {
-      logger.error('Failed to record an exhausted generation job', {
+      logger.error(`Failed to record an exhausted ${label.toLowerCase()} job`, {
         jobId: job.id,
         error: getErrorMessage(cause),
       });
@@ -268,4 +340,30 @@ export function createGenerationWorker(
   });
 
   return worker;
+}
+
+export function createGenerationWorker(
+  handler: (payload: GenerationJobPayload) => Promise<void>,
+  options: GenerationWorkerOptions = {},
+): Worker<GenerationJobPayload> {
+  return buildWorker(
+    QUEUE_NAME,
+    'Generation',
+    (payload) => ({ projectId: payload.projectId }),
+    handler,
+    options,
+  );
+}
+
+export function createAiProposalWorker(
+  handler: (payload: AiProposalJobPayload) => Promise<void>,
+  options: WorkerFactoryOptions<AiProposalJobPayload> = {},
+): Worker<AiProposalJobPayload> {
+  return buildWorker(
+    AI_QUEUE_NAME,
+    'AI proposal',
+    (payload) => ({ proposalId: payload.proposalId }),
+    handler,
+    options,
+  );
 }
