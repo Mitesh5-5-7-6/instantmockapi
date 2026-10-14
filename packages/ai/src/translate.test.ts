@@ -54,8 +54,21 @@ describe('readTranslation', () => {
     ['list length changed', { ...translated, assumptions: ['only one'] }],
     ['entity renamed', { ...translated, entityDescriptions: { Thing: 'x', Renamed: 'y' } }],
     ['non-string item', { ...translated, questions: [1] }],
+    ['blanked scalar', { ...translated, description: '' }],
+    ['scalar that cleans to empty', { ...translated, kindRationale: ' \u0007 ' }],
+    ['blanked list item', { ...translated, assumptions: ['b1', '   '] }],
+    [
+      'blanked entity description',
+      { ...translated, entityDescriptions: { Thing: 'x', Other: '' } },
+    ],
   ])('rejects a reply with a %s', (_label, reply) => {
     expect(readTranslation(JSON.stringify(reply), prose)).toBeNull();
+  });
+
+  it('keeps a string empty when the original was empty too', () => {
+    const blank = { ...prose, authReason: '' };
+    const reply = { ...translated, authReason: '' };
+    expect(readTranslation(JSON.stringify(reply), blank)).toEqual(reply);
   });
 
   it('rejects non-JSON', () => {

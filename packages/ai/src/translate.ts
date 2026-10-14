@@ -104,7 +104,7 @@ export function readTranslation(text: string, original: ProposalProse): Proposal
     return null;
   }
   if (Object.values(described).some((value) => typeof value !== 'string')) return null;
-  return {
+  const translated: ProposalProse = {
     description: cleanProse(raw['description'] as string),
     kindRationale: cleanProse(raw['kindRationale'] as string),
     authReason: cleanProse(raw['authReason'] as string),
@@ -114,6 +114,23 @@ export function readTranslation(text: string, original: ProposalProse): Proposal
       Object.entries(described).map(([name, value]) => [name, cleanProse(value as string)]),
     ),
   };
+  // A same-shaped reply can still have dropped text; applying it would blank the user's prose.
+  return blanksAny(original, translated) ? null : translated;
+}
+
+/** True when a string that had text in the original is empty in the translation. */
+function blanksAny(original: ProposalProse, translated: ProposalProse): boolean {
+  const lost = (before: string, after: string | undefined): boolean =>
+    before.trim() !== '' && !after;
+  const scalars = ['description', 'kindRationale', 'authReason'] as const;
+  return (
+    scalars.some((key) => lost(original[key], translated[key])) ||
+    original.assumptions.some((item, i) => lost(item, translated.assumptions[i])) ||
+    original.questions.some((item, i) => lost(item, translated.questions[i])) ||
+    Object.entries(original.entityDescriptions).some(([name, text]) =>
+      lost(text, translated.entityDescriptions[name]),
+    )
+  );
 }
 
 export type TranslateOutcome =
