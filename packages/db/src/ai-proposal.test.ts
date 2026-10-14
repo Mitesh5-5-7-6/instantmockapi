@@ -45,4 +45,19 @@ describe('AiProposal', () => {
       ),
     ).toBe(true);
   });
+
+  it('defaults the SP2 fields', async () => {
+    const doc = await AiProposal.create({
+      ownerId: new Types.ObjectId(),
+      prompt: 'p',
+      model: 'm',
+      promptVersion: 'v',
+    });
+    expect(doc.draft).toBeNull();
+    expect(doc.translation).toBeNull();
+    expect(doc.parentId).toBeNull();
+    expect(doc.childId).toBeNull();
+    expect(doc.clarification).toBeNull();
+    expect(doc.translations).toBe(0);
+  });
 });

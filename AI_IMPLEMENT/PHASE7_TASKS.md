@@ -3,7 +3,7 @@
 > **Source spec:** [PHASE7_SPEC.md](PHASE7_SPEC.md) (Intelligent Multilingual AI API Builder with Persistent Learning Memory).
 > It supersedes the earlier [/phase7.md](../phase7.md) wherever the two disagree.
 >
-> **Status:** Stage A complete. **Sub-project 1 is implemented** on `feat/phase7-sp1-ai-core` (plan: [SP1_PLAN.md](SP1_PLAN.md)); the manual Gemini check (an English and a Gujarati prompt, prompt → Create → Generate) is pending. Sub-projects 2–5 scoped; each needs its own design review.
+> **Status:** Stage A complete. **Sub-project 1 is implemented** on `feat/phase7-sp1-ai-core` (plan: [SP1_PLAN.md](SP1_PLAN.md)); the manual Gemini check (an English and a Gujarati prompt, prompt → Create → Generate) is pending. **Sub-project 2 is implemented** (spec [SP2_SPEC.md](SP2_SPEC.md), plan [SP2_PLAN.md](SP2_PLAN.md)), with manual checks pending: SP1's English and Gujarati prompts; SP2's "Some endpoints protected" flow, a mixed per-entity regenerate, switching to Gujarati after generation, and one Single API flow. Sub-projects 3–5 scoped; each needs its own design review.
 >
 > **Rule from the spec (§18):** never ship more than one sub-project in a single change. Each sub-project ends with its tests green, a review, and a merge before the next one starts.
 

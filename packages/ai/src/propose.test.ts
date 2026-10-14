@@ -135,3 +135,28 @@ describe('proposeBlueprint', () => {
     expect(provider.calls[0]!.turns[0]!.text).toContain('<reference_blueprints>');
   });
 });
+
+it('passes regenerate context into the user turn', async () => {
+  const provider = createScriptedProvider(fakeOutputJson(['Thing']));
+  await proposeBlueprint(
+    { ...input, currentBlueprint: [{ name: 'Old' }], clarification: { answers: 'yes' } },
+    deps(provider),
+  );
+  expect(provider.calls[0]!.turns[0]!.text).toContain('<current_blueprint>');
+  expect(provider.calls[0]!.turns[0]!.text).toContain('<clarifications>');
+});
+
+it('strips authentication a model puts on entities', async () => {
+  const base = JSON.parse(fakeOutputJson(['Thing'])) as { entities: object[] };
+  const provider = createScriptedProvider(
+    fakeOutputJson(['Thing'], {
+      entities: base.entities.map((e) => ({ ...e, authentication: 'PROTECTED' })),
+    }),
+  );
+  const outcome = await proposeBlueprint(input, deps(provider));
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  for (const entity of outcome.output.entities) {
+    expect(entity).not.toHaveProperty('authentication');
+  }
+});

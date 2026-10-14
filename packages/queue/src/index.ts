@@ -11,6 +11,7 @@ export {
   AI_QUEUE_NAME,
   getAiProposalQueue,
   enqueueAiProposalJob,
+  enqueueAiTranslateJob,
   createAiProposalWorker,
   type GenerationJobPayload,
   type AiProposalJobPayload,

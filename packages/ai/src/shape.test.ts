@@ -174,3 +174,65 @@ describe('validateShape', () => {
     expect(validateShape(shape, 'single', 10).length).toBeGreaterThan(0);
   });
 });
+
+describe('toBuilderShape keepEntityAuth', () => {
+  const entity = (authentication: unknown) => ({
+    name: 'Thing',
+    authentication,
+    fields: [id],
+    relations: [],
+  });
+
+  it('strips per-entity authentication by default (AI output path)', () => {
+    const shape = toBuilderShape({ entities: [entity('PROTECTED')] }, defaults);
+    expect(
+      (shape.entities[0] as unknown as Record<string, unknown>)['authentication'],
+    ).toBeUndefined();
+  });
+
+  it('keeps PROTECTED/PUBLIC stamps when keepEntityAuth is set (draft path)', () => {
+    const shape = toBuilderShape(
+      { entities: [entity('PROTECTED'), entity('PUBLIC')] },
+      defaults,
+      undefined,
+      {
+        keepEntityAuth: true,
+      },
+    );
+    expect(
+      shape.entities.map((e) => (e as unknown as Record<string, unknown>)['authentication']),
+    ).toEqual(['PROTECTED', 'PUBLIC']);
+  });
+
+  it('drops any other stamp value even with keepEntityAuth', () => {
+    const shape = toBuilderShape({ entities: [entity('ADMIN')] }, defaults, undefined, {
+      keepEntityAuth: true,
+    });
+    expect(
+      (shape.entities[0] as unknown as Record<string, unknown>)['authentication'],
+    ).toBeUndefined();
+  });
+});
+
+describe('validateShape with authentication', () => {
+  it('accepts a valid ALL_PROTECTED config and rejects a malformed one', () => {
+    const shape = toBuilderShape(
+      { entities: [{ name: 'Thing', fields: [id], relations: [] }] },
+      defaults,
+    );
+    const good = {
+      mode: 'ALL_PROTECTED',
+      signup: true,
+      signin: true,
+      refreshToken: true,
+      cookieAuth: false,
+      accessTokenExpiresIn: '15m',
+      refreshTokenExpiresIn: '7d',
+      userFields: [],
+    };
+    expect(validateShape(shape, 'project', 10, good as never)).toEqual([]);
+    expect(validateShape(shape, 'project', 10, { mode: 'NOPE' } as never).length).toBeGreaterThan(
+      0,
+    );
+  });
+});
