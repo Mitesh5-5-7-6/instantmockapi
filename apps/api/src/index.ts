@@ -63,8 +63,7 @@ async function main(): Promise<void> {
       await app.close();
       // Must precede closeQueue(): the worker shares the queue's Redis
       // connection, and draining in-flight jobs needs it still open.
-      await worker?.close();
-      await aiWorker?.close();
+      await Promise.all([worker?.close(), aiWorker?.close()]);
       await closeQueue();
       await disconnectDB();
       process.exit(0);

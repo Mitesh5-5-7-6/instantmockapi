@@ -64,7 +64,7 @@ describe('AI proposal queue', () => {
     expect([...state.jobs.keys()]).toEqual(['abc-1']);
     await enqueueAiProposalJob('abc', 2);
     expect([...state.jobs.keys()]).toEqual(['abc-1', 'abc-2']);
-    expect(state.jobs.get('abc-2')!.data).toEqual({ proposalId: 'abc' });
+    expect(state.jobs.get('abc-2')!.data).toEqual({ proposalId: 'abc', run: 2 });
   });
 
   it('is a singleton until closeQueue resets it', async () => {

@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 // `mongoose` is not a dependency of apps/workers; use the instance the db package re-exports.
-import { AiProposal, connectDB, disconnectDB, mongoose } from '@instantmockapi/db';
+import {
+  AI_PROPOSAL_RAW_OUTPUT_MAX,
+  AiProposal,
+  connectDB,
+  disconnectDB,
+  mongoose,
+} from '@instantmockapi/db';
 import { loadEnvConfig } from '@instantmockapi/config';
 
 const { Types } = mongoose;
@@ -39,7 +45,7 @@ async function generating(extra: Record<string, unknown> = {}) {
 }
 
 async function run(id: unknown, provider: LLMProvider) {
-  await processAiProposalJob({ proposalId: String(id) }, { config, provider });
+  await processAiProposalJob({ proposalId: String(id), run: 1 }, { config, provider });
   return AiProposal.findById(id).lean();
 }
 
@@ -77,7 +83,7 @@ describe('processAiProposalJob', () => {
     const doc = await generating();
     await expect(
       processAiProposalJob(
-        { proposalId: String(doc._id) },
+        { proposalId: String(doc._id), run: 1 },
         { config, provider: createScriptedProvider(new ProviderError('transient', 'HTTP 503')) },
       ),
     ).rejects.toMatchObject({ kind: 'transient' });
@@ -107,27 +113,60 @@ describe('processAiProposalJob', () => {
   it('finishes quietly when the proposal no longer exists (Review Focus #4)', async () => {
     const provider = createScriptedProvider();
     await expect(
-      processAiProposalJob({ proposalId: String(new Types.ObjectId()) }, { config, provider }),
+      processAiProposalJob(
+        { proposalId: String(new Types.ObjectId()), run: 1 },
+        { config, provider },
+      ),
     ).resolves.toBeUndefined();
     await expect(
-      processAiProposalJob({ proposalId: 'not-an-object-id' }, { config, provider }),
+      processAiProposalJob({ proposalId: 'not-an-object-id', run: 1 }, { config, provider }),
     ).resolves.toBeUndefined();
     expect(provider.calls).toHaveLength(0);
   });
 
   it('fails with AI_NOT_CONFIGURED when there is no key and no provider', async () => {
     const doc = await generating();
-    await processAiProposalJob({ proposalId: String(doc._id) }, { config });
+    await processAiProposalJob({ proposalId: String(doc._id), run: 1 }, { config });
     const after = await AiProposal.findById(doc._id).lean();
     expect(after).toMatchObject({ status: 'failed' });
     expect(after!.error!.code).toBe('AI_NOT_CONFIGURED');
+  });
+
+  it('ignores a stale job whose run no longer matches the document', async () => {
+    const doc = await generating({ runs: 2 });
+    const provider = createScriptedProvider();
+    await run(doc._id, provider);
+    expect(provider.calls).toHaveLength(0);
+    expect(await AiProposal.findById(doc._id).lean()).toMatchObject({
+      status: 'generating',
+      runs: 2,
+      result: null,
+    });
+  });
+
+  it('writes AI_NOT_CONFIGURED when the provider rejects the key (config error)', async () => {
+    const doc = await generating();
+    const after = await run(
+      doc._id,
+      createScriptedProvider(new ProviderError('config', 'HTTP 401')),
+    );
+    expect(after).toMatchObject({ status: 'failed' });
+    expect(after!.error!.code).toBe('AI_NOT_CONFIGURED');
+  });
+
+  it('truncates stored raw output to AI_PROPOSAL_RAW_OUTPUT_MAX', async () => {
+    const doc = await generating();
+    const huge = 'x'.repeat(AI_PROPOSAL_RAW_OUTPUT_MAX + 5000);
+    const after = await run(doc._id, createScriptedProvider(huge, huge));
+    expect(after).toMatchObject({ status: 'failed' });
+    expect(after!.rawOutput).toHaveLength(AI_PROPOSAL_RAW_OUTPUT_MAX);
   });
 });
 
 describe('settleExhaustedAiProposal', () => {
   it('marks a still-generating proposal failed with a retryable message', async () => {
     const doc = await generating();
-    await settleExhaustedAiProposal({ proposalId: String(doc._id) }, new Error('HTTP 503'));
+    await settleExhaustedAiProposal({ proposalId: String(doc._id), run: 1 }, new Error('HTTP 503'));
     const after = await AiProposal.findById(doc._id).lean();
     expect(after).toMatchObject({ status: 'failed', stage: null });
     expect(after!.error!.code).toBe('AI_GENERATION_FAILED');
@@ -136,7 +175,13 @@ describe('settleExhaustedAiProposal', () => {
 
   it('leaves a proposal that already settled untouched', async () => {
     const doc = await generating({ status: 'ready' });
-    await settleExhaustedAiProposal({ proposalId: String(doc._id) }, new Error('x'));
+    await settleExhaustedAiProposal({ proposalId: String(doc._id), run: 1 }, new Error('x'));
     expect((await AiProposal.findById(doc._id).lean())!.status).toBe('ready');
+  });
+
+  it('leaves a retried (newer run) generating proposal untouched', async () => {
+    const doc = await generating({ runs: 2 });
+    await settleExhaustedAiProposal({ proposalId: String(doc._id), run: 1 }, new Error('HTTP 503'));
+    expect((await AiProposal.findById(doc._id).lean())!.status).toBe('generating');
   });
 });

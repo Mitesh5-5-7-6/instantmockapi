@@ -38,8 +38,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     logger.info('Worker host shutting down', { signal });
     void (async () => {
-      await worker.close();
-      await aiWorker.close();
+      await Promise.all([worker.close(), aiWorker.close()]);
       await closeQueue();
       await disconnectDB();
       process.exit(0);

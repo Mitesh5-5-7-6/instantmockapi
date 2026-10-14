@@ -27,8 +27,14 @@ let aiQueueInstance: Queue | null = null;
  */
 export const AI_QUEUE_NAME = 'ai-proposal-jobs';
 
+/**
+ * `run` lets a job tell its own run from a later retry of the same document
+ * (retry reuses the proposal, runs++), so a stale job cannot settle or
+ * overwrite the active run.
+ */
 export interface AiProposalJobPayload {
   proposalId: string;
+  run: number;
 }
 
 export const QUEUE_NAME = 'generation-jobs';
@@ -111,7 +117,7 @@ export async function enqueueAiProposalJob(
   logger.info('Enqueuing AI proposal job', { proposalId, run });
   return (await getAiProposalQueue().add(
     AI_QUEUE_NAME,
-    { proposalId },
+    { proposalId, run },
     { jobId: `${proposalId}-${run}` },
   )) as Job<AiProposalJobPayload>;
 }

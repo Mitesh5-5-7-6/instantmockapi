@@ -43,13 +43,14 @@ export async function processAiProposalJob(
   const proposal = await AiProposal.findById(payload.proposalId).lean();
   // Gone (30-day TTL) or no longer generating (cancelled, or a duplicate run):
   // nothing to do, and throwing would only trigger pointless retries.
-  if (!proposal || proposal.status !== 'generating') {
+  // A job from an earlier run must not touch a retried document (runs moved on).
+  if (!proposal || proposal.status !== 'generating' || proposal.runs !== payload.run) {
     return;
   }
 
   const config = deps.config ?? loadEnvConfig();
   const started = Date.now();
-  const pending = { _id: proposal._id, status: 'generating' as const };
+  const pending = { _id: proposal._id, status: 'generating' as const, runs: payload.run };
 
   if (!deps.provider && !config.geminiApiKey) {
     logger.error('AI proposal cannot run: GEMINI_API_KEY is not configured for the worker');
@@ -147,7 +148,7 @@ export async function settleExhaustedAiProposal(
     return;
   }
   await AiProposal.updateOne(
-    { _id: payload.proposalId, status: 'generating' },
+    { _id: payload.proposalId, status: 'generating', runs: payload.run },
     {
       $set: {
         status: 'failed',
