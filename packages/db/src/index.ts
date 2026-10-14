@@ -58,6 +58,7 @@ export {
   type IAiProposal,
   type AiProposalStatus,
   type AiProposalStage,
+  type ProposalDraft,
 } from './models/aiProposal.js';
 
 // Export Queries

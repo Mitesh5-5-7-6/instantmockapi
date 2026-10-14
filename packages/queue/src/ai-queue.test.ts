@@ -36,7 +36,13 @@ vi.mock('ioredis', () => ({
   },
 }));
 
-import { AI_QUEUE_NAME, closeQueue, enqueueAiProposalJob, getAiProposalQueue } from './queue.js';
+import {
+  AI_QUEUE_NAME,
+  closeQueue,
+  enqueueAiProposalJob,
+  enqueueAiTranslateJob,
+  getAiProposalQueue,
+} from './queue.js';
 
 beforeEach(async () => {
   state.jobs.clear();
@@ -72,5 +78,15 @@ describe('AI proposal queue', () => {
     const before = getAiProposalQueue();
     await closeQueue();
     expect(getAiProposalQueue()).not.toBe(before);
+  });
+
+  it('enqueues a translate job with its own id and payload', async () => {
+    await enqueueAiTranslateJob('abc', 2, 3, 'gu');
+    expect(state.jobs.get('abc-t3')!.data).toEqual({
+      proposalId: 'abc',
+      run: 2,
+      kind: 'translate',
+      language: 'gu',
+    });
   });
 });

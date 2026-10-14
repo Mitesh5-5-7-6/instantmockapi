@@ -1,6 +1,7 @@
 import { Schema, model, Document, Types } from 'mongoose';
 import type { ErrorCode, ErrorDetail } from '@instantmockapi/shared';
 import type { AiProposalOutput, ProposalKind } from '@instantmockapi/ai';
+import type { AuthConfig, Entity } from '@instantmockapi/ips';
 
 /**
  * One AI request, from prompt to committed project (Phase 7, Sub-project 1).
@@ -19,12 +20,14 @@ import type { AiProposalOutput, ProposalKind } from '@instantmockapi/ai';
  *         │
  *         └──retry──▶ generating
  *
+ *     ready ──adopt(child)──▶ superseded   (final; the child carries on)
+ *
  * Every transition is a conditional update with the expected current status in
  * its filter. That is what stops a cancelled proposal receiving a late worker
  * result, and a double-clicked commit creating two projects.
  */
 export type AiProposalStatus =
-  'generating' | 'ready' | 'failed' | 'cancelled' | 'committing' | 'committed';
+  'generating' | 'ready' | 'failed' | 'cancelled' | 'committing' | 'committed' | 'superseded';
 
 /** Progress inside `generating`, so the UI can say something truer than "loading". Null otherwise. */
 export type AiProposalStage = 'queued' | 'generating' | 'repairing' | 'validating';
@@ -34,6 +37,31 @@ export const AI_PROPOSAL_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 /** Raw model text is kept only on failure, for debugging, and bounded. */
 export const AI_PROPOSAL_RAW_OUTPUT_MAX = 64_000;
+
+/**
+ * The user's edited copy of a proposal, kept beside `result` so the model's
+ * original output stays intact for comparison and regeneration.
+ */
+export interface ProposalDraft {
+  /**
+   * Optimistic concurrency between tabs: a save must name the revision it was
+   * based on, so a stale tab cannot silently overwrite a newer edit.
+   */
+  revision: number;
+  kind: ProposalKind;
+  name: string;
+  description: string;
+  entities: Entity[];
+  generationConfig: { methods: string[]; mockRecords: number };
+  /**
+   * True once the user has answered the authentication question. The proposal
+   * always asks, so "no answer yet" must be distinguishable from "no auth".
+   */
+  authAnswered: boolean;
+  /** Null means "no authentication" once `authAnswered` is true; before that it means unanswered. */
+  authentication: AuthConfig | null;
+  savedAt: Date;
+}
 
 // `model` is the Gemini model id the brief requires, but Document already has a
 // `model()` method with an incompatible type, so that one member is omitted.
@@ -67,6 +95,26 @@ export interface IAiProposal extends Omit<Document, 'model'> {
    * model calls without ever counting against the budget.
    */
   runStartedAt: Date;
+  /** The user's edits; null until the first save. `result` is never mutated by edits. */
+  draft: ProposalDraft | null;
+  /**
+   * In-flight or failed prose translation. Null when idle; a successful
+   * translation is written into `result` and clears this, so only the
+   * states that need the UI's attention are stored.
+   */
+  translation: { status: 'pending' | 'failed'; language: string; message?: string } | null;
+  /** The proposal this one was regenerated from, so the chain can be walked back. */
+  parentId: Types.ObjectId | null;
+  /** Set when this proposal is superseded by a regeneration; points at its successor. */
+  childId: Types.ObjectId | null;
+  /** What the user told the model when regenerating: answers to its questions and/or a free instruction. */
+  clarification: { answers?: string; instruction?: string } | null;
+  /**
+   * How many translations have been requested. Part of the translate job id
+   * (`-t<n>`), for the same reason as `runs`: a retried translation must be
+   * a new job, not a silent no-op against a failed one still in Redis.
+   */
+  translations: number;
   projectId: Types.ObjectId | null;
   committedAt: Date | null;
   createdAt: Date;
@@ -96,6 +144,12 @@ const aiProposalSchema = new Schema<IAiProposal>(
     durationMs: { type: Number, default: null },
     runs: { type: Number, default: 1 },
     runStartedAt: { type: Date, default: () => new Date() },
+    draft: { type: Schema.Types.Mixed, default: null },
+    translation: { type: Schema.Types.Mixed, default: null },
+    parentId: { type: Schema.Types.ObjectId, ref: 'AiProposal', default: null },
+    childId: { type: Schema.Types.ObjectId, ref: 'AiProposal', default: null },
+    clarification: { type: Schema.Types.Mixed, default: null },
+    translations: { type: Number, default: 0 },
     projectId: { type: Schema.Types.ObjectId, ref: 'Project', default: null },
     committedAt: { type: Date, default: null },
   },
