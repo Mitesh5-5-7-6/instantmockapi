@@ -270,6 +270,18 @@ describe('regenerate', () => {
     expect(await AiProposal.countDocuments({ parentId: parent._id })).toBe(1);
   });
 
+  it('lets only one of two concurrent regenerates through', async () => {
+    const parent = await seedReady(alice.userId);
+    const url = `/v1/ai/proposals/${parent._id}/regenerate`;
+    const results = await Promise.all([
+      post(url, alice.accessToken, {}),
+      post(url, alice.accessToken, {}),
+    ]);
+    expect(results.map((r) => r.statusCode).sort()).toEqual([202, 409]);
+    expect(await AiProposal.countDocuments({ parentId: parent._id, status: 'generating' })).toBe(1);
+    expect(enqueueAiProposalJob).toHaveBeenCalledTimes(1);
+  });
+
   it('counts toward the hourly budget', async () => {
     await AiProposal.create({
       ownerId: alice.userId,
@@ -330,6 +342,14 @@ describe('adopt', () => {
     ).toBe(409);
   });
 
+  it('cancel leaves a parent alone when it points at a different child', async () => {
+    const { parent, child } = await parentAndReadyChild();
+    const other = await seedReady(alice.userId, { parentId: parent._id });
+    await AiProposal.updateOne({ _id: parent._id }, { $set: { childId: other._id } });
+    await post(`/v1/ai/proposals/${child._id}/cancel`, alice.accessToken);
+    expect(String((await AiProposal.findById(parent._id).lean())!.childId)).toBe(String(other._id));
+  });
+
   it('cancelling the child clears the parent link', async () => {
     const { parent, child } = await parentAndReadyChild();
     await post(`/v1/ai/proposals/${child._id}/cancel`, alice.accessToken);
@@ -356,6 +376,39 @@ describe('translate', () => {
       language: 'en',
     });
     expect(res.statusCode).toBe(200);
+    expect(enqueueAiTranslateJob).not.toHaveBeenCalled();
+  });
+
+  it('dismisses a failed translation when the user keeps the current language', async () => {
+    const doc = await seedReady(alice.userId, {
+      translation: { status: 'failed', language: 'gu' },
+    });
+    const res = await post(`/v1/ai/proposals/${doc._id}/translate`, alice.accessToken, {
+      language: 'en',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().translation).toBeNull();
+    expect(enqueueAiTranslateJob).not.toHaveBeenCalled();
+  });
+
+  it('counts toward the hourly budget', async () => {
+    await AiProposal.create({
+      ownerId: alice.userId,
+      prompt: 'x',
+      model: 'm',
+      promptVersion: 'v',
+      status: 'failed',
+      runs: 15,
+      translations: 5,
+      runStartedAt: new Date(),
+    });
+    const doc = await seedReady(alice.userId, {
+      runStartedAt: new Date(Date.now() - 2 * 3_600_000),
+    });
+    const res = await post(`/v1/ai/proposals/${doc._id}/translate`, alice.accessToken, {
+      language: 'gu',
+    });
+    expect(res.statusCode).toBe(429);
     expect(enqueueAiTranslateJob).not.toHaveBeenCalled();
   });
 

@@ -224,7 +224,7 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
     if (doc.parentId) {
       // "Keep my draft": the parent stops pointing at a suggestion that no longer exists.
       await AiProposal.updateOne(
-        { _id: doc.parentId, childId: doc._id },
+        { _id: doc.parentId, childId: doc._id, status: 'ready' },
         { $set: { childId: null } },
       );
     }

@@ -129,16 +129,19 @@ export const aiProposalReviewRoutes: FastifyPluginAsync<AiProposalReviewRouteOpt
             ? { ...(answers ? { answers } : {}), ...(instruction ? { instruction } : {}) }
             : null,
       });
+      // Compare-and-swap on the childId we read: of two concurrent regenerates only
+      // one link wins, so only one child is ever left generating.
       const linked = await AiProposal.updateOne(
-        { _id: parent._id, status: 'ready' },
+        { _id: parent._id, status: 'ready', childId: parent.childId ?? null },
         { $set: { childId: child._id } },
       );
       if (linked.matchedCount === 0) {
         await AiProposal.updateOne(
-          { _id: child._id },
+          { _id: child._id, status: 'generating' },
           { $set: { status: 'cancelled', stage: null } },
         );
-        return conflict(reply, parent, 'Only a ready proposal can be regenerated.');
+        const current = (await AiProposal.findById(parent._id)) ?? parent;
+        return conflict(reply, current, 'A regeneration is already running.');
       }
       try {
         await enqueueAiProposalJob(String(child._id), child.runs);
@@ -240,8 +243,20 @@ export const aiProposalReviewRoutes: FastifyPluginAsync<AiProposalReviewRouteOpt
         return conflict(reply, owned, 'Only a ready proposal can be translated.');
       }
       const current = owned.responseLanguage ?? owned.result.detectedLanguage;
-      if (language === current && !owned.translation) {
-        return reply.send(toAiProposalView(owned));
+      if (language === current) {
+        if (!owned.translation) {
+          return reply.send(toAiProposalView(owned));
+        }
+        // "Keep this language": dismiss a pending or failed translation; no job, no budget.
+        const cleared = await AiProposal.findOneAndUpdate(
+          { _id: owned._id, status: 'ready' },
+          { $set: { translation: null } },
+          { new: true },
+        );
+        if (!cleared) {
+          return conflict(reply, owned, 'Only a ready proposal can be translated.');
+        }
+        return reply.send(toAiProposalView(cleared));
       }
       await assertProposalBudget(sub);
       const doc = await AiProposal.findOneAndUpdate(
@@ -268,7 +283,13 @@ export const aiProposalReviewRoutes: FastifyPluginAsync<AiProposalReviewRouteOpt
         });
         const message = 'Could not start translation. Please retry.';
         await AiProposal.updateOne(
-          { _id: doc._id, status: 'ready', 'translation.language': language },
+          {
+            _id: doc._id,
+            status: 'ready',
+            'translation.status': 'pending',
+            'translation.language': language,
+            translations: doc.translations,
+          },
           { $set: { translation: { status: 'failed', language, message } } },
         );
         throw new AppError({ code: 'AI_GENERATION_FAILED', message, statusCode: 503 });
