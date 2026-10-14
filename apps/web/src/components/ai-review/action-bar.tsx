@@ -15,6 +15,7 @@ export function ActionBar({
   saveStatus,
   canUndo,
   canCreate,
+  canRegenerate,
   creating,
   onUndo,
   onShowChanges,
@@ -25,6 +26,8 @@ export function ActionBar({
   saveStatus: SaveStatus;
   canUndo: boolean;
   canCreate: boolean;
+  /** False while the prose is being translated: a regeneration would race it. */
+  canRegenerate: boolean;
   creating: boolean;
   onUndo: () => void;
   onShowChanges: () => void;
@@ -49,7 +52,7 @@ export function ActionBar({
         <Button variant="secondary" onClick={onShowChanges}>
           View changes
         </Button>
-        <Button variant="secondary" onClick={onRegenerate}>
+        <Button variant="secondary" onClick={onRegenerate} disabled={!canRegenerate}>
           Regenerate…
         </Button>
         <Button onClick={onCreate} disabled={!canCreate || creating}>

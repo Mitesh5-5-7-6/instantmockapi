@@ -334,6 +334,7 @@ function AiReview({ id }: { id: string }) {
             saveStatus={saveState.status}
             canUndo={session.history.past.length > 0}
             canCreate={canCreate}
+            canRegenerate={proposal.translation?.status !== 'pending'}
             creating={creating}
             onUndo={() => {
               if (!creating) dispatchSession({ type: 'undo' });
