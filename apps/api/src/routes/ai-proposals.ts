@@ -375,6 +375,7 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
             generationConfig: result.generationConfig,
           },
           newProjectGenerationConfig(config.defaultMockRecords),
+          { maxMockRecords: config.maxMockRecords },
         );
         const kind = body.kind ?? claimed.hints?.kind ?? result.recommendedKind;
         const name = body.name?.trim() || result.name;

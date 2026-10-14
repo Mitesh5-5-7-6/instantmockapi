@@ -118,6 +118,20 @@ describe('toBuilderShape', () => {
     expect(Object.keys(shape)).toEqual(['entities', 'generationConfig']);
   });
 
+  it.each([
+    [5000, defaults.mockRecords],
+    [0, defaults.mockRecords],
+    [50, 50],
+    [2.5, defaults.mockRecords],
+  ])('coerces mockRecords %s to %s under a max of 1000', (given, expected) => {
+    const shape = toBuilderShape(
+      { entities: [], generationConfig: { mockRecords: given } },
+      defaults,
+      { maxMockRecords: 1000 },
+    );
+    expect(shape.generationConfig.mockRecords).toBe(expected);
+  });
+
   it('defaults required to true and default to null, and tolerates garbage', () => {
     const shape = toBuilderShape(
       { entities: [{ name: 'Thing', fields: [{ name: 'x', type: 'string' }, 'junk'] }] },

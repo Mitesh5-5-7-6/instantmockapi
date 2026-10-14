@@ -12,6 +12,8 @@ export interface ProposeDeps {
   provider: LLMProvider;
   generationDefaults: GenerationConfig;
   maxDepth: number;
+  /** Platform cap on mockRecords; larger model-proposed counts are coerced to the default. */
+  maxMockRecords?: number;
   /** Curated reference blueprints. Always empty in Sub-project 1; Sub-project 3 fills it. */
   examples?: readonly unknown[];
   /** Progress callback for the UI. A rejection here propagates. */
@@ -116,7 +118,11 @@ function evaluate(
   }
 
   const meta = sanitizeMeta(raw);
-  const shape = toBuilderShape(raw, deps.generationDefaults);
+  const shape = toBuilderShape(
+    raw,
+    deps.generationDefaults,
+    deps.maxMockRecords === undefined ? undefined : { maxMockRecords: deps.maxMockRecords },
+  );
   const details = validateShape(shape, input.hints.kind ?? meta.recommendedKind, deps.maxDepth);
   if (details.length > 0) {
     return { ok: false, details };

@@ -16,6 +16,11 @@ export interface BuilderShape {
   generationConfig: GenerationConfig;
 }
 
+/** Platform limits the coercion must respect so the result is generatable. */
+export interface ShapeLimits {
+  maxMockRecords: number;
+}
+
 /**
  * Meta keys a proposal may set. The rest (`reference`, `readOnly`, `relation`)
  * are written by `materializeRelations`; accepting them from the model would let
@@ -37,11 +42,15 @@ const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : [
  * What it does remove is everything the platform owns: ids, authentication,
  * and generation settings other than methods and record count.
  */
-export function toBuilderShape(raw: unknown, defaults: GenerationConfig): BuilderShape {
+export function toBuilderShape(
+  raw: unknown,
+  defaults: GenerationConfig,
+  limits?: ShapeLimits,
+): BuilderShape {
   const source = isRecord(raw) ? raw : {};
   return {
     entities: asArray(source['entities']).map(toEntity),
-    generationConfig: toGenerationConfig(source['generationConfig'], defaults),
+    generationConfig: toGenerationConfig(source['generationConfig'], defaults, limits),
   };
 }
 
@@ -94,7 +103,11 @@ function toRelation(raw: unknown): Relation {
   };
 }
 
-function toGenerationConfig(raw: unknown, defaults: GenerationConfig): GenerationConfig {
+function toGenerationConfig(
+  raw: unknown,
+  defaults: GenerationConfig,
+  limits?: ShapeLimits,
+): GenerationConfig {
   const config = isRecord(raw) ? raw : {};
   const known = HTTP_METHODS as readonly string[];
   const methods = asArray(config['methods']).filter(
@@ -105,8 +118,14 @@ function toGenerationConfig(raw: unknown, defaults: GenerationConfig): Generatio
   return {
     ...defaults,
     methods: methods.length > 0 ? [...new Set(methods)] : defaults.methods,
+    // Coercion, like the dropped methods: a count the generation config would
+    // refuse (non-integer, < 1, above the platform maximum) falls back to the
+    // default so the proposal stays committable. Not a semantic rejection.
     mockRecords:
-      typeof mockRecords === 'number' && Number.isInteger(mockRecords)
+      typeof mockRecords === 'number' &&
+      Number.isInteger(mockRecords) &&
+      mockRecords >= 1 &&
+      mockRecords <= (limits?.maxMockRecords ?? Number.POSITIVE_INFINITY)
         ? mockRecords
         : defaults.mockRecords,
   };

@@ -81,6 +81,7 @@ export async function processAiProposalJob(
       provider,
       generationDefaults: newProjectGenerationConfig(config.defaultMockRecords),
       maxDepth: config.maxNestingDepth,
+      maxMockRecords: config.maxMockRecords,
       onStage: async (stage) => {
         await AiProposal.updateOne(pending, { $set: { stage } });
       },
