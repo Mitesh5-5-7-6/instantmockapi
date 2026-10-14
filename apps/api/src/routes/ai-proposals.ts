@@ -7,9 +7,16 @@
  */
 
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
-import { AppError, getErrorMessage, logger } from '@instantmockapi/shared';
+import {
+  AppError,
+  SLUG_MAX_LENGTH,
+  SLUG_PATTERN,
+  getErrorMessage,
+  isUsableSlug,
+  logger,
+} from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
-import { AiProposal, mongoose, type IAiProposal } from '@instantmockapi/db';
+import { AiProposal, Project, mongoose, type IAiProposal } from '@instantmockapi/db';
 import { enqueueAiProposalJob } from '@instantmockapi/queue';
 import { PROMPT_VERSION, toBuilderShape } from '@instantmockapi/ai';
 import { newProjectGenerationConfig, type AuthConfig } from '@instantmockapi/ips';
@@ -244,6 +251,8 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
             error: null,
             rawOutput: null,
             result: null,
+            durationMs: null,
+            geminiCalls: 0,
           },
           $inc: { runs: 1 },
         },
@@ -282,7 +291,7 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
           properties: {
             kind: { type: 'string', enum: [...KINDS] },
             name: { type: 'string', minLength: 1, maxLength: 120 },
-            slug: { type: 'string', maxLength: 64 },
+            slug: { type: 'string', pattern: SLUG_PATTERN.source, maxLength: SLUG_MAX_LENGTH },
             description: { type: 'string', maxLength: 500 },
             blueprint: {
               type: 'object',
@@ -305,12 +314,20 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
       const sub = request.authUser?.sub ?? '';
       const owned = await loadOwnedProposal(id, sub);
 
+      if (body.slug !== undefined && !isUsableSlug(body.slug)) {
+        throw new AppError({
+          code: 'VALIDATION_ERROR',
+          message: `slug '${body.slug}' is reserved or malformed`,
+          details: [{ path: 'slug', issue: 'must be kebab-case and not a reserved word' }],
+        });
+      }
+
       await assertProjectQuota(sub, request.authUser?.plan);
 
       // The claim is the double-commit guard: only one request can move
       // ready → committing; the loser sees the new status and gets a 409.
       const claimed = await AiProposal.findOneAndUpdate(
-        { _id: owned._id, status: 'ready' },
+        { _id: owned._id, status: 'ready', result: { $ne: null } },
         { $set: { status: 'committing' } },
         { new: true },
       );
@@ -325,6 +342,8 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
         );
       }
 
+      // Captured so the failure path can tell whether the project was persisted.
+      let createdId: string | null = null;
       try {
         const result = claimed.result;
         const shape = toBuilderShape(
@@ -344,14 +363,21 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
 
         const created = await createProjectRecord({
           ownerId: sub,
-          prepare: (projectId) => ({
-            name,
-            kind,
-            slug: body.slug ?? null,
-            description: body.description ?? (result.description || claimed.prompt),
-            inputSource: { type: 'builder', raw },
-            ips: parseInputSource(projectId, name, 'builder', raw, config, kind),
-          }),
+          prepare: (projectId) => {
+            createdId = projectId;
+            return {
+              name,
+              kind,
+              slug: body.slug ?? null,
+              // Project.description has maxlength 500; a 1000-char prompt fallback would 500 on save.
+              description: (body.description ?? (result.description || claimed.prompt)).slice(
+                0,
+                500,
+              ),
+              inputSource: { type: 'builder', raw },
+              ips: parseInputSource(projectId, name, 'builder', raw, config, kind),
+            };
+          },
         });
 
         await AiProposal.updateOne(
@@ -360,10 +386,30 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
         );
         return reply.status(201).send(toProjectDetail(created));
       } catch (error) {
-        await AiProposal.updateOne(
-          { _id: claimed._id, status: 'committing' },
-          { $set: { status: 'ready' } },
-        );
+        // A duplicate project is worse than a 500 for a commit that actually
+        // succeeded: if the project was persisted (the failure came after the
+        // save, e.g. the 'committed' write blipped), settle as committed rather
+        // than reverting to 'ready', which would let the next commit duplicate it.
+        const persisted =
+          createdId !== null && (await Project.exists({ _id: createdId }).catch(() => null));
+        if (persisted) {
+          try {
+            await AiProposal.updateOne(
+              { _id: claimed._id, status: 'committing' },
+              { $set: { status: 'committed', projectId: createdId, committedAt: new Date() } },
+            );
+          } catch (settleError) {
+            logger.error('Could not settle committed AI proposal', {
+              proposalId: String(claimed._id),
+              error: getErrorMessage(settleError),
+            });
+          }
+        } else {
+          await AiProposal.updateOne(
+            { _id: claimed._id, status: 'committing' },
+            { $set: { status: 'ready' } },
+          );
+        }
         throw error;
       }
     },

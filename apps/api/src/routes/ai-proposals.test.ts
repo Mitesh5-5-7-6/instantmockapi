@@ -126,6 +126,7 @@ describe('POST /v1/ai/proposals', () => {
     expect(res.statusCode).toBe(503);
     const stored = await AiProposal.findOne().lean();
     expect(stored).toMatchObject({ status: 'failed', prompt: 'x' });
+    expect(res.body).not.toContain('ECONNREFUSED');
   });
 });
 
@@ -253,6 +254,38 @@ describe('commit', () => {
       409,
     );
     expect(await Project.countDocuments()).toBe(0);
+  });
+
+  it('does not duplicate the project when the committed write fails after creation', async () => {
+    const doc = await seed(alice.userId);
+    const spy = vi.spyOn(AiProposal, 'updateOne').mockRejectedValueOnce(new Error('mongo blip'));
+    const first = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken);
+    spy.mockRestore();
+    expect(first.statusCode).toBeGreaterThanOrEqual(500);
+    expect(await Project.countDocuments()).toBe(1);
+    expect((await AiProposal.findById(doc._id).lean())!.status).not.toBe('ready');
+    const second = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken);
+    expect(second.statusCode).toBe(409);
+    expect(await Project.countDocuments()).toBe(1);
+  });
+
+  it('rejects a malformed slug and creates nothing', async () => {
+    const doc = await seed(alice.userId);
+    const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken, {
+      slug: 'Not A Slug',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(await Project.countDocuments()).toBe(0);
+  });
+
+  it('caps a long prompt used as the description fallback', async () => {
+    const result = JSON.parse(fakeOutputJson(['Alpha']));
+    result.description = '';
+    const doc = await seed(alice.userId, { prompt: 'p'.repeat(900), result });
+    const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken);
+    expect(res.statusCode).toBe(201);
+    const stored = await Project.findOne().lean();
+    expect(stored!.description!.length).toBeLessThanOrEqual(500);
   });
 
   it('cannot commit another user’s proposal', async () => {
