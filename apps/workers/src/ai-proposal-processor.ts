@@ -71,7 +71,10 @@ export async function processAiProposalJob(
 
   // A regenerated child revises the parent's current schema (its draft if edited),
   // so the AI does not undo the user's changes (SP2 §5.3).
-  const parent = proposal.parentId ? await AiProposal.findById(proposal.parentId).lean() : null;
+  // Owner-scoped like every API read: a forged parentId never leaks another user's schema.
+  const parent = proposal.parentId
+    ? await AiProposal.findOne({ _id: proposal.parentId, ownerId: proposal.ownerId }).lean()
+    : null;
   const currentBlueprint = parent
     ? (parent.draft?.entities ?? parent.result?.entities ?? null)
     : null;
@@ -189,6 +192,11 @@ async function processTranslateJob(
   };
   const config = deps.config ?? loadEnvConfig();
   if (!deps.provider && !config.geminiApiKey) {
+    logger.warn('AI translation failed', {
+      proposalId: String(proposal._id),
+      language,
+      code: 'AI_NOT_CONFIGURED',
+    });
     await AiProposal.updateOne(pending, {
       $set: {
         translation: { status: 'failed', language, message: 'The AI service is not configured.' },
@@ -209,6 +217,12 @@ async function processTranslateJob(
     });
     return;
   }
+  // The code only: the failure message may quote provider text, which never reaches logs.
+  logger.warn('AI translation failed', {
+    proposalId: String(proposal._id),
+    language,
+    code: outcome.failure.code,
+  });
   await AiProposal.updateOne(pending, {
     $set: { translation: { status: 'failed', language, message: outcome.failure.message } },
   });
@@ -259,7 +273,7 @@ export async function settleExhaustedAiProposal(
           translation: {
             status: 'failed',
             language: payload.language,
-            message: 'The AI service is busy. Please try again in a minute.',
+            message: 'Translation failed – keep this language or retry',
           },
         },
       },

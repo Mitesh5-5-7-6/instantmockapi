@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 // `mongoose` is not a dependency of apps/workers; use the instance the db package re-exports.
 import {
@@ -9,6 +9,7 @@ import {
   mongoose,
 } from '@instantmockapi/db';
 import { loadEnvConfig } from '@instantmockapi/config';
+import { logger } from '@instantmockapi/shared';
 
 const { Types } = mongoose;
 import {
@@ -284,7 +285,30 @@ describe('translate jobs', () => {
     );
     const after = await AiProposal.findById(doc._id).lean();
     expect(after).toMatchObject({ status: 'ready' });
-    expect(after!.translation).toMatchObject({ status: 'failed', language: 'gu' });
+    expect(after!.translation).toEqual({
+      status: 'failed',
+      language: 'gu',
+      message: 'Translation failed – keep this language or retry',
+    });
+  });
+
+  it('logs a final translate failure with its code and no provider text', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    try {
+      const doc = await readyWithTranslation('gu');
+      await processAiProposalJob(
+        { proposalId: String(doc._id), run: 1, kind: 'translate', language: 'gu' },
+        { config, provider: createScriptedProvider('{"description":"secret provider text"}') },
+      );
+      expect(warn).toHaveBeenCalledWith('AI translation failed', {
+        proposalId: String(doc._id),
+        language: 'gu',
+        code: 'AI_GENERATION_FAILED',
+      });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('secret provider text');
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
@@ -310,6 +334,7 @@ it('passes the parent blueprint and clarification to a regenerated child', async
     },
   });
   const child = await generating({
+    ownerId: parent.ownerId,
     parentId: parent._id,
     clarification: { answers: 'yes please' },
   });
@@ -318,4 +343,20 @@ it('passes the parent blueprint and clarification to a regenerated child', async
   const turn = provider.calls[0]!.turns[0]!.text;
   expect(turn).toContain('Edited');
   expect(turn).toContain('answers: yes please');
+});
+
+it('ignores a parent that belongs to another owner', async () => {
+  const parent = await AiProposal.create({
+    ownerId: new Types.ObjectId(),
+    prompt: 'p',
+    model: 'm',
+    promptVersion: 'v',
+    status: 'ready',
+    stage: null,
+    result: JSON.parse(fakeOutputJson(['Foreign'])),
+  });
+  const child = await generating({ ownerId: new Types.ObjectId(), parentId: parent._id });
+  const provider = createScriptedProvider(fakeOutputJson(['Alpha']));
+  await run(child._id, provider);
+  expect(provider.calls[0]!.turns[0]!.text).not.toContain('<current_blueprint>');
 });
