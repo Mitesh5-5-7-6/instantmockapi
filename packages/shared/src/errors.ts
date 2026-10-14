@@ -75,6 +75,23 @@ export type ErrorCode =
   | 'PLAN_LIMIT_EXCEEDED'
   | 'DEPTH_LIMIT_EXCEEDED'
   | 'GENERATION_ERROR'
+  /**
+   * The AI provider is not usable from this deployment: no key, or a key the
+   * provider refuses. 503 because nothing the user changes will help — an
+   * operator has to configure the key.
+   */
+  | 'AI_NOT_CONFIGURED'
+  /**
+   * The AI could not produce a valid proposal: the provider stayed unavailable
+   * through every retry, blocked the request, or returned a blueprint that still
+   * failed IPS validation after the one repair attempt.
+   *
+   * Deliberately not VALIDATION_ERROR: the user did not write the invalid
+   * schema, so blaming their input would mislead, and their next step is the
+   * same in every case — retry or rephrase. 502 because an upstream we depend
+   * on is what failed.
+   */
+  | 'AI_GENERATION_FAILED'
   | 'INTERNAL_ERROR';
 
 /**
@@ -144,6 +161,8 @@ function errorCodeToStatus(code: ErrorCode): number {
     PLAN_LIMIT_EXCEEDED: 403,
     DEPTH_LIMIT_EXCEEDED: 422,
     GENERATION_ERROR: 500,
+    AI_NOT_CONFIGURED: 503,
+    AI_GENERATION_FAILED: 502,
     INTERNAL_ERROR: 500,
   };
   return map[code];

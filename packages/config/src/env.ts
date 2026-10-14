@@ -114,6 +114,12 @@ export interface EnvConfig {
 
   /** Gemini API key used by the AI project generator. Optional unless the AI workflow is enabled. */
   readonly geminiApiKey: string;
+  /**
+   * Gemini model id used for AI proposals. A setting rather than a constant so
+   * a model can be swapped without a deploy — and recorded on every proposal,
+   * so results stay attributable to the model that produced them.
+   */
+  readonly geminiModel: string;
 
   /** From address for transactional mail, e.g. `InstantMockAPI <no-reply@…>`. */
   readonly emailFrom: string;
@@ -271,6 +277,7 @@ export function loadEnvConfig(): EnvConfig {
     appUrl: envStr('APP_URL', webOrigin),
     resendApiKey: envStr('RESEND_API_KEY', ''),
     geminiApiKey: envStr('GEMINI_API_KEY', envStr('GOOGLE_API_KEY', '')),
+    geminiModel: envStr('GEMINI_MODEL', 'gemini-2.5-flash'),
     emailFrom: envStr('EMAIL_FROM', 'InstantMockAPI <no-reply@instantmockapi.dev>'),
     googleClientId: envStr('GOOGLE_CLIENT_ID', ''),
     googleClientSecret: envStr('GOOGLE_CLIENT_SECRET', ''),
