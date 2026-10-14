@@ -119,6 +119,9 @@ The worker host and the embedded API worker now also run an `ai-proposal-jobs` w
 more idle BullMQ poller against Redis (budget for it on a metered plan), and both the worker host
 and an API running `RUN_WORKER_IN_PROCESS=true` need `GEMINI_API_KEY`.
 
+Deploy the workers before the API: an older worker treats translate jobs as no-ops and ignores
+regenerate context.
+
 ---
 
 ## Hosted API performance
