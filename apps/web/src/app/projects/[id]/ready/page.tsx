@@ -64,8 +64,14 @@ export default function ReadyPage({ params }: { params: Promise<{ id: string }> 
   }));
 
   // A refused clipboard write must say so; a silent Copy leaves stale content.
+  // `navigator.clipboard` is undefined on a non-secure (http) origin: that is a
+  // refusal too, reported by the same toast rather than thrown.
   const copyUrl = (url: string): void => {
-    navigator.clipboard.writeText(url).then(
+    const clipboard = navigator.clipboard as Clipboard | undefined;
+    (clipboard
+      ? clipboard.writeText(url)
+      : Promise.reject(new Error('The clipboard is not available on this page.'))
+    ).then(
       () => notifySuccess('URL copied'),
       (cause: unknown) => notifyFailure(normalizeError(cause)),
     );

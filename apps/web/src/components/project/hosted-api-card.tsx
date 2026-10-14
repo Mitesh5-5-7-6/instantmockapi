@@ -36,7 +36,8 @@ function CopyUrl({ url }: { url: string }) {
       variant="secondary"
       size="sm"
       onClick={() => {
-        void navigator.clipboard.writeText(url);
+        // Undefined on a non-secure (http) origin; Copy then does nothing instead of throwing.
+        void (navigator.clipboard as Clipboard | undefined)?.writeText(url);
       }}
     >
       <Icon name="copy" size={14} /> Copy
