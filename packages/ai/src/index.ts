@@ -42,3 +42,13 @@ export {
   type ProposeOutcome,
 } from './propose.js';
 export { createScriptedProvider, fakeOutputJson } from './testing.js';
+export {
+  TRANSLATE_PROMPT,
+  buildTranslateTurn,
+  proseOf,
+  readTranslation,
+  translateProse,
+  withProse,
+  type ProposalProse,
+  type TranslateOutcome,
+} from './translate.js';
