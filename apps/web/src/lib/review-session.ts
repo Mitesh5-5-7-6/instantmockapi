@@ -90,15 +90,21 @@ export function nextTranslation(
   return { previous: seen.description, next: now.description };
 }
 
-/** Create API is offered only for a form the server has seen, in full, and found valid. */
+/**
+ * Create API is offered only for a form the server has seen, in full, and found
+ * valid. `clientIssueCount` covers what the server never sees because the saved
+ * payload is pruned (see `clientIssueCount` in review-state).
+ */
 export function canCreateApi(input: {
   authAnswered: boolean;
   issueCount: number;
+  clientIssueCount: number;
   save: SaverSnapshot;
 }): boolean {
   return (
     input.authAnswered &&
     input.issueCount === 0 &&
+    input.clientIssueCount === 0 &&
     input.save.status === 'saved' &&
     !input.save.dirty &&
     !input.save.pending

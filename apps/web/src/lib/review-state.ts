@@ -1,5 +1,6 @@
 import type { AuthConfigView, AuthMode } from './api-types';
-import type { BuilderEntity } from './builder';
+import { hasEmptyEnum, type BuilderEntity } from './builder';
+import { validateRelations } from './relations';
 import { configForChoice } from './auth-onboarding';
 import type { FieldPathIndex } from './error-paths';
 import { attachDescriptions, serializeBuilder, type ReviewSource } from './builder-payload';
@@ -21,6 +22,20 @@ export type ReviewAction =
 
 export function hasRelations(state: ReviewState): boolean {
   return state.entities.some((entity) => entity.relations.length > 0);
+}
+
+/**
+ * Problems the server's dry run cannot see. The saved payload is pruned
+ * (`serializeBuilder` drops unnamed entities and dangling relations), so the
+ * server would find it valid and Create would silently lose those parts.
+ */
+export function clientIssueCount(entities: BuilderEntity[]): number {
+  const generated = entities.filter((entity) => entity.generate);
+  return (
+    validateRelations(entities).length +
+    generated.filter((entity) => !entity.name.trim()).length +
+    generated.filter((entity) => hasEmptyEnum(entity.fields)).length
+  );
 }
 
 export function reviewReducer(state: ReviewState, action: ReviewAction): ReviewState {
@@ -47,9 +62,22 @@ export function reviewReducer(state: ReviewState, action: ReviewAction): ReviewS
     case 'entity': {
       const previous = state.entities.find((entity) => entity.id === action.id);
       const renamed = previous && previous.name !== action.next.name ? previous.name : null;
+      // Relations point at entities by name, so they follow a rename like the
+      // protected list does. Otherwise a rename leaves them dangling.
+      const retarget = (entity: BuilderEntity): BuilderEntity =>
+        renamed !== null && entity.relations.some((relation) => relation.target === renamed)
+          ? {
+              ...entity,
+              relations: entity.relations.map((relation) =>
+                relation.target === renamed ? { ...relation, target: action.next.name } : relation,
+              ),
+            }
+          : entity;
       return {
         ...state,
-        entities: state.entities.map((entity) => (entity.id === action.id ? action.next : entity)),
+        entities: state.entities.map((entity) =>
+          retarget(entity.id === action.id ? action.next : entity),
+        ),
         protectedNames: renamed
           ? state.protectedNames.map((name) => (name === renamed ? action.next.name : name))
           : state.protectedNames,

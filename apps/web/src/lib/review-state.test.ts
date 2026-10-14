@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { newEntity, newRelation } from './builder';
+import { newEntity, newField, newRelation } from './builder';
 import {
   applyTranslation,
+  clientIssueCount,
   draftInputFor,
   hasRelations,
   reviewReducer,
@@ -36,6 +37,18 @@ describe('reviewReducer', () => {
     expect(next.protectedNames).toEqual(['Member']);
   });
 
+  it('retargets relations in other entities when an entity is renamed', () => {
+    const state = base();
+    const alpha = state.entities[0]!;
+    const next = reviewReducer(state, {
+      type: 'entity',
+      id: alpha.id,
+      next: { ...alpha, name: 'Member' },
+    });
+    expect(next.entities[1]!.relations.map((relation) => relation.target)).toEqual(['Member']);
+    expect(clientIssueCount(next.entities)).toBe(0);
+  });
+
   it('drops a removed entity from the protected list', () => {
     const state = {
       ...base(),
@@ -68,6 +81,22 @@ describe('reviewReducer', () => {
     expect(reviewReducer(once, { type: 'toggleProtected', name: 'Alpha' }).protectedNames).toEqual(
       [],
     );
+  });
+});
+
+describe('clientIssueCount', () => {
+  it('is 0 for a valid model', () => {
+    expect(clientIssueCount(base().entities)).toBe(0);
+  });
+
+  it('counts a dangling relation, an unnamed entity and an empty enum', () => {
+    const [alpha, beta] = base().entities;
+    const unnamed = { ...newEntity('X'), name: '  ' };
+    const withEnum = { ...newEntity('Gamma'), fields: [newField('status', 'enum')] };
+    // Without Alpha, Beta's relation dangles.
+    expect(clientIssueCount([beta!])).toBe(1);
+    expect(clientIssueCount([alpha!, beta!, unnamed])).toBe(1);
+    expect(clientIssueCount([alpha!, beta!, withEnum])).toBe(1);
   });
 });
 

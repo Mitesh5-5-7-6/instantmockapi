@@ -15,7 +15,7 @@ import { normalizeError, type FailureDetail } from '../../../../lib/errors';
 import { resolveDetails, type FieldPathIndex } from '../../../../lib/error-paths';
 import { notifyFailure } from '../../../../lib/toast';
 import { proposalToBuilder } from '../../../../lib/builder-payload';
-import { draftInputFor, type ReviewAction } from '../../../../lib/review-state';
+import { clientIssueCount, draftInputFor, type ReviewAction } from '../../../../lib/review-state';
 import {
   canCreateApi,
   initialSession,
@@ -23,6 +23,7 @@ import {
   sessionReducer,
   type SeenProse,
 } from '../../../../lib/review-session';
+import { validateRelations } from '../../../../lib/relations';
 import { DraftSaver, type SaverSnapshot } from '../../../../lib/draft-saver';
 import { REVIEW_PROPOSAL_QUERY } from '../../../../lib/ai-proposal';
 import { OverviewCard } from '../../../../components/ai-review/overview-card';
@@ -175,6 +176,7 @@ function AiReview({ id }: { id: string }) {
   );
 
   const resolved = useMemo(() => resolveDetails(issues.list, issues.pathIndex), [issues]);
+  const clientIssues = useMemo(() => (state ? clientIssueCount(state.entities) : 0), [state]);
 
   // "AI version vs. mine": the result as the AI produced it, ignoring the draft.
   const aiEntities = useMemo(
@@ -279,6 +281,7 @@ function AiReview({ id }: { id: string }) {
   const canCreate = canCreateApi({
     authAnswered: state.authMode !== null,
     issueCount: issues.list.length,
+    clientIssueCount: clientIssues,
     save: saveState,
   });
 
@@ -350,6 +353,13 @@ function AiReview({ id }: { id: string }) {
         </fieldset>
         {state.authMode === null ? (
           <p className="ui-meta">Answer the authentication question to create the API.</p>
+        ) : null}
+        {clientIssues > 0 ? (
+          <p className="ui-meta">
+            {validateRelations(state.entities).length > 0
+              ? 'Fix the highlighted relationships to create the API.'
+              : 'Name every entity and give every enum field a value to create the API.'}
+          </p>
         ) : null}
         {error ? <FormError title={error} /> : null}
         {regenerating ? (

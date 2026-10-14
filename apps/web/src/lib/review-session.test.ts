@@ -138,6 +138,7 @@ describe('canCreateApi', () => {
   const ready = {
     authAnswered: true,
     issueCount: 0,
+    clientIssueCount: 0,
     save: { status: 'saved' as const, dirty: false, pending: false },
   };
 
@@ -148,6 +149,7 @@ describe('canCreateApi', () => {
   it.each([
     ['the auth question is unanswered', { ...ready, authAnswered: false }],
     ['the server reported issues', { ...ready, issueCount: 1 }],
+    ['the form has client issues, e.g. a dangling relation', { ...ready, clientIssueCount: 1 }],
     ['an edit is unsaved', { ...ready, save: { ...ready.save, dirty: true } }],
     ['a save is scheduled or in flight', { ...ready, save: { ...ready.save, pending: true } }],
     ['the last save failed', { ...ready, save: { ...ready.save, status: 'error' as const } }],
