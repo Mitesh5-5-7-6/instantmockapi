@@ -22,3 +22,10 @@ export {
   type LLMTurn,
   type ProviderErrorKind,
 } from './provider.js';
+export {
+  proposeBlueprint,
+  type ProposalStage,
+  type ProposeDeps,
+  type ProposeOutcome,
+} from './propose.js';
+export { createScriptedProvider, fakeOutputJson } from './testing.js';
