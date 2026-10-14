@@ -306,17 +306,27 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
       // A commit with no body is the ordinary case; see drafts.ts for why this is needed.
       preValidation: (request, _reply, done) => {
         request.body ??= {};
-        // Fastify's ajv strips unknown properties instead of rejecting them, so
-        // `additionalProperties: false` alone would silently ignore this field. Raise the
-        // same validation error ajv would, so the error handler answers 400 as usual.
-        if ('authentication' in (request.body as object)) {
-          done(
-            Object.assign(new Error('body must not have property authentication'), {
-              validation: [{ instancePath: '/authentication', message: 'is not accepted' }],
-              validationContext: 'body',
-            }) as never,
-          );
-          return;
+        // Unlike the other routes, which silently strip unknown fields (Fastify's ajv
+        // removeAdditional), this one rejects `authentication` outright. The field decides who
+        // can read a project, and SP2 reintroduces it deliberately; until then a client that
+        // sends it must hear that it was not applied rather than assume it was.
+        const body = request.body;
+        if (typeof body === 'object' && body !== null && !Array.isArray(body)) {
+          if ('authentication' in body) {
+            done(
+              new AppError({
+                code: 'VALIDATION_ERROR',
+                message: 'authentication is not accepted on AI proposal commit yet',
+                details: [
+                  {
+                    path: 'authentication',
+                    issue: 'not accepted until the authentication step ships (Sub-project 2)',
+                  },
+                ],
+              }),
+            );
+            return;
+          }
         }
         done();
       },

@@ -229,12 +229,26 @@ describe('commit', () => {
     expect((await AiProposal.findById(doc._id).lean())!.status).toBe('ready');
     expect(await Project.countDocuments()).toBe(0);
   });
-  it('rejects an authentication property with 400 and creates no project', async () => {
+  it('rejects an authentication property with 422 and creates no project', async () => {
     const doc = await seed(alice.userId);
     const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken, {
       authentication: { type: 'none' },
     });
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+    expect(await Project.countDocuments()).toBe(0);
+  });
+
+  it('does not 500 when the commit body is a JSON primitive', async () => {
+    const doc = await seed(alice.userId);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/ai/proposals/${doc._id}/commit`,
+      headers: { ...authHeader(alice.accessToken), 'content-type': 'application/json' },
+      payload: '"abc"',
+    });
+    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(res.statusCode).toBeLessThan(500);
     expect(await Project.countDocuments()).toBe(0);
   });
 
