@@ -279,7 +279,9 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
       }
 
       // "Always ask" (SP2 §5.2): the auth answer lives only in the reviewed draft.
-      if (!owned.draft || owned.draft.authAnswered !== true) {
+      // Only for a ready proposal: any other status falls through to the claim below and
+      // keeps SP1's 409 (with the projectId when committed).
+      if (owned.status === 'ready' && (!owned.draft || owned.draft.authAnswered !== true)) {
         throw new AppError({
           code: 'VALIDATION_ERROR',
           message: 'Answer the authentication question first',
@@ -291,6 +293,7 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
 
       // The claim is the double-commit guard: only one request can move
       // ready → committing; the loser sees the new status and gets a 409.
+      // `draft.authAnswered` repeats the pre-check so a race can never commit an unanswered draft.
       const claimed = await AiProposal.findOneAndUpdate(
         { _id: owned._id, status: 'ready', 'draft.authAnswered': true },
         { $set: { status: 'committing' } },

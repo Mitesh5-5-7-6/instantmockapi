@@ -317,7 +317,7 @@ describe('retry and cancel', () => {
 });
 
 describe('commit', () => {
-  it('creates a project from the draft, with body overrides winning', async () => {
+  it('creates a project from the draft', async () => {
     const doc = await seed(alice.userId, { draft: readyDraft({ kind: 'single' }) });
     const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken);
     expect(res.statusCode).toBe(201);
@@ -329,12 +329,41 @@ describe('commit', () => {
   });
 
   it('lets the commit body override kind and name', async () => {
-    const doc = await seed(alice.userId, { hints: { kind: 'single' } });
+    const doc = await seed(alice.userId, { draft: readyDraft({ kind: 'single' }) });
     const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken, {
       kind: 'project',
       name: 'Renamed',
     });
     expect(res.json()).toMatchObject({ kind: 'project', name: 'Renamed' });
+  });
+
+  it('ignores a body blueprint and builds from the draft', async () => {
+    const doc = await seed(alice.userId);
+    const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken, {
+      blueprint: { entities: [{ name: 'Bad', fields: [{ name: 'id', type: 'nonsense' }] }] },
+    });
+    expect(res.statusCode).toBe(201);
+    const ips = (await Project.findById(res.json().id).lean())!.ips as {
+      entities: { name: string }[];
+    };
+    expect(ips.entities.map((e) => e.name)).toEqual(
+      readyDraft().entities.map((e: { name: string }) => e.name),
+    );
+  });
+
+  it('keeps the 409 with projectId for a committed proposal that has no draft', async () => {
+    const projectId = new Types.ObjectId();
+    const doc = await seed(alice.userId, { status: 'committed', projectId, draft: null });
+    const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.projectId).toBe(String(projectId));
+  });
+
+  it('keeps the 409 for a cancelled proposal that has no draft', async () => {
+    const doc = await seed(alice.userId, { status: 'cancelled', draft: null });
+    expect((await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken)).statusCode).toBe(
+      409,
+    );
   });
 
   it('answers 422 for an invalid draft and returns the proposal to ready', async () => {
@@ -364,15 +393,17 @@ describe('commit', () => {
     const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken);
     expect(res.statusCode).toBe(422);
     expect(res.json().error.details[0].path).toBe('authentication');
+    expect((await AiProposal.findById(doc._id).lean())!.status).toBe('ready');
     expect(await Project.countDocuments()).toBe(0);
   });
 
   it('refuses to commit until the authentication question is answered', async () => {
     const doc = await seed(alice.userId, { draft: readyDraft({ authAnswered: false }) });
-    expect((await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken)).statusCode).toBe(
-      422,
-    );
+    const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken);
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details[0].path).toBe('authentication');
     expect((await AiProposal.findById(doc._id).lean())!.status).toBe('ready');
+    expect(await Project.countDocuments()).toBe(0);
   });
 
   it('creates an ALL_PROTECTED project from the draft auth answer', async () => {
