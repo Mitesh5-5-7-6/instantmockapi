@@ -202,3 +202,120 @@ describe('settleExhaustedAiProposal', () => {
     expect((await AiProposal.findById(doc._id).lean())!.status).toBe('generating');
   });
 });
+
+async function readyWithTranslation(language: string, extra: Record<string, unknown> = {}) {
+  return AiProposal.create({
+    ownerId: new Types.ObjectId(),
+    prompt: 'p',
+    model: 'm',
+    promptVersion: 'v',
+    status: 'ready',
+    stage: null,
+    result: JSON.parse(fakeOutputJson(['Alpha'])),
+    translation: { status: 'pending', language },
+    ...extra,
+  });
+}
+const translated = (language: string) =>
+  JSON.stringify({
+    description: `D-${language}`,
+    kindRationale: 'K',
+    authReason: 'R',
+    assumptions: [],
+    questions: [],
+    entityDescriptions: { Alpha: `A-${language}` },
+  });
+
+describe('translate jobs', () => {
+  it('writes translated prose into the result and clears the translation', async () => {
+    const doc = await readyWithTranslation('gu');
+    await processAiProposalJob(
+      { proposalId: String(doc._id), run: 1, kind: 'translate', language: 'gu' },
+      { config, provider: createScriptedProvider(translated('gu')) },
+    );
+    const after = await AiProposal.findById(doc._id).lean();
+    expect(after).toMatchObject({ status: 'ready', responseLanguage: 'gu', translation: null });
+    expect(after!.result!.description).toBe('D-gu');
+    expect(after!.result!.entities[0]!.description).toBe('A-gu');
+    expect(after!.draft).toBeNull();
+  });
+
+  it('marks a wrong-shaped reply as a failed translation', async () => {
+    const doc = await readyWithTranslation('gu');
+    await processAiProposalJob(
+      { proposalId: String(doc._id), run: 1, kind: 'translate', language: 'gu' },
+      { config, provider: createScriptedProvider('{"description":"x"}') },
+    );
+    expect((await AiProposal.findById(doc._id).lean())!.translation).toMatchObject({
+      status: 'failed',
+      language: 'gu',
+    });
+  });
+
+  it('drops the result when the user switched to another language meanwhile', async () => {
+    const doc = await readyWithTranslation('fr');
+    const provider = createScriptedProvider(translated('gu'));
+    await processAiProposalJob(
+      { proposalId: String(doc._id), run: 1, kind: 'translate', language: 'gu' },
+      { config, provider },
+    );
+    expect(provider.calls).toHaveLength(0);
+    expect((await AiProposal.findById(doc._id).lean())!.translation).toMatchObject({
+      status: 'pending',
+      language: 'fr',
+    });
+  });
+
+  it('rethrows transient errors', async () => {
+    const doc = await readyWithTranslation('gu');
+    await expect(
+      processAiProposalJob(
+        { proposalId: String(doc._id), run: 1, kind: 'translate', language: 'gu' },
+        { config, provider: createScriptedProvider(new ProviderError('transient', 'HTTP 503')) },
+      ),
+    ).rejects.toMatchObject({ kind: 'transient' });
+  });
+
+  it('settles an exhausted translate job as a failed translation only', async () => {
+    const doc = await readyWithTranslation('gu');
+    await settleExhaustedAiProposal(
+      { proposalId: String(doc._id), run: 1, kind: 'translate', language: 'gu' },
+      new Error('x'),
+    );
+    const after = await AiProposal.findById(doc._id).lean();
+    expect(after).toMatchObject({ status: 'ready' });
+    expect(after!.translation).toMatchObject({ status: 'failed', language: 'gu' });
+  });
+});
+
+it('passes the parent blueprint and clarification to a regenerated child', async () => {
+  const parent = await AiProposal.create({
+    ownerId: new Types.ObjectId(),
+    prompt: 'p',
+    model: 'm',
+    promptVersion: 'v',
+    status: 'ready',
+    stage: null,
+    result: JSON.parse(fakeOutputJson(['Old'])),
+    draft: {
+      revision: 1,
+      kind: 'project',
+      name: 'n',
+      description: '',
+      entities: [{ name: 'Edited' }],
+      generationConfig: { methods: ['GET'], mockRecords: 5 },
+      authAnswered: false,
+      authentication: null,
+      savedAt: new Date(),
+    },
+  });
+  const child = await generating({
+    parentId: parent._id,
+    clarification: { answers: 'yes please' },
+  });
+  const provider = createScriptedProvider(fakeOutputJson(['Alpha']));
+  await run(child._id, provider);
+  const turn = provider.calls[0]!.turns[0]!.text;
+  expect(turn).toContain('Edited');
+  expect(turn).toContain('answers: yes please');
+});

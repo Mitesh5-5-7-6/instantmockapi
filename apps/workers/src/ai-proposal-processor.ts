@@ -7,6 +7,9 @@ import {
   GeminiProvider,
   PROMPT_VERSION,
   proposeBlueprint,
+  proseOf,
+  translateProse,
+  withProse,
   type AiFailure,
   type LLMProvider,
 } from '@instantmockapi/ai';
@@ -52,6 +55,12 @@ export async function processAiProposalJob(
     });
     return;
   }
+  // Only an explicit translate job takes the translate path; a payload without a
+  // kind (queued before SP2) is a propose job.
+  if (payload.kind === 'translate') {
+    await processTranslateJob(payload, deps);
+    return;
+  }
   const proposal = await AiProposal.findById(payload.proposalId).lean();
   // Gone (30-day TTL) or no longer generating (cancelled, or a duplicate run):
   // nothing to do, and throwing would only trigger pointless retries.
@@ -59,6 +68,13 @@ export async function processAiProposalJob(
   if (!proposal || proposal.status !== 'generating' || proposal.runs !== payload.run) {
     return;
   }
+
+  // A regenerated child revises the parent's current schema (its draft if edited),
+  // so the AI does not undo the user's changes (SP2 §5.3).
+  const parent = proposal.parentId ? await AiProposal.findById(proposal.parentId).lean() : null;
+  const currentBlueprint = parent
+    ? (parent.draft?.entities ?? parent.result?.entities ?? null)
+    : null;
 
   const config = deps.config ?? loadEnvConfig();
   const started = Date.now();
@@ -90,6 +106,8 @@ export async function processAiProposalJob(
           ...(proposal.hints?.kind ? { kind: proposal.hints.kind } : {}),
         },
         responseLanguage: proposal.responseLanguage,
+        clarification: proposal.clarification ?? null,
+        currentBlueprint,
       },
       {
         provider,
@@ -141,6 +159,61 @@ export async function processAiProposalJob(
   });
 }
 
+/**
+ * Re-write a ready proposal's prose in another language. Never touches the
+ * schema or the draft: writing the draft would bump its revision and make every
+ * open tab conflict (SP2 §5.5). Every write requires the translation the job was
+ * created for to still be the pending one — a later language change wins.
+ */
+async function processTranslateJob(
+  payload: AiProposalJobPayload,
+  deps: AiProposalDeps,
+): Promise<void> {
+  const language = payload.language;
+  if (!language) return;
+  const proposal = await AiProposal.findById(payload.proposalId).lean();
+  if (
+    !proposal ||
+    proposal.status !== 'ready' ||
+    !proposal.result ||
+    proposal.translation?.status !== 'pending' ||
+    proposal.translation.language !== language
+  ) {
+    return;
+  }
+  const pending = {
+    _id: proposal._id,
+    status: 'ready' as const,
+    'translation.status': 'pending' as const,
+    'translation.language': language,
+  };
+  const config = deps.config ?? loadEnvConfig();
+  if (!deps.provider && !config.geminiApiKey) {
+    await AiProposal.updateOne(pending, {
+      $set: {
+        translation: { status: 'failed', language, message: 'The AI service is not configured.' },
+      },
+    });
+    return;
+  }
+  const provider =
+    deps.provider ?? new GeminiProvider({ apiKey: config.geminiApiKey, model: config.geminiModel });
+  const outcome = await translateProse(proseOf(proposal.result), language, provider);
+  if (outcome.ok) {
+    await AiProposal.updateOne(pending, {
+      $set: {
+        result: withProse(proposal.result, outcome.prose),
+        responseLanguage: language,
+        translation: null,
+      },
+    });
+    return;
+  }
+  await AiProposal.updateOne(pending, {
+    $set: { translation: { status: 'failed', language, message: outcome.failure.message } },
+  });
+}
+
 function failedUpdate(
   failure: AiFailure,
   rawOutput: string | null,
@@ -171,6 +244,26 @@ export async function settleExhaustedAiProposal(
     error: error.message,
   });
   if (!mongoose.isValidObjectId(payload.proposalId)) {
+    return;
+  }
+  if (payload.kind === 'translate') {
+    await AiProposal.updateOne(
+      {
+        _id: payload.proposalId,
+        status: 'ready',
+        'translation.status': 'pending' as const,
+        'translation.language': payload.language,
+      },
+      {
+        $set: {
+          translation: {
+            status: 'failed',
+            language: payload.language,
+            message: 'The AI service is busy. Please try again in a minute.',
+          },
+        },
+      },
+    );
     return;
   }
   await AiProposal.updateOne(
