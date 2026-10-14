@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Button, FormError, Modal, Select, Textarea } from '@instantmockapi/ui';
 import type { AiProposalView } from '../../lib/api-types';
 import { normalizeError } from '../../lib/errors';
@@ -38,6 +38,8 @@ export function RegenerateDialog({
   const [childId, setChildId] = useState<string | null>(proposal.childId);
   const [choices, setChoices] = useState<Record<string, MergeChoice>>({});
   const [error, setError] = useState<string | null>(null);
+  // Set once Apply succeeds: the child is still 'ready' in the cache until the refetch lands.
+  const adopted = useRef(false);
   const regenerate = useRegenerateAiProposal(proposal.id);
   const adopt = useAdoptAiProposal();
   const cancel = useCancelAiProposal();
@@ -62,8 +64,14 @@ export function RegenerateDialog({
   }
 
   function close() {
-    // Closing while the suggestion is still being made abandons it.
-    if (childId && child && (child.status === 'generating' || child.status === 'ready')) {
+    // Closing abandons a suggestion that is still being made or waiting for a choice, but never an
+    // adopted one. A child whose view has not loaded yet counts as unfinished too. Cancel is best
+    // effort: a conflict on an already-finished child is harmless, so the error is dropped.
+    if (
+      !adopted.current &&
+      childId &&
+      (!child || child.status === 'generating' || child.status === 'ready')
+    ) {
       void cancel.mutateAsync(childId).catch(() => undefined);
     }
     setChildId(null);
@@ -102,6 +110,7 @@ export function RegenerateDialog({
                   answers: answers.trim() || undefined,
                   instruction: instruction.trim() || undefined,
                 });
+                adopted.current = false;
                 setChildId(c.id);
                 setChoices({});
               })
@@ -162,6 +171,7 @@ export function RegenerateDialog({
                   const merged = { ...current, entities: mergeEntities(changes, choices) };
                   const { input } = draftInputFor(merged, child.result?.entities ?? []);
                   await adopt.mutateAsync({ childId: child.id, draft: input });
+                  adopted.current = true;
                   onAdopted(child.id);
                 })
               }
