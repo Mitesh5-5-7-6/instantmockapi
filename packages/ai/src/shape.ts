@@ -49,8 +49,9 @@ const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : [
  * those paths are what the repair call and the UI show. Rejecting here would
  * make this a second validator that could disagree with the real one.
  *
- * What it does remove is everything the platform owns: ids, authentication,
- * and generation settings other than methods and record count.
+ * What it does remove is everything the platform owns: ids, and generation
+ * settings other than methods and record count. Entity authentication is
+ * removed too, except with `keepEntityAuth`, which is for user drafts only.
  */
 export function toBuilderShape(
   raw: unknown,
