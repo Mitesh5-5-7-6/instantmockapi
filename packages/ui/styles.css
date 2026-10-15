@@ -381,39 +381,185 @@ h3 {
 
 /* --------------------------------------------------------------- ER canvas -- */
 .ui-er {
-  overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg);
+  overflow: hidden;
+}
+
+.ui-er__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.ui-er__zoom {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.ui-er__zoom button {
+  min-width: 32px;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font: 12px var(--font-mono);
+  cursor: pointer;
+}
+
+.ui-er__zoom button:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.ui-er__zoom button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* Dot grid, so the canvas reads as a canvas rather than an empty panel. */
+.ui-er__canvas {
+  overflow: auto;
+  max-height: 640px;
   padding: var(--space-3);
+  background-image: radial-gradient(var(--border) 1px, transparent 1px);
+  background-size: 18px 18px;
 }
 
-.ui-er__node {
+.ui-er__card-body {
   fill: var(--surface-raised);
-  stroke: var(--accent);
+  stroke: var(--border-strong);
+  stroke-width: 1;
 }
 
-.ui-er__node--isolated {
-  stroke: var(--border);
+.ui-er__card-head {
+  fill: var(--accent-subtle);
+}
+
+.ui-er__card-rule {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.ui-er__card--isolated .ui-er__card-body {
   stroke-dasharray: 4 3;
 }
 
-.ui-er__label {
+.ui-er__card--isolated .ui-er__card-rule {
+  stroke: var(--border-strong);
+}
+
+.ui-er__card-title {
+  fill: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ui-er__row-rule {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.ui-er__col-name {
   fill: var(--text);
   font-family: var(--font-ui);
   font-size: 12px;
-  font-weight: 500;
 }
 
-.ui-er__edge {
-  stroke: var(--text-muted);
-  fill: none;
+.ui-er__col-name--key {
+  font-weight: 600;
 }
 
-.ui-er__edge-label {
+.ui-er__col-type {
   fill: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
+}
+
+.ui-er__badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.ui-er__badge--pk {
+  fill: var(--warning);
+}
+
+.ui-er__badge--fk {
+  fill: var(--info);
+}
+
+.ui-er__more {
+  fill: var(--text-subtle);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.ui-er__edge-line {
+  fill: none;
+  stroke: var(--text-subtle);
+  stroke-width: 1.4;
+  transition: stroke 120ms ease;
+}
+
+.ui-er__edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 10;
+}
+
+.ui-er__glyph {
+  fill: none;
+  stroke: var(--text-subtle);
+  stroke-width: 1.4;
+}
+
+.ui-er__edge:hover .ui-er__edge-line {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+/* Legend chips mirror the in-card badges. */
+.ui-er__badge-chip {
+  display: inline-block;
+  margin-right: var(--space-1);
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font: 700 9px var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+.ui-er__badge-chip--pk {
+  color: var(--warning);
+}
+
+.ui-er__badge-chip--fk {
+  color: var(--info);
+}
+
+.ui-er__legend-glyph {
+  vertical-align: middle;
+}
+
+.ui-er__legend-glyph .ui-er__edge-line,
+.ui-er__legend-glyph .ui-er__glyph {
+  stroke: var(--text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-er__edge-line {
+    transition: none;
+  }
 }
 
 /* ---------------------------------------------------------- endpoint rows -- */

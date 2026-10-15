@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { newEntity, newRelation, type BuilderEntity, type BuilderRelation } from './builder';
-import { NODE_HEIGHT, NODE_WIDTH, layoutEr } from './er-layout';
+import {
+  newEntity,
+  newField,
+  newRelation,
+  type BuilderEntity,
+  type BuilderRelation,
+} from './builder';
+import { MAX_CARD_FIELDS, layoutEr, type ErCard, type ErEdge, type ErLayout } from './er-layout';
 
 function rel(
   name: string,
@@ -21,158 +27,274 @@ const erp = (): BuilderEntity[] => [
   entity('Course'),
 ];
 
-const nameAt = (entities: BuilderEntity[], row: number): string[] =>
-  layoutEr(entities)
-    .nodes.filter((node) => node.row === row)
-    .map((node) => node.name);
+const card = (layout: ErLayout, name: string): ErCard =>
+  layout.cards.find((candidate) => candidate.name === name)!;
 
-describe('layoutEr', () => {
+const namesInColumn = (entities: BuilderEntity[], column: number): string[] =>
+  layoutEr(entities)
+    .cards.filter((candidate) => candidate.column === column)
+    .map((candidate) => candidate.name);
+
+/** Points where one line's vertical run cuts another line's horizontal runs. */
+function crossings(edges: ErEdge[]): number {
+  const between = (value: number, a: number, b: number) =>
+    value > Math.min(a, b) && value < Math.max(a, b);
+  let count = 0;
+  for (const a of edges) {
+    for (const b of edges) {
+      if (a === b) continue;
+      for (const [y, x1, x2] of [
+        [b.from.y, b.from.x, b.laneX],
+        [b.to.y, b.laneX, b.to.x],
+      ] as const) {
+        if (between(a.laneX, x1, x2) && between(y, a.from.y, a.to.y)) count += 1;
+      }
+    }
+  }
+  return count;
+}
+
+function overlaps(a: ErCard, b: ErCard): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+describe('layoutEr — cards', () => {
   it('returns an empty canvas for an empty model', () => {
-    expect(layoutEr([])).toEqual({ nodes: [], edges: [], width: 0, height: 0 });
+    expect(layoutEr([])).toEqual({ cards: [], edges: [], width: 0, height: 0 });
   });
 
   it('draws only named, included entities', () => {
     const entities = [entity('Student'), entity('  '), { ...entity('Fee'), generate: false }];
-    expect(layoutEr(entities).nodes.map((node) => node.name)).toEqual(['Student']);
+    expect(layoutEr(entities).cards.map((candidate) => candidate.name)).toEqual(['Student']);
   });
 
-  it('roots the diagram at the most-connected entity', () => {
-    // Student has two relations, so it anchors row 0 — regardless of where it
-    // happens to sit in the authoring order.
-    expect(nameAt(erp(), 0)).toEqual(['Student']);
-    expect(nameAt(erp(), 1)).toEqual(['Classroom', 'Course']);
+  it('lists the primary key first, typed by the identity style', () => {
+    const uuid = { ...entity('Tour'), identityStyle: 'uuid' as const };
+    const rows = card(layoutEr([uuid]), 'Tour').rows;
+    expect(rows[0]).toMatchObject({ name: 'id', type: 'uuid', key: 'pk' });
+    expect(card(layoutEr([entity('Tour')]), 'Tour').rows[0]).toMatchObject({ type: 'integer' });
   });
 
-  it('is stable under reordering of the input', () => {
-    // Layout runs on every keystroke; if it depended on input order the boxes
-    // would jump while someone types. One model in two orders, so the node ids
-    // are identical and only the ordering differs.
-    const model = erp();
-    const forwards = layoutEr(model);
-    const backwards = layoutEr([...model].reverse());
-    expect(backwards.nodes).toEqual(forwards.nodes);
-  });
-
-  it('breaks a degree tie alphabetically, so the root is never arbitrary', () => {
-    const entities = [entity('Zebra'), entity('Apple')];
-    expect(nameAt(entities, 0)).toEqual(['Apple']);
-  });
-
-  it('orders each row alphabetically', () => {
-    const entities = [
-      entity('Hub', [rel('c', 'Charlie'), rel('a', 'Alpha'), rel('b', 'Bravo')]),
-      entity('Alpha'),
-      entity('Bravo'),
-      entity('Charlie'),
+  it('shows each field with its type', () => {
+    const tour = entity('Tour');
+    tour.fields = [
+      { ...newField('title'), type: 'string' },
+      { ...newField('price'), type: 'decimal' },
     ];
-    expect(nameAt(entities, 1)).toEqual(['Alpha', 'Bravo', 'Charlie']);
+    const rows = card(layoutEr([tour]), 'Tour').rows;
+    expect(rows.slice(1)).toEqual([
+      expect.objectContaining({ name: 'title', type: 'string', key: null }),
+      expect.objectContaining({ name: 'price', type: 'decimal', key: null }),
+    ]);
   });
 
-  it('centres a narrow row against a wide one', () => {
-    const entities = [
-      entity('Hub', [rel('a', 'Alpha'), rel('b', 'Bravo'), rel('c', 'Charlie')]),
-      entity('Alpha'),
-      entity('Bravo'),
-      entity('Charlie'),
-    ];
-    const layout = layoutEr(entities);
-    const hub = layout.nodes.find((node) => node.name === 'Hub')!;
-    expect(hub.x + hub.width / 2).toBeCloseTo(layout.width / 2, 5);
+  it('adds the foreign key an owning relation creates, marked as one', () => {
+    // The key is derived server-side, but it is the column the line attaches to,
+    // so the card has to show it.
+    const layout = layoutEr(erp());
+    const rows = card(layout, 'Student').rows;
+    expect(rows).toContainEqual(
+      expect.objectContaining({ name: 'classroomId', type: 'integer', key: 'fk' }),
+    );
+    expect(rows).toContainEqual(
+      expect.objectContaining({ name: 'courseIds', type: 'integer[]', key: 'fk' }),
+    );
+    // A non-owning side adds no column.
+    expect(card(layout, 'Classroom').rows.filter((row) => row.key === 'fk')).toEqual([]);
+  });
+
+  it('does not repeat a key the author already declared as a field', () => {
+    const student = entity('Student', [rel('classroom', 'Classroom')]);
+    student.fields = [newField('id'), newField('classroomId'), newField('name')];
+    const rows = card(layoutEr([student, entity('Classroom')]), 'Student').rows;
+    expect(rows.filter((row) => row.name === 'id')).toHaveLength(1);
+    expect(rows.filter((row) => row.name === 'classroomId')).toEqual([
+      expect.objectContaining({ key: 'fk' }),
+    ]);
+  });
+
+  it('caps a long card and says how many fields are hidden', () => {
+    const wide = entity('Wide');
+    wide.fields = Array.from({ length: MAX_CARD_FIELDS + 3 }, (_, index) =>
+      newField(`field${index}`),
+    );
+    const layout = layoutEr([wide]);
+    const plain = card(layout, 'Wide').rows.filter((row) => row.key === null);
+    expect(plain).toHaveLength(MAX_CARD_FIELDS);
+    expect(card(layout, 'Wide').hiddenFields).toBe(3);
+  });
+
+  it('never hides a key column, however long the card', () => {
+    const wide = entity('Wide', [rel('owner', 'Owner')]);
+    wide.fields = Array.from({ length: MAX_CARD_FIELDS + 5 }, (_, index) =>
+      newField(`field${index}`),
+    );
+    const rows = card(layoutEr([wide, entity('Owner')]), 'Wide').rows;
+    expect(rows.some((row) => row.name === 'ownerId')).toBe(true);
+  });
+
+  it('widens a card to fit its longest row', () => {
+    const narrow = entity('A');
+    const wide = entity('B');
+    wide.fields = [newField('aVeryLongFieldNameThatNeedsRoom')];
+    const layout = layoutEr([narrow, wide]);
+    expect(card(layout, 'B').width).toBeGreaterThan(card(layout, 'A').width);
   });
 
   it('marks an entity nothing relates to', () => {
     const layout = layoutEr(erp().concat(entity('Orphan')));
-    expect(layout.nodes.find((node) => node.name === 'Orphan')?.isolated).toBe(true);
-    expect(layout.nodes.find((node) => node.name === 'Student')?.isolated).toBe(false);
+    expect(card(layout, 'Orphan').isolated).toBe(true);
+    expect(card(layout, 'Student').isolated).toBe(false);
   });
 
-  it('places a disconnected component below the first, not on top of it', () => {
-    const entities = [
-      entity('Student', [rel('classroom', 'Classroom')]),
-      entity('Classroom'),
-      entity('Invoice', [rel('payment', 'Payment')]),
-      entity('Payment'),
-    ];
-    const layout = layoutEr(entities);
-    const rows = new Map(layout.nodes.map((node) => [node.name, node.row]));
-    // The second component starts on a fresh row rather than colliding.
-    expect(rows.get('Invoice')).toBeGreaterThan(rows.get('Classroom')!);
-    const positions = layout.nodes.map((node) => `${node.x},${node.y}`);
-    expect(new Set(positions).size).toBe(positions.length);
-  });
-
-  it('sizes the canvas to hold the widest row', () => {
-    const layout = layoutEr(erp());
-    const widest = 2;
-    expect(layout.width).toBeGreaterThanOrEqual(widest * NODE_WIDTH);
-    expect(layout.height).toBeGreaterThanOrEqual(2 * NODE_HEIGHT);
-  });
-
-  it('keeps every node inside the canvas', () => {
-    const layout = layoutEr(erp());
-    for (const node of layout.nodes) {
-      expect(node.x).toBeGreaterThanOrEqual(0);
-      expect(node.x + node.width).toBeLessThanOrEqual(layout.width);
-      expect(node.y + node.height).toBeLessThanOrEqual(layout.height);
-    }
-  });
-
-  it('emits one edge per resolvable relation, carrying its cardinality', () => {
-    const layout = layoutEr(erp());
-    expect(layout.edges).toHaveLength(3);
-    const m2m = layout.edges.find((edge) => edge.kind === 'manyToMany');
-    expect(m2m?.cardinality).toBe('M : M');
-    expect(m2m?.label).toBe('courses');
-  });
-
-  it('skips an edge to a target that is not on the diagram', () => {
-    // Flagged by validateRelations; here there is simply no line to draw.
-    const entities = [entity('Student', [rel('ghost', 'Nowhere')])];
-    expect(layoutEr(entities).edges).toEqual([]);
-  });
-
-  it('skips a self-relation rather than drawing a degenerate line', () => {
-    const entities = [entity('Employee', [rel('manager', 'Employee')])];
-    expect(layoutEr(entities).edges).toEqual([]);
-    expect(layoutEr(entities).nodes).toHaveLength(1);
-  });
-
-  it('routes a sibling edge around the side instead of through the boxes', () => {
-    // A direct relation always steps a BFS row, so two related entities only
-    // share a row when they are siblings: Hub owns both, and they also relate to
-    // each other. That sideways edge is the case the elbow exists for.
-    const entities = [
-      entity('Hub', [rel('alpha', 'Alpha'), rel('bravo', 'Bravo')]),
-      entity('Alpha', [rel('bravo', 'Bravo', 'hasOne')]),
-      entity('Bravo'),
-    ];
-    const layout = layoutEr(entities);
-    const edge = layout.edges.find((candidate) => candidate.sameRow)!;
-    expect(edge).toBeDefined();
-    expect(edge.from.y).toBe(edge.to.y);
-    // The elbow lifts clear of the row instead of cutting through the boxes.
-    expect(edge.via.y).toBeLessThan(edge.from.y);
-  });
-
-  it('anchors a downward edge from the bottom of the source to the top of the target', () => {
-    const layout = layoutEr(erp());
-    const student = layout.nodes.find((node) => node.name === 'Student')!;
-    const edge = layout.edges.find((candidate) => candidate.label === 'classroom')!;
-    expect(edge.sameRow).toBe(false);
-    expect(edge.from.y).toBe(student.y + student.height);
-  });
-
-  it('keeps one node when a name is duplicated', () => {
-    // Duplicate names are a validation error elsewhere; the diagram must not
-    // render two boxes claiming the same identity.
-    const entities = [entity('Student'), entity('Student')];
-    expect(layoutEr(entities).nodes).toHaveLength(1);
+  it('keeps one card when a name is duplicated', () => {
+    expect(layoutEr([entity('Student'), entity('Student')]).cards).toHaveLength(1);
   });
 
   it('ignores surrounding whitespace in an entity name', () => {
     const entities = [entity('  Student  ', [rel('classroom', 'Classroom')]), entity('Classroom')];
     const layout = layoutEr(entities);
-    expect(layout.nodes.map((node) => node.name)).toContain('Student');
+    expect(layout.cards.map((candidate) => candidate.name)).toContain('Student');
     expect(layout.edges).toHaveLength(1);
+  });
+});
+
+describe('layoutEr — arrangement', () => {
+  it('puts the most-connected entity in the first column', () => {
+    expect(namesInColumn(erp(), 0)).toEqual(['Student']);
+    expect(namesInColumn(erp(), 1)).toEqual(['Classroom', 'Course']);
+  });
+
+  it('breaks a degree tie alphabetically, so the root is never arbitrary', () => {
+    // One relation each, so neither is more connected.
+    const entities = [entity('Zebra', [rel('apple', 'Apple')]), entity('Apple')];
+    expect(namesInColumn(entities, 0)).toEqual(['Apple']);
+    expect(namesInColumn(entities, 1)).toEqual(['Zebra']);
+  });
+
+  it('is stable under reordering of the input', () => {
+    // Layout runs on every keystroke; if it depended on input order the cards
+    // would jump while someone types.
+    const model = erp();
+    expect(layoutEr([...model].reverse())).toEqual(layoutEr(model));
+  });
+
+  it('never overlaps two cards, across components and isolated entities', () => {
+    const entities = [
+      entity('Student', [rel('classroom', 'Classroom'), rel('courses', 'Course', 'manyToMany')]),
+      entity('Classroom'),
+      entity('Course'),
+      entity('Invoice', [rel('payment', 'Payment')]),
+      entity('Payment'),
+      entity('Orphan'),
+      entity('Another'),
+    ];
+    const cards = layoutEr(entities).cards;
+    for (const a of cards) {
+      for (const b of cards) {
+        if (a !== b) {
+          expect(overlaps(a, b), `${a.name} overlaps ${b.name}`).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('keeps every card inside the canvas', () => {
+    const layout = layoutEr(erp().concat(entity('Orphan')));
+    for (const candidate of layout.cards) {
+      expect(candidate.x).toBeGreaterThanOrEqual(0);
+      expect(candidate.y).toBeGreaterThanOrEqual(0);
+      expect(candidate.x + candidate.width).toBeLessThanOrEqual(layout.width);
+      expect(candidate.y + candidate.height).toBeLessThanOrEqual(layout.height);
+    }
+  });
+});
+
+describe('layoutEr — relationship lines', () => {
+  it('draws a relation declared on both sides once', () => {
+    // Student.classroom and Classroom.students are one relationship; two lines
+    // on the same path are what made the old labels print over each other.
+    const layout = layoutEr(erp());
+    expect(layout.edges).toHaveLength(2);
+    const classroom = layout.edges.find((edge) => edge.label === 'classroom')!;
+    expect(classroom).toMatchObject({ kind: 'belongsTo', cardinality: 'M : 1' });
+    expect(layout.edges.find((edge) => edge.kind === 'manyToMany')?.cardinality).toBe('M : M');
+  });
+
+  it('draws a many-to-many declared on both sides once', () => {
+    const entities = [
+      entity('Student', [rel('courses', 'Course', 'manyToMany')]),
+      entity('Course', [rel('students', 'Student', 'manyToMany')]),
+    ];
+    expect(layoutEr(entities).edges).toHaveLength(1);
+  });
+
+  it('still draws a relation declared only on its non-owning side', () => {
+    const entities = [entity('Tour', [rel('bookings', 'Booking', 'hasMany')]), entity('Booking')];
+    expect(layoutEr(entities).edges).toEqual([
+      expect.objectContaining({ kind: 'hasMany', label: 'bookings' }),
+    ]);
+  });
+
+  it('attaches the line to the foreign-key row and the primary-key row', () => {
+    const layout = layoutEr(erp());
+    const student = card(layout, 'Student');
+    const classroom = card(layout, 'Classroom');
+    const edge = layout.edges.find((candidate) => candidate.label === 'classroom')!;
+    const fkRow = student.rows.findIndex((row) => row.name === 'classroomId');
+    expect(edge.from.y).toBe(student.rowY[fkRow]);
+    expect(edge.to.y).toBe(classroom.rowY[0]);
+  });
+
+  it('leaves a card on the side that faces the other card', () => {
+    const layout = layoutEr(erp());
+    const student = card(layout, 'Student');
+    const classroom = card(layout, 'Classroom');
+    const edge = layout.edges.find((candidate) => candidate.label === 'classroom')!;
+    // Student is in column 0, Classroom in column 1.
+    expect(edge.from.x).toBe(student.x + student.width);
+    expect(edge.to.x).toBe(classroom.x);
+  });
+
+  it('gives lines that share a gap their own lane, so they never run together', () => {
+    const layout = layoutEr(erp());
+    const lanes = layout.edges.map((edge) => edge.laneX);
+    expect(new Set(lanes).size).toBe(lanes.length);
+  });
+
+  it('orders lanes so lines sharing a gap do not cross', () => {
+    // Tour's key rows run top to bottom destinationIds, guideId, while their
+    // targets stack Booking, Destination, Guide. A lane order by midpoint alone
+    // crossed guideId's line over destinationIds'.
+    const entities = [
+      entity('Tour', [
+        rel('guide', 'Guide'),
+        rel('bookings', 'Booking', 'hasMany'),
+        rel('destinations', 'Destination', 'manyToMany'),
+      ]),
+      entity('Booking', [rel('tour', 'Tour'), rel('customer', 'Customer')]),
+      entity('Customer', [rel('bookings', 'Booking', 'hasMany')]),
+      entity('Destination'),
+      entity('Guide', [rel('mentor', 'Guide')]),
+    ];
+    // A tall Tour card is what put the key rows level with the targets.
+    entities[0]!.fields = Array.from({ length: 11 }, (_, index) => newField(`field${index}`));
+    expect(crossings(layoutEr(entities).edges)).toBe(0);
+  });
+
+  it('routes a self-relation as a loop on the right of its card', () => {
+    const entities = [entity('Employee', [rel('manager', 'Employee')])];
+    const layout = layoutEr(entities);
+    const employee = card(layout, 'Employee');
+    expect(layout.edges).toHaveLength(1);
+    const [edge] = layout.edges;
+    expect(edge!.from.x).toBe(employee.x + employee.width);
+    expect(edge!.to.x).toBe(employee.x + employee.width);
+    expect(edge!.laneX).toBeGreaterThan(employee.x + employee.width);
+    expect(layout.width).toBeGreaterThan(edge!.laneX);
+  });
+
+  it('skips a line to a target that is not on the diagram', () => {
+    expect(layoutEr([entity('Student', [rel('ghost', 'Nowhere')])]).edges).toEqual([]);
   });
 });
