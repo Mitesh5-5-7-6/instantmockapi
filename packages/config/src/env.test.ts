@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   assertProductionSecrets,
   productionConfigProblems,
@@ -143,5 +143,36 @@ describe('loadEnvConfig defaults', () => {
     expect(config.resendApiKey).toBe('');
     expect(config.googleClientId).toBe('');
     expect(config.googleClientSecret).toBe('');
+  });
+});
+
+describe('Gemini settings', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  /*
+   * A key pasted into a host's settings page with a trailing newline, a space or
+   * surrounding quotes is sent to Google verbatim, which answers 400
+   * API_KEY_INVALID — indistinguishable, from the user's side, from a revoked key.
+   */
+  it('trims whitespace and surrounding quotes from the key', () => {
+    vi.stubEnv('GEMINI_API_KEY', '  "AIza-test-key"\n');
+    expect(loadEnvConfig().geminiApiKey).toBe('AIza-test-key');
+    vi.stubEnv('GEMINI_API_KEY', "'AIza-single'");
+    expect(loadEnvConfig().geminiApiKey).toBe('AIza-single');
+  });
+
+  it('falls back to GOOGLE_API_KEY when GEMINI_API_KEY is empty or blank', () => {
+    vi.stubEnv('GEMINI_API_KEY', '   ');
+    vi.stubEnv('GOOGLE_API_KEY', ' AIza-google ');
+    expect(loadEnvConfig().geminiApiKey).toBe('AIza-google');
+  });
+
+  it('trims the model id and uses the default when it is blank', () => {
+    vi.stubEnv('GEMINI_MODEL', ' gemini-2.5-pro \n');
+    expect(loadEnvConfig().geminiModel).toBe('gemini-2.5-pro');
+    vi.stubEnv('GEMINI_MODEL', '');
+    expect(loadEnvConfig().geminiModel).toBe('gemini-2.5-flash');
   });
 });
