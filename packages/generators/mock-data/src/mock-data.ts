@@ -11,7 +11,7 @@
  * Faker draws, in the same order, so their output is byte-identical.
  */
 
-import { Faker, en } from '@faker-js/faker';
+import { Faker, base, en } from '@faker-js/faker';
 import { AVATAR_TRAITS, AVATAR_TRAIT_NAMES, avatarUrl } from '@instantmockapi/shared';
 import {
   entityIdentity,
@@ -223,7 +223,9 @@ export function generateMockData(
   seed?: number,
 ): Record<string, string> {
   // Setup seeded or random Faker instance
-  const faker = new Faker({ locale: [en] });
+  // `base` supplies the locale-independent data `en` lacks (country codes,
+  // time zones, MIME types); without it those generators throw.
+  const faker = new Faker({ locale: [en, base] });
   if (seed !== undefined) {
     faker.seed(seed);
   }

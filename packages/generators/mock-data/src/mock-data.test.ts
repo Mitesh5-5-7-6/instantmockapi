@@ -569,6 +569,15 @@ describe('semantic field names', () => {
     }
   });
 
+  it('generates country codes, time zones and locales instead of throwing', () => {
+    // These live in Faker's `base` locale, not `en`; with `en` alone every
+    // artifact of an AI-designed project with a `countryCode` field failed.
+    const row = records(['countryCode', 'timeZone', 'language'])[0]!;
+    expect(String(row.countryCode)).toMatch(/^[A-Z]{2}$/);
+    expect(String(row.timeZone)).toMatch(/\//);
+    expect(String(row.language)).toMatch(/^[A-Z]{2}$/);
+  });
+
   it('stays deterministic under a seed', () => {
     // The contract the whole module keeps; the table must not break it.
     expect(records(['email', 'firstName', 'avatar'], 11)).toEqual(
