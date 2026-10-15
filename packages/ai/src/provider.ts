@@ -1,3 +1,5 @@
+import { logger } from '@instantmockapi/shared';
+
 export interface LLMTurn {
   role: 'user' | 'model';
   text: string;
@@ -88,8 +90,16 @@ export class GeminiProvider implements LLMProvider {
     }
 
     if (!response.ok) {
-      // The body is deliberately not read into the message: it can echo the
-      // request, and this message is stored on the proposal.
+      // The body's text is deliberately kept out of the thrown message (it can
+      // echo the request, and the message is stored on the proposal) and out of
+      // the logs. Only Google's machine-readable status and reason codes are
+      // logged — enough for an operator to tell a bad key from a disabled API or
+      // an unknown model.
+      logger.warn('AI provider rejected the request', {
+        model: this.model,
+        httpStatus: response.status,
+        ...(await rejectionCodes(response)),
+      });
       const kind =
         response.status === 408 || response.status === 429 || response.status >= 500
           ? 'transient'
@@ -116,5 +126,27 @@ export class GeminiProvider implements LLMProvider {
       throw new ProviderError('blocked', 'The request was blocked by the AI provider');
     }
     return (candidate?.content?.parts ?? []).map((part) => part.text ?? '').join('');
+  }
+}
+
+/**
+ * Google's error status (e.g. INVALID_ARGUMENT) and reason codes (e.g.
+ * API_KEY_INVALID) from a rejected response — enums, never free text. Anything
+ * unreadable yields no codes rather than an error: this only feeds a log line.
+ */
+async function rejectionCodes(
+  response: Response,
+): Promise<{ status: string | undefined; reasons: string[] }> {
+  try {
+    const body = (await response.json()) as {
+      error?: { status?: unknown; details?: Array<{ reason?: unknown }> };
+    };
+    const status = typeof body.error?.status === 'string' ? body.error.status : undefined;
+    const reasons = (Array.isArray(body.error?.details) ? body.error.details : [])
+      .map((detail) => detail?.reason)
+      .filter((reason): reason is string => typeof reason === 'string');
+    return { status, reasons };
+  } catch {
+    return { status: undefined, reasons: [] };
   }
 }

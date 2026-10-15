@@ -208,6 +208,24 @@ function envStr(key: string, fallback: string): string {
   return process.env[key] ?? fallback;
 }
 
+/**
+ * A value pasted into a host's settings page, cleaned: surrounding whitespace and
+ * one pair of matching quotes removed, and blank treated as unset.
+ *
+ * Used for the Gemini settings only. A key sent with a stray newline or quotes is
+ * rejected by Google as API_KEY_INVALID, which looks exactly like a revoked key.
+ */
+function envPasted(...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const cleaned = (process.env[key] ?? '')
+      .trim()
+      .replace(/^(['"])(.*)\1$/s, '$2')
+      .trim();
+    if (cleaned) return cleaned;
+  }
+  return undefined;
+}
+
 function envInt(key: string, fallback: number): number {
   const val = process.env[key];
   if (val === undefined) return fallback;
@@ -276,8 +294,8 @@ export function loadEnvConfig(): EnvConfig {
     webOrigin,
     appUrl: envStr('APP_URL', webOrigin),
     resendApiKey: envStr('RESEND_API_KEY', ''),
-    geminiApiKey: envStr('GEMINI_API_KEY', envStr('GOOGLE_API_KEY', '')),
-    geminiModel: envStr('GEMINI_MODEL', 'gemini-2.5-flash'),
+    geminiApiKey: envPasted('GEMINI_API_KEY', 'GOOGLE_API_KEY') ?? '',
+    geminiModel: envPasted('GEMINI_MODEL') ?? 'gemini-2.5-flash',
     emailFrom: envStr('EMAIL_FROM', 'InstantMockAPI <no-reply@instantmockapi.dev>'),
     googleClientId: envStr('GOOGLE_CLIENT_ID', ''),
     googleClientSecret: envStr('GOOGLE_CLIENT_SECRET', ''),
