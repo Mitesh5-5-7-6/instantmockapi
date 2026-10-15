@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { logger } from '@instantmockapi/shared';
 import { GeminiProvider, ProviderError } from './provider.js';
 
 const request = { system: 'SYS', turns: [{ role: 'user' as const, text: 'hello' }] };
@@ -57,16 +58,56 @@ describe('GeminiProvider', () => {
     expect(String(error.message)).not.toContain('secret-key');
   });
 
-  it('never reads the body of an error response', async () => {
-    const res = new Response('echo: secret-key', { status: 500 });
-    const text = vi.spyOn(res, 'text');
-    const json = vi.spyOn(res, 'json');
-    await provider(vi.fn().mockResolvedValue(res))
-      .generate(request)
-      .catch(() => undefined);
-    expect(text).not.toHaveBeenCalled();
-    expect(json).not.toHaveBeenCalled();
-    expect(res.bodyUsed).toBe(false);
+  describe('rejection logging', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    /*
+     * Operators need to know WHY Google refused (bad key, API disabled, unknown
+     * model) without the message text, which can echo the request.
+     */
+    it("logs Google's status and reason codes, never its message or the key", async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      const body = {
+        error: {
+          code: 400,
+          status: 'INVALID_ARGUMENT',
+          message: 'API key not valid: secret-key',
+          details: [
+            { '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'API_KEY_INVALID' },
+          ],
+        },
+      };
+      await provider(respond(400, body))
+        .generate(request)
+        .catch(() => undefined);
+
+      expect(warn).toHaveBeenCalledWith('AI provider rejected the request', {
+        model: 'gemini-test',
+        httpStatus: 400,
+        status: 'INVALID_ARGUMENT',
+        reasons: ['API_KEY_INVALID'],
+      });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('secret-key');
+    });
+
+    it('still logs the HTTP status when the error body is not JSON', async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      const res = new Response('<html>echo: secret-key</html>', { status: 503 });
+      await expect(
+        provider(vi.fn().mockResolvedValue(res)).generate(request),
+      ).rejects.toMatchObject({
+        kind: 'transient',
+      });
+      expect(warn).toHaveBeenCalledWith('AI provider rejected the request', {
+        model: 'gemini-test',
+        httpStatus: 503,
+        status: undefined,
+        reasons: [],
+      });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('secret-key');
+    });
   });
 
   it('treats network failures and timeouts as transient', async () => {
