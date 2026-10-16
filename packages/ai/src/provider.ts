@@ -1,8 +1,11 @@
 import { logger } from '@instantmockapi/shared';
+import type { PromptImage } from './images.js';
 
 export interface LLMTurn {
   role: 'user' | 'model';
   text: string;
+  /** Sent ahead of the text, which Google recommends for a single image. */
+  images?: readonly PromptImage[];
 }
 
 export interface LLMRequest {
@@ -96,7 +99,12 @@ export class GeminiProvider implements LLMProvider {
             systemInstruction: { parts: [{ text: request.system }] },
             contents: request.turns.map((turn) => ({
               role: turn.role,
-              parts: [{ text: turn.text }],
+              parts: [
+                ...(turn.images ?? []).map((image) => ({
+                  inlineData: { mimeType: image.mimeType, data: image.data },
+                })),
+                { text: turn.text },
+              ],
             })),
             generationConfig: {
               responseMimeType: 'application/json',

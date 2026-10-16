@@ -1,3 +1,4 @@
+import type { PromptImage } from './images.js';
 import type { ErrorDetail } from '@instantmockapi/shared';
 import type { Entity, GenerationConfig } from '@instantmockapi/ips';
 
@@ -44,4 +45,6 @@ export interface ProposeInput {
   clarification?: { answers?: string; instruction?: string } | null;
   /** Regenerate only: the blueprint being revised (the parent's draft entities, or its result's). */
   currentBlueprint?: readonly unknown[] | null;
+  /** Photos or screenshots describing the data, already validated by `checkPromptImages`. */
+  images?: readonly PromptImage[];
 }

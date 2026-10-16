@@ -18,12 +18,12 @@ const CHOICES = [
   {
     href: '/new/ai',
     flow: 'ai' as const,
-    title: 'Describe it',
-    tagline: 'Natural-language project creation',
+    title: 'Build with AI',
+    tagline: 'Describe your API and AI designs it for you',
     points: [
-      'Describe the API you want in plain English',
-      'The app proposes entities, fields and relations',
-      'The generated blueprint still passes through the same validation pipeline',
+      'Type what you need in plain words, or attach a photo of a sketch',
+      'AI suggests the entities, fields and relationships',
+      'You review and edit everything before anything is created',
     ],
   },
   {
@@ -77,8 +77,11 @@ export default function NewPage() {
       >
         {CHOICES.map((choice) => (
           <div key={choice.href} data-flow={choice.flow} style={{ flex: '1 1 320px' }}>
-            <Link href={choice.href} style={{ textDecoration: 'none', color: 'inherit' }}>
-              <Card interactive className="ui-stack">
+            <Link
+              href={choice.href}
+              style={{ textDecoration: 'none', color: 'inherit', display: 'block', height: '100%' }}
+            >
+              <Card interactive className="ui-stack h-full">
                 <div className="ui-stack" style={{ gap: 'var(--space-1)' }}>
                   <h2 style={{ color: 'var(--accent)' }}>{choice.title}</h2>
                   <span className="ui-meta">{choice.tagline}</span>

@@ -164,90 +164,93 @@ export default function SettingsPage() {
   const limits = me.data?.limits;
 
   return (
-    <div className="ui-stack" style={{ gap: 'var(--space-6)', maxWidth: 560 }}>
+    <div className="ui-stack" style={{ gap: 'var(--space-6)' }}>
       <h1>Settings</h1>
 
-      <Card className="ui-stack">
-        <h2>Account</h2>
-        <div className="ui-row ui-row--between">
-          <span className="ui-mono">{me.data?.email ?? '…'}</span>
-        </div>
-
-        <Field label="Display name">
-          <Input
-            value={name}
-            placeholder="Your name"
-            maxLength={80}
-            onChange={(event) => setName(event.target.value)}
-          />
-        </Field>
-        <div className="ui-row">
-          <Button
-            size="sm"
-            disabled={saveName.isPending || !nameLoaded || name === (me.data?.name ?? '')}
-            onClick={() => void saveName.run({ name: name.trim() === '' ? null : name.trim() })}
-          >
-            {saveName.isPending ? 'Saving…' : 'Save'}
-          </Button>
-          {<span className="ui-meta">Used to greet you on the dashboard.</span>}
-        </div>
-
-        {limits ? (
-          <div className="ui-stack" style={{ gap: 'var(--space-1)' }}>
-            <h3 className="ui-meta" style={{ margin: 0 }}>
-              Limits
-            </h3>
-            <ul className="ui-meta" style={{ margin: 0, paddingLeft: 'var(--space-4)' }}>
-              <li>
-                Hosted APIs stay live for {limits.hostedApiLifetimeDays} days after publishing
-              </li>
-              <li>Up to {limits.maxProjects} projects</li>
-              <li>Up to {limits.maxConcurrentJobs} generation jobs at once</li>
-            </ul>
+      {/* Two cards to a row when there is room, one when there is not. */}
+      <div className="ui-settings-grid">
+        <Card className="ui-stack">
+          <h2>Account</h2>
+          <div className="ui-row ui-row--between">
+            <span className="ui-mono">{me.data?.email ?? '…'}</span>
           </div>
-        ) : null}
-      </Card>
 
-      <ChangePasswordCard />
+          <Field label="Display name">
+            <Input
+              value={name}
+              placeholder="Your name"
+              maxLength={80}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </Field>
+          <div className="ui-row">
+            <Button
+              size="sm"
+              disabled={saveName.isPending || !nameLoaded || name === (me.data?.name ?? '')}
+              onClick={() => void saveName.run({ name: name.trim() === '' ? null : name.trim() })}
+            >
+              {saveName.isPending ? 'Saving…' : 'Save'}
+            </Button>
+            {<span className="ui-meta">Used to greet you on the dashboard.</span>}
+          </div>
 
-      <Card className="ui-stack">
-        <h2>Appearance</h2>
-        <Field label="Theme">
-          <Select value={theme} onChange={(event) => applyTheme(event.target.value)}>
-            <option value="dark">Dark (default)</option>
-            <option value="light">Light</option>
-          </Select>
-        </Field>
-      </Card>
+          {limits ? (
+            <div className="ui-stack" style={{ gap: 'var(--space-1)' }}>
+              <h3 className="ui-meta" style={{ margin: 0 }}>
+                Limits
+              </h3>
+              <ul className="ui-meta" style={{ margin: 0, paddingLeft: 'var(--space-4)' }}>
+                <li>
+                  Hosted APIs stay live for {limits.hostedApiLifetimeDays} days after publishing
+                </li>
+                <li>Up to {limits.maxProjects} projects</li>
+                <li>Up to {limits.maxConcurrentJobs} generation jobs at once</li>
+              </ul>
+            </div>
+          ) : null}
+        </Card>
 
-      <Card className="ui-stack">
-        <h2>Notifications</h2>
-        <Field
-          label="Position"
-          hint="Where confirmations and errors appear. One place, on every screen."
-        >
-          <Select
-            value={toastPosition}
-            aria-label="Notification position"
-            onChange={(event) => applyToastPosition(event.target.value as ToastPosition)}
+        <ChangePasswordCard />
+
+        <Card className="ui-stack">
+          <h2>Appearance</h2>
+          <Field label="Theme">
+            <Select value={theme} onChange={(event) => applyTheme(event.target.value)}>
+              <option value="dark">Dark (default)</option>
+              <option value="light">Light</option>
+            </Select>
+          </Field>
+        </Card>
+
+        <Card className="ui-stack">
+          <h2>Notifications</h2>
+          <Field
+            label="Position"
+            hint="Where confirmations and errors appear. One place, on every screen."
           >
-            {TOAST_POSITIONS.map((position) => (
-              <option key={position} value={position}>
-                {TOAST_POSITION_LABELS[position]}
-                {position === DEFAULT_TOAST_POSITION ? ' (default)' : ''}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        {/*
+            <Select
+              value={toastPosition}
+              aria-label="Notification position"
+              onChange={(event) => applyToastPosition(event.target.value as ToastPosition)}
+            >
+              {TOAST_POSITIONS.map((position) => (
+                <option key={position} value={position}>
+                  {TOAST_POSITION_LABELS[position]}
+                  {position === DEFAULT_TOAST_POSITION ? ' (default)' : ''}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {/*
           Changing the control shows a sample immediately. A position setting
           whose effect is invisible until the next failure is one nobody can tell
           they have set correctly.
         */}
-        <p className="ui-meta">
-          Errors stay until you dismiss them; confirmations fade on their own.
-        </p>
-      </Card>
+          <p className="ui-meta">
+            Errors stay until you dismiss them; confirmations fade on their own.
+          </p>
+        </Card>
+      </div>
     </div>
   );
 }

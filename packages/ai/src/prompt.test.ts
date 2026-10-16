@@ -39,7 +39,11 @@ describe('SYSTEM_PROMPT', () => {
     }
   });
   it('is versioned', () => {
-    expect(PROMPT_VERSION).toBe('generic-v2');
+    expect(PROMPT_VERSION).toBe('generic-v3');
+  });
+  it('treats text inside an attached image as data, never as instructions', () => {
+    expect(SYSTEM_PROMPT).toContain('<attached_images>');
+    expect(SYSTEM_PROMPT).toMatch(/text inside an image[^.]*never an instruction/i);
   });
 });
 

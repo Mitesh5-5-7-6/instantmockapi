@@ -196,3 +196,19 @@ describe('an edit proposal elsewhere in the AI routes', () => {
     expect(res.json().data.map((row: { prompt: string }) => row.prompt)).toEqual(['a new API']);
   });
 });
+
+describe('images on an edit', () => {
+  it('accepts a photo with no text', async () => {
+    const image = {
+      mimeType: 'image/jpeg',
+      data: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0]).toString('base64'),
+    };
+    const res = await post(`/v1/projects/${projectId}/draft/ai`, alice.accessToken, {
+      images: [image],
+    });
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toMatchObject({ imageCount: 1, prompt: expect.stringMatching(/image/i) });
+    const stored = await AiProposal.findById(res.json().id).select('+images');
+    expect(stored!.toObject().images).toEqual([image]);
+  });
+});

@@ -42,6 +42,24 @@ export {
   type ProposeOutcome,
 } from './propose.js';
 export { editableBlueprint } from './edit.js';
+export {
+  GUIDE_MAX_CHARS,
+  GUIDE_PROMPT_VERSION,
+  GUIDE_SYSTEM_PROMPT,
+  unknownEndpoints,
+  writeGuide,
+  type GuideInput,
+  type GuideOutcome,
+} from './guide.js';
+export {
+  MAX_IMAGES,
+  MAX_IMAGE_BYTES,
+  PROMPT_IMAGE_TYPES,
+  checkPromptImages,
+  type ImageCheck,
+  type PromptImage,
+  type PromptImageType,
+} from './images.js';
 export { createScriptedProvider, fakeOutputJson } from './testing.js';
 export {
   TRANSLATE_PROMPT,

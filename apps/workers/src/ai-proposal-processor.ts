@@ -21,6 +21,7 @@ import {
   type LLMProvider,
 } from '@instantmockapi/ai';
 import type { AiProposalJobPayload } from '@instantmockapi/queue';
+import { processAiGuideJob, settleExhaustedAiGuide } from './ai-guide-processor.js';
 
 export interface AiProposalDeps {
   config?: EnvConfig;
@@ -68,7 +69,12 @@ export async function processAiProposalJob(
     await processTranslateJob(payload, deps);
     return;
   }
-  const proposal = await AiProposal.findById(payload.proposalId).lean();
+  if (payload.kind === 'guide') {
+    await processAiGuideJob(payload, deps);
+    return;
+  }
+  // `+images`: excluded by default so status polls stay light; only this run needs them.
+  const proposal = await AiProposal.findById(payload.proposalId).select('+images').lean();
   // Gone (30-day TTL) or no longer generating (cancelled, or a duplicate run):
   // nothing to do, and throwing would only trigger pointless retries.
   // A job from an earlier run must not touch a retried document (runs moved on).
@@ -140,6 +146,7 @@ export async function processAiProposalJob(
         responseLanguage: proposal.responseLanguage,
         clarification: request.clarification,
         currentBlueprint: blueprint,
+        ...(proposal.images && proposal.images.length > 0 ? { images: proposal.images } : {}),
       },
       {
         provider,
@@ -317,6 +324,10 @@ export async function settleExhaustedAiProposal(
     error: error.message,
   });
   if (!mongoose.isValidObjectId(payload.proposalId)) {
+    return;
+  }
+  if (payload.kind === 'guide') {
+    await settleExhaustedAiGuide(payload);
     return;
   }
   if (payload.kind === 'translate') {

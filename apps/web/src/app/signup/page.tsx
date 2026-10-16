@@ -34,7 +34,6 @@ export default function SignupPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
     if (authState === 'authenticated') {
@@ -48,9 +47,6 @@ export default function SignupPage() {
   const emailFailed = failure?.code === 'EMAIL_SEND_FAILED';
 
   const problems = passwordProblems(password, email);
-  // Only after a submit attempt: flagging a half-typed password as too short on
-  // the third keystroke is noise, and the checklist already shows the rules.
-  const passwordError = submitted && problems.length > 0 ? (problems[0] ?? null) : null;
   const pending = signup.isPending;
 
   if (signup.isSuccess) {
@@ -97,7 +93,6 @@ export default function SignupPage() {
         className="ui-stack"
         onSubmit={(event) => {
           event.preventDefault();
-          setSubmitted(true);
           if (problems.length > 0) {
             return;
           }
@@ -140,7 +135,8 @@ export default function SignupPage() {
           email={email}
           showRules
           disabled={pending}
-          error={passwordError}
+          // No separate error line: every problem is already an unticked item in
+          // the checklist above, so repeating one under it said the same thing twice.
         />
 
         <Button type="submit" disabled={pending}>
@@ -157,7 +153,10 @@ export default function SignupPage() {
             rejected login — instructions to somewhere they were not. */}
         {emailFailed ? (
           <AuthNotice tone="warning" icon="alert" title="We could not send the confirmation email">
-            <p className="ui-meta">{failure?.title} Your password is saved — nothing is lost.</p>
+            <p className="ui-meta">
+              Your account was created and your password is saved, but the email did not go out. Try
+              sending it again.
+            </p>
             {resend.isSuccess ? (
               <p className="ui-meta">{resend.data.message}</p>
             ) : (

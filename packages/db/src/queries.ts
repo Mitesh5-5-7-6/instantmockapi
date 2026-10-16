@@ -6,6 +6,7 @@ import { ApiLog } from './models/apiLog.js';
 import { Artifact } from './models/artifact.js';
 import { Version } from './models/version.js';
 import { ProjectDraft } from './models/projectDraft.js';
+import { ProjectGuide } from './models/projectGuide.js';
 import { Job } from './models/job.js';
 import { AppError, PUBLIC_ID_PREFIX, logger, slugify } from '@instantmockapi/shared';
 
@@ -142,6 +143,7 @@ export async function hardDeleteProject(projectId: string): Promise<void> {
     // behind would also hold the unique index on projectId, so a later project
     // reusing that id could not create one.
     ProjectDraft.deleteMany({ projectId: pId }),
+    ProjectGuide.deleteMany({ projectId: pId }),
     Version.deleteMany({ projectId: pId }),
     Artifact.deleteMany({ projectId: pId }),
     Job.deleteMany({ projectId: pId }),

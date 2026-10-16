@@ -7,6 +7,13 @@ import type { FastifyReply } from 'fastify';
 import { AppError, getErrorMessage, logger } from '@instantmockapi/shared';
 import { enqueueAiProposalJob } from '@instantmockapi/queue';
 import { AiProposal, mongoose, type IAiProposal } from '@instantmockapi/db';
+import {
+  MAX_IMAGES,
+  MAX_IMAGE_BYTES,
+  PROMPT_IMAGE_TYPES,
+  checkPromptImages,
+  type PromptImage,
+} from '@instantmockapi/ai';
 
 /**
  * Burst guard only. The plugin's counter is per route and per instance (and
@@ -65,6 +72,56 @@ export async function loadOwnedProposal(id: string, ownerId: string): Promise<IA
     throw notFound();
   }
   return doc;
+}
+
+/**
+ * Request size for the routes that take images: three at the per-image cap,
+ * base64-encoded, plus the text. The global limit (1 MB) stays for every
+ * other route.
+ */
+export const IMAGE_BODY_LIMIT = Math.ceil((MAX_IMAGES * MAX_IMAGE_BYTES * 4) / 3) + 64_000;
+
+/** Body schema for `images`. Types and bytes are checked again by `checkPromptImages`. */
+export const IMAGES_SCHEMA = {
+  type: 'array',
+  maxItems: MAX_IMAGES,
+  items: {
+    type: 'object',
+    required: ['mimeType', 'data'],
+    additionalProperties: false,
+    properties: {
+      mimeType: { type: 'string', enum: [...PROMPT_IMAGE_TYPES] },
+      data: { type: 'string', minLength: 1 },
+    },
+  },
+} as const;
+
+/**
+ * The text and images of a request. Either may be missing, not both. A
+ * photo-only request is stored with `whenImageOnly` as its prompt, so history
+ * and the model both have a sentence to read.
+ */
+export function readPromptInput(
+  body: { prompt?: string; images?: { mimeType: string; data: string }[] },
+  messages: { blank: string; whenImageOnly: string },
+): { prompt: string; images: PromptImage[] } {
+  const checked = checkPromptImages(body.images ?? []);
+  if (!checked.ok) {
+    throw new AppError({
+      code: 'VALIDATION_ERROR',
+      message: `The image ${checked.issue}.`,
+      details: [{ path: checked.path, issue: checked.issue }],
+    });
+  }
+  const prompt = body.prompt?.trim() ?? '';
+  if (!prompt && checked.images.length === 0) {
+    throw new AppError({
+      code: 'VALIDATION_ERROR',
+      message: messages.blank,
+      details: [{ path: 'prompt', issue: 'must not be blank' }],
+    });
+  }
+  return { prompt: prompt || messages.whenImageOnly, images: checked.images };
 }
 
 /**
