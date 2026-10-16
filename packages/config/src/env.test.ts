@@ -13,6 +13,7 @@ function safeProduction(overrides: Partial<EnvConfig> = {}): EnvConfig {
     nodeEnv: 'production',
     jwtSecret: 'x'.repeat(48),
     resendApiKey: 're_live_key',
+    brevoApiKey: '',
     googleClientId: 'client-id.apps.googleusercontent.com',
     googleClientSecret: 'client-secret',
     appUrl: 'https://app.instantmockapi.dev',
@@ -54,6 +55,31 @@ describe('productionConfigProblems', () => {
     expect(productionConfigProblems(safeProduction({ resendApiKey: '' }))[0]).toMatch(
       /RESEND_API_KEY/,
     );
+  });
+
+  it('accepts Brevo as the only mail transport', () => {
+    // Free Render services cannot reach SMTP ports, and Resend needs a verified
+    // domain; Brevo sends over HTTPS from a verified single address.
+    expect(
+      productionConfigProblems(safeProduction({ resendApiKey: '', brevoApiKey: 'xkeysib-1' })),
+    ).toEqual([]);
+  });
+
+  it('names both transports when neither is configured', () => {
+    expect(productionConfigProblems(safeProduction({ resendApiKey: '' }))[0]).toMatch(
+      /BREVO_API_KEY or RESEND_API_KEY/,
+    );
+  });
+
+  it('reads BREVO_API_KEY, trimming what a dashboard paste adds', () => {
+    const previous = process.env['BREVO_API_KEY'];
+    process.env['BREVO_API_KEY'] = '  "xkeysib-abc"  ';
+    try {
+      expect(loadEnvConfig().brevoApiKey).toBe('xkeysib-abc');
+    } finally {
+      if (previous === undefined) delete process.env['BREVO_API_KEY'];
+      else process.env['BREVO_API_KEY'] = previous;
+    }
   });
 
   it('rejects half-configured Google credentials', () => {

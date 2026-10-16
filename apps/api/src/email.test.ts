@@ -14,6 +14,7 @@ const message: EmailMessage = {
 function configWith(overrides: Partial<EnvConfig>): EnvConfig {
   return {
     resendApiKey: '',
+    brevoApiKey: '',
     emailFrom: 'InstantMockAPI <no-reply@example.com>',
     ...overrides,
   } as EnvConfig;
@@ -126,6 +127,70 @@ describe('the Resend transport', () => {
     await expect(
       createMailer(configWith({ resendApiKey: 're_123' })).send(message),
     ).rejects.toThrow(/ECONNRESET/);
+  });
+});
+
+describe('the Brevo transport', () => {
+  const brevo = (emailFrom = 'Team <team@gmail.com>') =>
+    createMailer(configWith({ brevoApiKey: 'xkeysib-1', emailFrom }));
+
+  it('is chosen over Resend when both keys are set', () => {
+    expect(createMailer(configWith({ brevoApiKey: 'xkeysib-1', resendApiKey: 're_1' })).kind).toBe(
+      'brevo',
+    );
+  });
+
+  it('posts the message over HTTPS with the API key header', async () => {
+    fetchMock.mockResolvedValue(new Response('{"messageId":"<x>"}', { status: 201 }));
+    await brevo().send(message);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.brevo.com/v3/smtp/email');
+    expect(init.method).toBe('POST');
+    expect((init.headers as Record<string, string>)['api-key']).toBe('xkeysib-1');
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(JSON.parse(init.body as string)).toEqual({
+      sender: { name: 'Team', email: 'team@gmail.com' },
+      to: [{ email: 'ada@example.com' }],
+      subject: 'Confirm your email address',
+      htmlContent: '<p>hello</p>',
+      textContent: 'hello',
+    });
+  });
+
+  it('accepts a bare sender address and names it InstantMockAPI', async () => {
+    fetchMock.mockResolvedValue(new Response('{}', { status: 201 }));
+    await brevo('team@gmail.com').send(message);
+    const body = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(body.sender).toEqual({ name: 'InstantMockAPI', email: 'team@gmail.com' });
+  });
+
+  it('throws on a rejected send, logging Brevo’s reason', async () => {
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    fetchMock.mockResolvedValue(
+      new Response('{"code":"unauthorized","message":"Key not found"}', { status: 401 }),
+    );
+    await expect(brevo().send(message)).rejects.toThrow(/401/);
+    expect(error).toHaveBeenCalledWith(
+      'Email send failed',
+      expect.objectContaining({ status: 401, detail: expect.stringContaining('Key not found') }),
+    );
+    error.mockRestore();
+  });
+
+  it('warns at startup when the sender cannot be a verified Brevo sender', () => {
+    // Brevo only sends from an address verified in the account; Resend's test
+    // sender and the placeholder domain never are.
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    brevo('onboarding@resend.dev');
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/EMAIL_FROM/),
+      expect.objectContaining({ domain: 'resend.dev' }),
+    );
+    warn.mockClear();
+    brevo('team@gmail.com');
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
 
