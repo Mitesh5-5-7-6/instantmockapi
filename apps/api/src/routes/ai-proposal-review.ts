@@ -13,7 +13,7 @@ import {
   assertProposalBudget,
   conflict,
   idParams,
-  loadOwnedProposal,
+  loadOwnedNewProjectProposal,
 } from '../ai-proposal-access.js';
 import { toAiProposalView } from '../ai-proposal-serializers.js';
 import { DRAFT_FIELDS_SCHEMA, buildDraft, type DraftInput } from '../ai-draft.js';
@@ -52,7 +52,7 @@ export const aiProposalReviewRoutes: FastifyPluginAsync<AiProposalReviewRouteOpt
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = request.body as DraftInput & { revision: number };
-      const owned = await loadOwnedProposal(id, request.authUser?.sub ?? '');
+      const owned = await loadOwnedNewProjectProposal(id, request.authUser?.sub ?? '');
       if (owned.status !== 'ready') {
         return conflict(reply, owned, 'This proposal can no longer be edited.');
       }
@@ -103,7 +103,7 @@ export const aiProposalReviewRoutes: FastifyPluginAsync<AiProposalReviewRouteOpt
       const { id } = request.params as { id: string };
       const sub = request.authUser?.sub ?? '';
       const body = request.body as { answers?: string; instruction?: string };
-      const parent = await loadOwnedProposal(id, sub);
+      const parent = await loadOwnedNewProjectProposal(id, sub);
       if (parent.status !== 'ready') {
         return conflict(reply, parent, 'Only a ready proposal can be regenerated.');
       }
@@ -186,7 +186,7 @@ export const aiProposalReviewRoutes: FastifyPluginAsync<AiProposalReviewRouteOpt
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const sub = request.authUser?.sub ?? '';
-      const child = await loadOwnedProposal(id, sub);
+      const child = await loadOwnedNewProjectProposal(id, sub);
       if (child.status !== 'ready' || !child.parentId) {
         return conflict(reply, child, 'Only a ready regeneration can be adopted.');
       }
@@ -266,7 +266,7 @@ export const aiProposalReviewRoutes: FastifyPluginAsync<AiProposalReviewRouteOpt
       const { id } = request.params as { id: string };
       const sub = request.authUser?.sub ?? '';
       const { language } = request.body as { language: string };
-      const owned = await loadOwnedProposal(id, sub);
+      const owned = await loadOwnedNewProjectProposal(id, sub);
       if (owned.status !== 'ready' || !owned.result) {
         return conflict(reply, owned, 'Only a ready proposal can be translated.');
       }

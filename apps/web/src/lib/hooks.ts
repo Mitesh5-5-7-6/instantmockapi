@@ -491,6 +491,24 @@ export function useCreateAiProposal() {
   });
 }
 
+/**
+ * Ask the AI to edit a project's data model. The proposal it returns is polled
+ * with `useAiProposal`; its result is applied in the editor, never committed.
+ */
+export function useStartAiEdit(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { prompt: string }) =>
+      apiFetch<AiProposalView>(`/v1/projects/${projectId}/draft/ai`, {
+        method: 'POST',
+        body: input,
+      }),
+    onSuccess: (view) => {
+      queryClient.setQueryData(['ai-proposal', view.id], view);
+    },
+  });
+}
+
 export function useAiProposal(
   proposalId: string | null,
   options: { refetchOnMount?: 'always' } = {},
