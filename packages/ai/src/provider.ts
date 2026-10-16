@@ -43,6 +43,25 @@ interface GeminiResponse {
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const BLOCKED_FINISH_REASONS = new Set(['SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII']);
 
+/**
+ * Sampling and reasoning settings, which differ by model family.
+ *
+ * Gemini 3: Google strongly recommends the default temperature of 1.0 — below
+ * it the model "may lead to unexpected behavior, such as looping" — and
+ * suggests the `low` thinking level when deep reasoning is not needed. Writing
+ * a schema in a fixed format is that case, and the lower level is what keeps a
+ * proposal well inside the request timeout.
+ *
+ * Older models: a low temperature keeps the same request giving the same
+ * schema, and they reject `thinkingLevel`.
+ */
+function generationTuning(model: string): Record<string, unknown> {
+  if (/^gemini-[3-9]/.test(model)) {
+    return { thinkingConfig: { thinkingLevel: 'low' } };
+  }
+  return { temperature: 0.2 };
+}
+
 export interface GeminiProviderOptions {
   apiKey: string;
   model: string;
@@ -79,8 +98,10 @@ export class GeminiProvider implements LLMProvider {
               role: turn.role,
               parts: [{ text: turn.text }],
             })),
-            // Low temperature: the same request should give the same schema.
-            generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
+            generationConfig: {
+              responseMimeType: 'application/json',
+              ...generationTuning(this.model),
+            },
           }),
           signal: AbortSignal.timeout(this.timeoutMs),
         },
