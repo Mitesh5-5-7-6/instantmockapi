@@ -126,6 +126,13 @@ export interface IAiProposal extends Omit<Document, 'model'> {
    */
   translations: number;
   projectId: Types.ObjectId | null;
+  /**
+   * Set when this proposal edits an existing project instead of creating one.
+   * Its result is applied to that project's draft in the editor; it can never be
+   * committed as a new project. Distinct from `projectId`, which is the project a
+   * proposal *created*.
+   */
+  editsProjectId: Types.ObjectId | null;
   committedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -161,6 +168,7 @@ const aiProposalSchema = new Schema<IAiProposal>(
     clarification: { type: Schema.Types.Mixed, default: null },
     translations: { type: Number, default: 0 },
     projectId: { type: Schema.Types.ObjectId, ref: 'Project', default: null },
+    editsProjectId: { type: Schema.Types.ObjectId, ref: 'Project', default: null },
     committedAt: { type: Date, default: null },
   },
   { timestamps: true, minimize: false },

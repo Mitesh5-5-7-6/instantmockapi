@@ -4,6 +4,8 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import {
   AI_PROPOSAL_RAW_OUTPUT_MAX,
   AiProposal,
+  Project,
+  ProjectDraft,
   connectDB,
   disconnectDB,
   mongoose,
@@ -359,4 +361,94 @@ it('ignores a parent that belongs to another owner', async () => {
   const provider = createScriptedProvider(fakeOutputJson(['Alpha']));
   await run(child._id, provider);
   expect(provider.calls[0]!.turns[0]!.text).not.toContain('<current_blueprint>');
+});
+
+describe('editing an existing project', () => {
+  async function projectWithDraft(ownerId: InstanceType<typeof Types.ObjectId>) {
+    const project = await Project.create({
+      ownerId,
+      name: 'Tours',
+      description: 'A tour booking API',
+      status: 'active',
+      inputSource: { type: 'builder', raw: '{}' },
+      ips: { projectId: 'x', version: 1, entities: [], generationConfig: {} },
+      generationConfig: {},
+      currentVersion: 1,
+    });
+    await ProjectDraft.create({
+      projectId: project._id,
+      baseVersion: 1,
+      generationConfig: {},
+      ips: {
+        projectId: 'x',
+        version: 1,
+        generationConfig: {},
+        entities: [
+          {
+            id: 'ent_booking',
+            name: 'Booking',
+            fields: [
+              { id: 'fld_seats', name: 'seats', type: 'integer', required: true, meta: {} },
+              {
+                id: 'fld_tour',
+                name: 'tourId',
+                type: 'integer',
+                required: true,
+                meta: { reference: true },
+              },
+            ],
+            relations: [{ id: 'rel_tour', name: 'tour', kind: 'belongsTo', target: 'Tour' }],
+          },
+        ],
+      },
+    });
+    return project;
+  }
+
+  it('revises the project draft, with the instruction as a clarification', async () => {
+    const ownerId = new Types.ObjectId();
+    const project = await projectWithDraft(ownerId);
+    const doc = await generating({
+      ownerId,
+      prompt: 'Add a Review entity',
+      editsProjectId: project._id,
+    });
+    const provider = createScriptedProvider(fakeOutputJson(['Booking', 'Review']));
+    const after = await run(doc._id, provider);
+
+    expect(after!.status).toBe('ready');
+    const turn = provider.calls[0]!.turns[0]!.text;
+    expect(turn).toContain('<current_blueprint>');
+    expect(turn).toContain('seats');
+    // Derived keys and stable ids stay out of what the model sees.
+    expect(turn).not.toContain('tourId');
+    expect(turn).not.toMatch(/\b(ent|fld|rel)_/);
+    expect(turn).toContain('instruction: Add a Review entity');
+    // The request the model revises against is the project's own description.
+    expect(turn).toMatch(/<user_request>\s*A tour booking API\s*<\/user_request>/);
+  });
+
+  it('fails without calling the model when the project is not the owner’s', async () => {
+    const project = await projectWithDraft(new Types.ObjectId());
+    const doc = await generating({ prompt: 'Add a Review entity', editsProjectId: project._id });
+    const provider = createScriptedProvider(fakeOutputJson(['Review']));
+    const after = await run(doc._id, provider);
+    expect(provider.calls).toHaveLength(0);
+    expect(after).toMatchObject({ status: 'failed' });
+  });
+
+  it('fails without calling the model when no draft is open', async () => {
+    const ownerId = new Types.ObjectId();
+    const project = await projectWithDraft(ownerId);
+    await ProjectDraft.deleteMany({ projectId: project._id });
+    const doc = await generating({
+      ownerId,
+      prompt: 'Add a Review entity',
+      editsProjectId: project._id,
+    });
+    const provider = createScriptedProvider(fakeOutputJson(['Review']));
+    const after = await run(doc._id, provider);
+    expect(provider.calls).toHaveLength(0);
+    expect(after!.error!.message).toMatch(/editor/i);
+  });
 });

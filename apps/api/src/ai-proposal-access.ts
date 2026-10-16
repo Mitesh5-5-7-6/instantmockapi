@@ -4,7 +4,8 @@
  */
 
 import type { FastifyReply } from 'fastify';
-import { AppError } from '@instantmockapi/shared';
+import { AppError, getErrorMessage, logger } from '@instantmockapi/shared';
+import { enqueueAiProposalJob } from '@instantmockapi/queue';
 import { AiProposal, mongoose, type IAiProposal } from '@instantmockapi/db';
 
 /**
@@ -64,6 +65,57 @@ export async function loadOwnedProposal(id: string, ownerId: string): Promise<IA
     throw notFound();
   }
   return doc;
+}
+
+/**
+ * Load a proposal for a route that only makes sense for a new project:
+ * commit, and the review routes that edit, regenerate, adopt or translate it.
+ *
+ * A proposal that edits an existing project is applied in that project's
+ * editor; committing one would create a second project from a partial copy of
+ * the first.
+ */
+export async function loadOwnedNewProjectProposal(
+  id: string,
+  ownerId: string,
+): Promise<IAiProposal> {
+  const doc = await loadOwnedProposal(id, ownerId);
+  if (doc.editsProjectId) {
+    throw new AppError({
+      code: 'VALIDATION_ERROR',
+      message: "This suggestion edits an existing project. Apply it in that project's editor.",
+      details: [{ path: 'id', issue: 'edits an existing project' }],
+    });
+  }
+  return doc;
+}
+
+/**
+ * Queue the job, or settle the proposal as failed and answer 503. The prompt
+ * stays in history either way, so the user can retry without retyping. The
+ * cause (e.g. a Redis error) is logged, never sent to the client.
+ */
+export async function enqueueProposalOrFail(doc: IAiProposal): Promise<void> {
+  try {
+    await enqueueAiProposalJob(String(doc._id), doc.runs);
+  } catch (cause) {
+    logger.error('Could not enqueue AI proposal job', {
+      proposalId: String(doc._id),
+      error: getErrorMessage(cause),
+    });
+    const message = 'Could not start generation. Please retry.';
+    await AiProposal.updateOne(
+      { _id: doc._id, status: 'generating' },
+      {
+        $set: {
+          status: 'failed',
+          stage: null,
+          error: { code: 'AI_GENERATION_FAILED', message, details: [] },
+        },
+      },
+    );
+    throw new AppError({ code: 'AI_GENERATION_FAILED', message, statusCode: 503 });
+  }
 }
 
 /** Project creation is a handful of writes; past this, the request that claimed it is gone. */
