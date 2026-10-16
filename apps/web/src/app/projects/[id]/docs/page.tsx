@@ -43,7 +43,6 @@ import {
 } from '@instantmockapi/ui';
 import {
   downloadTextFile,
-  useAiContext,
   useBlueprint,
   useOpenDraft,
   useProject,
@@ -138,7 +137,6 @@ export default function DocsPage() {
   const notes = useTechnicalNotes(id, view);
   // Idle until the tab is opened: a reader who only wants the notes should not
   // pay for a second document.
-  const ai = useAiContext(id, tab === 'ai', view);
   const blueprint = useBlueprint(id, tab === 'blueprint');
 
   const markdown = notes.data?.markdown ?? '';
@@ -170,7 +168,7 @@ export default function DocsPage() {
   const changesHref =
     notes.data === undefined ? null : viewChangesHref(id, view, notes.data.version);
 
-  const filenameFor = (kind: 'notes' | 'ai' | 'blueprint') =>
+  const filenameFor = (kind: 'notes' | 'blueprint') =>
     notesFilename(kind, {
       slug: project.data?.slug ?? null,
       name: project.data?.name ?? null,
@@ -251,7 +249,7 @@ export default function DocsPage() {
         onChange={setTab}
         items={[
           { id: 'notes', label: 'Technical Notes' },
-          { id: 'ai', label: 'AI Context' },
+          { id: 'ai', label: 'AI Guide' },
           { id: 'blueprint', label: 'Blueprint' },
         ]}
       />
@@ -322,37 +320,6 @@ export default function DocsPage() {
         <TabPanel id="ai">
           <div className="flex flex-col gap-4">
             <GuideCard projectId={id} view={view} />
-
-            <h2 className="m-0">Exact context</h2>
-            <Note>
-              Paste this into an assistant before asking it to write client code. It states every
-              endpoint&rsquo;s access requirement, every field&rsquo;s type and validation, and the
-              authentication configuration — and it contains no keys or tokens.
-            </Note>
-
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <CopyButton text={ai.data?.context ?? ''} label="Copy context" />
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={ai.data === undefined}
-                onClick={() => downloadTextFile(filenameFor('ai'), ai.data?.context ?? '')}
-              >
-                <Icon name="download" size={14} /> Download .md
-              </Button>
-            </div>
-
-            {ai.isLoading ? <div className="h-64 animate-pulse rounded-md bg-muted" /> : null}
-
-            {ai.isError ? (
-              <ErrorState
-                title="Could not build the AI context"
-                detail={normalizeError(ai.error).title}
-                onRetry={() => void ai.refetch()}
-              />
-            ) : null}
-
-            {ai.data !== undefined ? <CodeBlock code={ai.data.context} maxHeight={640} /> : null}
           </div>
         </TabPanel>
       ) : (

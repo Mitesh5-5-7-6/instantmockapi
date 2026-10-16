@@ -74,11 +74,10 @@ export default function ApisPage({ params }: { params: Promise<{ id: string }> }
         </Link>
       </div>
 
-      <div
-        className="ui-row"
-        style={{ alignItems: 'flex-start', gap: 'var(--space-4)', flexWrap: 'wrap' }}
-      >
-        <div className="ui-stack" style={{ flex: '1 1 380px', gap: 'var(--space-4)' }}>
+      {/* A fixed 5:7 grid, not two flexible boxes: a long URL in a snippet used to
+          widen the right column and squeeze the endpoint list. */}
+      <div className="ui-api-explorer">
+        <div className="ui-stack" style={{ gap: 'var(--space-4)', minWidth: 0 }}>
           <Card className="ui-stack">
             <div className="ui-row ui-row--between">
               <h2>{isProject ? 'Available Entities (APIs)' : 'Endpoints'}</h2>
@@ -138,9 +137,12 @@ export default function ApisPage({ params }: { params: Promise<{ id: string }> }
           </Card>
         </div>
 
-        <div style={{ flex: '1 1 380px', position: 'sticky', top: 'var(--space-4)' }}>
+        <div className="ui-api-explorer__try">
           <Card className="ui-stack">
-            <h2>Use Your API</h2>
+            <div className="ui-stack" style={{ gap: 'var(--space-1)' }}>
+              <h2>Try it</h2>
+              <span className="ui-meta">Copy a ready-made request for the selected endpoint.</span>
+            </div>
             {selected ? (
               <SnippetTabs
                 baseUrl={baseUrl}

@@ -473,11 +473,101 @@ function normalizeFieldName(name: string): string {
   return name.toLowerCase().replace(/[\s_-]/g, '');
 }
 
-/** The realistic value a field name implies, or null when the name says nothing. */
-function semanticValue(name: string, faker: Faker): string | null {
+/** `employeeIdNumber` → ['employee', 'id', 'number']. */
+function nameWords(name: string): string[] {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[\s_-]+/)
+    .filter(Boolean);
+}
+
+/** Last words that make a field an identifier: `studentId`, `orderNumber`, `ticketCode`. */
+const IDENTIFIER_WORDS = new Set(['id', 'number', 'no', 'code', 'ref', 'reference']);
+
+/** Words that make a field free text: `descriptionOfIncident`, `comment`, `reason`. */
+const PROSE_WORDS = new Set([
+  'description',
+  'comment',
+  'comments',
+  'note',
+  'notes',
+  'reason',
+  'summary',
+  'details',
+  'detail',
+  'message',
+  'feedback',
+  'remark',
+  'remarks',
+  'review',
+  'bio',
+  'about',
+  'explanation',
+  'content',
+  'body',
+  'text',
+]);
+
+/**
+ * Lower-case English words, drawn one at a time.
+ *
+ * English rather than lorem: mock data is read by people building a front
+ * end, and Latin filler reads as broken. Words with hyphens or capitals are
+ * skipped so the text stays plain; the draw count is bounded so a seeded run
+ * stays reproducible.
+ */
+function englishWords(faker: Faker, count: number): string[] {
+  const words: string[] = [];
+  for (let attempt = 0; words.length < count && attempt < count * 4; attempt += 1) {
+    const word = faker.word.sample();
+    if (/^[a-z]+$/.test(word)) words.push(word);
+  }
+  return words;
+}
+
+/** Join words into text no longer than `max`, cutting only between words. */
+function fitWords(words: string[], max: number): string {
+  let text = '';
+  for (const word of words) {
+    const next = text ? `${text} ${word}` : word;
+    if (next.length > max) break;
+    text = next;
+  }
+  return text || (words[0] ?? '').slice(0, max);
+}
+
+/** A sentence: capital first letter, full stop, at most `max` characters. */
+function englishSentence(faker: Faker, max: number): string {
+  const words = englishWords(faker, faker.number.int({ min: 8, max: 16 }));
+  const body = fitWords(words, Math.max(1, max - 1));
+  return `${body.charAt(0).toUpperCase()}${body.slice(1)}.`;
+}
+
+/**
+ * The realistic value a field name implies, or null when the name says nothing.
+ *
+ * The table above wins; then two families recognised by their words. An
+ * identifier (`employeeIdNumber`) becomes a code like `EMP-48213`, built from
+ * the name's first word. Free text (`descriptionOfIncident`) becomes an English
+ * sentence instead of truncated lorem.
+ */
+function semanticValue(name: string, faker: Faker, maxLength?: number): string | null {
   const normalized = normalizeFieldName(name);
   const match = SEMANTIC_FIELDS.find((entry) => entry.test(normalized));
-  return match ? match.value(faker) : null;
+  if (match) {
+    return match.value(faker);
+  }
+  const words = nameWords(name);
+  const last = words[words.length - 1] ?? '';
+  if (words.length >= 2 && IDENTIFIER_WORDS.has(last)) {
+    const prefix = words[0] === 'id' ? 'ID' : words[0]!.slice(0, 3).toUpperCase();
+    return `${prefix}-${faker.string.numeric({ length: 5, allowLeadingZeros: false })}`;
+  }
+  if (words.some((word) => PROSE_WORDS.has(word))) {
+    return englishSentence(faker, maxLength ?? 160);
+  }
+  return null;
 }
 
 /**
@@ -505,22 +595,27 @@ function generateFieldValue(field: Field, faker: Faker, refDate: Date | undefine
 
   switch (field.type) {
     case 'string': {
-      const semantic = semanticValue(field.name, faker);
+      const semantic = semanticValue(field.name, faker, rules.max ?? rules.length);
       if (semantic !== null) {
         return semantic;
       }
 
-      const minLen = rules.min ?? rules.length ?? 5;
-      const maxLen = rules.max ?? rules.length ?? 20;
+      const minLen = rules.min ?? rules.length ?? 1;
+      const maxLen = rules.max ?? rules.length ?? 24;
 
-      let text = faker.lorem.sentence();
-
-      if (text.length > maxLen) {
-        text = text.slice(0, maxLen);
+      // Whole English words, never cut mid-word. Too short for the schema's
+      // minimum: add words rather than pad with letters ("Edge" became "Edgea").
+      const words = englishWords(faker, faker.number.int({ min: 2, max: 3 }));
+      let text = fitWords(words, maxLen);
+      for (let extra = 0; text.length < minLen && extra < 20; extra += 1) {
+        const next = `${text} ${englishWords(faker, 1)[0] ?? 'item'}`;
+        if (next.length > maxLen) break;
+        text = next;
       }
-
+      text = `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
       if (text.length < minLen) {
-        text = text.padEnd(minLen, 'a');
+        // A minimum the words cannot reach within the maximum: last resort.
+        text = text.padEnd(minLen, 'x');
       }
 
       return text;

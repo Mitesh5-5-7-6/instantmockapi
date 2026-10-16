@@ -11,7 +11,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Button, Icon, IconTile } from '@instantmockapi/ui';
+import { Button, Icon } from '@instantmockapi/ui';
+import { BrandMark } from './brand-mark';
 import { useMe, useRestoreSession } from '../lib/hooks';
 import { VISIBLE_NAV_ITEMS, isNavActive } from '../lib/nav-items';
 import { usesWideContent } from '../lib/project-tabs';
@@ -140,7 +141,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <aside className="ui-sidebar" id="primary-nav">
         <div className="ui-row" style={{ gap: 'var(--space-2)', alignItems: 'center' }}>
-          <IconTile icon="code" tone="accent" size="sm" />
+          <BrandMark />
           <span className="ui-sidebar__brand">
             Instant<span>Mock</span>API
           </span>
