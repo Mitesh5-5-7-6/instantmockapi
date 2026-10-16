@@ -53,7 +53,6 @@ export const generationRoutes: FastifyPluginAsync<GenerationRouteOptions> = asyn
       type: 'full',
       requestedArtifacts: deriveRequestedArtifacts(cfg),
       generationConfig: cfg,
-      plan: request.authUser?.plan ?? 'free',
       note: 'Full generation',
     });
     return reply.status(202).send({ jobId: job.jobId, status: job.status });
@@ -101,7 +100,6 @@ export const generationRoutes: FastifyPluginAsync<GenerationRouteOptions> = asyn
         type: 'partial',
         requestedArtifacts: artifacts,
         generationConfig: cfg,
-        plan: request.authUser?.plan ?? 'free',
         note: `Regenerated: ${artifacts.join(', ')}`,
       });
       return reply.status(202).send({ jobId: job.jobId, status: job.status });
@@ -135,7 +133,6 @@ export const generationRoutes: FastifyPluginAsync<GenerationRouteOptions> = asyn
       type: 'full',
       requestedArtifacts: deriveRequestedArtifacts(cfg),
       generationConfig: cfg,
-      plan: request.authUser?.plan ?? 'free',
       note: 'Generated again after expiry',
     });
     return reply.status(202).send({ jobId: job.jobId, status: job.status });

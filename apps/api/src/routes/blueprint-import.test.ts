@@ -27,8 +27,8 @@ import {
 /**
  * Blueprint import (Phase 4 §14, §15, §24, §26).
  *
- * The use case this exists for: a hosted API expires after two days on the free
- * plan, so a developer exports a blueprint and imports it to stand the same
+ * The use case this exists for: a hosted API expires after 30 days, so a
+ * developer exports a blueprint and imports it to stand the same
  * project up again in minutes. That shapes what is worth testing — the
  * *complete* export-then-import cycle through the HTTP surface, for all three
  * project kinds, including from an expired project.
@@ -202,7 +202,7 @@ describe('§15: import creates a new project', () => {
 
 describe('the expiry workflow, end to end', () => {
   /**
-   * The reason this feature exists: a free-plan hosted API lasts two days, so
+   * The reason this feature exists: a hosted API expires after 30 days, so
    * the definition has to survive its own deployment.
    *
    * §23 requires an expired project to retain its definition, its Technical
@@ -415,7 +415,7 @@ describe('a blueprint moves between accounts', () => {
   });
 });
 
-describe('plan and access', () => {
+describe('project limit and access', () => {
   it('rejects an unauthenticated import', async () => {
     const response = await app.inject({
       method: 'POST',
@@ -426,15 +426,15 @@ describe('plan and access', () => {
   });
 
   /**
-   * An import is a create, so it counts against the plan — and it is refused
+   * An import is a create, so it counts against the project limit — and it is refused
    * *before* the blueprint is read, so a user at their limit gets the reason
    * that matters rather than a validation error about a file that was fine.
    */
-  it('refuses when the plan is full, without creating anything', async () => {
+  it('refuses at the project limit, without creating anything', async () => {
     const sourceId = (await createProjectViaApi(app, token, 'Shop')).json().id as string;
     const blueprint = (await exportOf(sourceId)).json();
 
-    // The free plan's ceiling is 10; fill it.
+    // The project limit is 10; fill it.
     const owner = (await Project.findById(sourceId))!.ownerId;
     const filler = Array.from({ length: 9 }, (_, index) => ({
       ownerId: owner,
@@ -452,7 +452,7 @@ describe('plan and access', () => {
     const response = await importBlueprint({ blueprint });
 
     expect(response.statusCode).toBe(403);
-    expect(response.json().error.code).toBe('PLAN_LIMIT_EXCEEDED');
+    expect(response.json().error.code).toBe('LIMIT_EXCEEDED');
     expect(await Project.countDocuments({})).toBe(before);
   });
 });

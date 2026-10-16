@@ -7,10 +7,10 @@ export type ProjectStatus = 'draft' | 'generating' | 'active' | 'expired';
 export type ArtifactStatus = 'pending' | 'generating' | 'completed' | 'failed';
 export type JobStatus = 'queued' | 'running' | 'completed' | 'failed_partial';
 
-export interface PlanLimits {
-  /** null means unlimited — both server-side sentinels normalise to it. */
-  maxProjects: number | null;
-  maxConcurrentJobs: number | null;
+/** Usage limits, the same for every account. Served by `/v1/me`. */
+export interface Limits {
+  maxProjects: number;
+  maxConcurrentJobs: number;
   hostedApiLifetimeDays: number;
 }
 
@@ -18,8 +18,7 @@ export interface ApiUser {
   id: string;
   email: string;
   name: string | null;
-  limits: PlanLimits;
-  plan: 'free' | 'pro' | 'enterprise';
+  limits: Limits;
   authProvider: 'google' | 'email';
   createdAt: string;
 }
@@ -357,10 +356,9 @@ export interface DashboardView {
     note: string;
   };
   hosted: { live: number; total: number; soonestExpiresAt: string | null };
-  plan: {
-    tier: 'free' | 'pro' | 'enterprise';
-    projects: { used: number; limit: number | null };
-    concurrentJobs: { used: number; limit: number | null };
+  limits: {
+    projects: { used: number; limit: number };
+    concurrentJobs: { used: number; limit: number };
     hostedApiLifetimeDays: number;
   };
   activity: ActivityEvent[];

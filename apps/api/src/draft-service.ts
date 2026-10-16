@@ -24,7 +24,7 @@
 
 import { createHash } from 'node:crypto';
 
-import { AppError, unwrap, type ArtifactType, type PlanTier } from '@instantmockapi/shared';
+import { AppError, unwrap, type ArtifactType } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
 import {
   Project,
@@ -428,7 +428,6 @@ export interface CommitResult {
  */
 export async function commitDraft(params: {
   ctx: DraftContext;
-  plan: PlanTier;
   /** Which artifacts to regenerate. Defaults to the impact report's list. */
   artifacts?: ArtifactType[];
   /**
@@ -442,7 +441,7 @@ export async function commitDraft(params: {
   acknowledgeImpact?: string;
   note?: string;
 }): Promise<CommitResult> {
-  const { ctx, plan, acknowledgeImpact, note } = params;
+  const { ctx, acknowledgeImpact, note } = params;
   const { project, draft } = ctx;
 
   // 1. Staleness. Never merge — the user reasoned about a definition that has
@@ -531,7 +530,6 @@ export async function commitDraft(params: {
     type: 'full',
     requestedArtifacts: artifacts,
     generationConfig: draft.generationConfig,
-    plan,
     note: note ?? commitNote(analysis, rollbackSource),
     // A rollback is a version like any other, and says so in the history: §7
     // wants the lineage recorded rather than reconstructed from the note text.

@@ -160,7 +160,6 @@ export const draftRoutes: FastifyPluginAsync<DraftRouteOptions> = async (app, { 
 
       const result = await commitDraft({
         ctx,
-        plan: request.authUser?.plan ?? 'free',
         ...(body.artifacts ? { artifacts: body.artifacts } : {}),
         ...(body.acknowledgeImpact !== undefined
           ? { acknowledgeImpact: body.acknowledgeImpact }

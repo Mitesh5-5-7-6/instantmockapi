@@ -296,7 +296,7 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
         });
       }
 
-      await assertProjectQuota(sub, request.authUser?.plan);
+      await assertProjectQuota(sub);
 
       // The claim is the double-commit guard: only one request can move
       // ready → committing; the loser sees the new status and gets a 409.

@@ -1,13 +1,7 @@
-// @instantmockapi/config — plan limits, environment configuration
-// The single source of truth for plan values and env loading (doc 05 §5).
+// @instantmockapi/config — platform limits, environment configuration
+// The single source of truth for limit values and env loading (doc 05 §5).
 
-export {
-  PLAN_CONFIGS,
-  type PlanConfig,
-  getPlanConfig,
-  calculateExpiresAt,
-  canCreateJob,
-} from './plans.js';
+export { LIMITS, type Limits, calculateExpiresAt, canCreateJob } from './limits.js';
 
 export {
   type EnvConfig,

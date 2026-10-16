@@ -405,7 +405,7 @@ describe('§25: the copy is independently editable', () => {
   });
 });
 
-describe('access and plan', () => {
+describe('access and project limit', () => {
   it('rejects an unauthenticated request', async () => {
     const response = await app.inject({
       method: 'POST',
@@ -426,11 +426,11 @@ describe('access and plan', () => {
   });
 
   /**
-   * A duplicate is a create, so it counts against the plan — and the source is
+   * A duplicate is a create, so it counts against the project limit — and the source is
    * loaded first, so an unauthorised request gets a 404 rather than being told
    * about a quota it has no business knowing.
    */
-  it('refuses when the plan is full, creating nothing', async () => {
+  it('refuses at the project limit, creating nothing', async () => {
     const owner = (await Project.findById(sourceId))!.ownerId;
     await Project.insertMany(
       Array.from({ length: 9 }, (_, index) => ({
@@ -449,7 +449,7 @@ describe('access and plan', () => {
     const response = await duplicate();
 
     expect(response.statusCode).toBe(403);
-    expect(response.json().error.code).toBe('PLAN_LIMIT_EXCEEDED');
+    expect(response.json().error.code).toBe('LIMIT_EXCEEDED');
     expect(await Project.countDocuments({})).toBe(before);
   });
 });

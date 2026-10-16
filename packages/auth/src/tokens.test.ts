@@ -14,7 +14,6 @@ const baseConfig: EnvConfig = { ...loadEnvConfig(), jwtSecret: 'test-secret', jw
 const user: AuthUser = {
   id: '507f1f77bcf86cd799439011',
   email: 'dev@example.com',
-  plan: 'free',
   tokenVersion: 0,
 };
 
@@ -26,7 +25,7 @@ describe('JWT issuance and verification', () => {
     if (res.ok) {
       expect(res.value.sub).toBe(user.id);
       expect(res.value.email).toBe(user.email);
-      expect(res.value.plan).toBe('free');
+      expect(res.value).not.toHaveProperty('plan');
       expect(res.value.tokenType).toBe('access');
     }
   });
@@ -115,6 +114,29 @@ describe('the tokenVersion claim', () => {
     }
   });
 
+  it('still accepts a token issued while plans existed', async () => {
+    // Sessions signed before plans were removed carry a `plan` claim. It is
+    // ignored, so nobody is signed out by the deploy.
+    const { SignJWT } = await import('jose');
+    const withPlan = await new SignJWT({
+      email: user.email,
+      plan: 'enterprise',
+      tokenType: 'access',
+      tv: 0,
+    })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setSubject(user.id)
+      .setIssuedAt()
+      .setExpirationTime('1h')
+      .sign(new TextEncoder().encode(baseConfig.jwtSecret));
+
+    const res = await verifyAccessToken(withPlan, baseConfig);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.value).not.toHaveProperty('plan');
+    }
+  });
+
   it('rejects a token minted before the claim existed', async () => {
     // Required rather than defaulted to 0: treating a pre-claim token as version
     // zero would let it survive a revocation it predates. Signed here by hand,
@@ -122,7 +144,6 @@ describe('the tokenVersion claim', () => {
     const { SignJWT } = await import('jose');
     const legacy = await new SignJWT({
       email: user.email,
-      plan: user.plan,
       tokenType: 'access',
     })
       .setProtectedHeader({ alg: 'HS256' })
@@ -143,7 +164,6 @@ describe('the tokenVersion claim', () => {
     for (const tv of ['3', 1.5, null, {}]) {
       const token = await new SignJWT({
         email: user.email,
-        plan: user.plan,
         tokenType: 'access',
         tv,
       })

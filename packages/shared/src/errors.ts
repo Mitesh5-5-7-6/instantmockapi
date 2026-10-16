@@ -72,7 +72,7 @@ export type ErrorCode =
    */
   | 'VERSION_NOT_READY'
   | 'RATE_LIMIT_EXCEEDED'
-  | 'PLAN_LIMIT_EXCEEDED'
+  | 'LIMIT_EXCEEDED'
   | 'DEPTH_LIMIT_EXCEEDED'
   | 'GENERATION_ERROR'
   /**
@@ -158,7 +158,7 @@ function errorCodeToStatus(code: ErrorCode): number {
     // is not in a publishable state yet.
     VERSION_NOT_READY: 409,
     RATE_LIMIT_EXCEEDED: 429,
-    PLAN_LIMIT_EXCEEDED: 403,
+    LIMIT_EXCEEDED: 403,
     DEPTH_LIMIT_EXCEEDED: 422,
     GENERATION_ERROR: 500,
     AI_NOT_CONFIGURED: 503,

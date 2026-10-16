@@ -8,7 +8,7 @@
 
 import { SignJWT, jwtVerify } from 'jose';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
-import { AppError, PLAN_TIERS, type PlanTier, type Result, ok, err } from '@instantmockapi/shared';
+import { AppError, type Result, ok, err } from '@instantmockapi/shared';
 
 export type TokenType = 'access' | 'refresh';
 
@@ -17,7 +17,6 @@ export interface AuthUser {
   /** User id (Mongo ObjectId hex string) — becomes the JWT `sub`. */
   id: string;
   email: string;
-  plan: PlanTier;
   /**
    * Revocation counter, mirrored from `User.tokenVersion`.
    *
@@ -34,7 +33,6 @@ export interface AuthTokenClaims {
   /** Token subject: the user id. Ownership checks compare against this (doc 13 §2). */
   sub: string;
   email: string;
-  plan: PlanTier;
   tokenType: TokenType;
   tokenVersion: number;
 }
@@ -53,7 +51,7 @@ async function signToken(
   config: EnvConfig,
 ): Promise<string> {
   const nowSeconds = Math.floor(Date.now() / 1000);
-  return new SignJWT({ email: user.email, plan: user.plan, tokenType, tv: user.tokenVersion })
+  return new SignJWT({ email: user.email, tokenType, tv: user.tokenVersion })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(user.id)
     .setIssuedAt(nowSeconds)
@@ -75,10 +73,6 @@ export async function issueRefreshToken(
   config: EnvConfig = loadEnvConfig(),
 ): Promise<string> {
   return signToken(user, 'refresh', REFRESH_TOKEN_LIFETIME_SECONDS, config);
-}
-
-function isPlanTier(value: unknown): value is PlanTier {
-  return typeof value === 'string' && (PLAN_TIERS as readonly string[]).includes(value);
 }
 
 function unauthorized(message: string): AppError {
@@ -112,11 +106,10 @@ export async function verifyToken(
 
   const sub = payload['sub'];
   const email = payload['email'];
-  const plan = payload['plan'];
   const tokenType = payload['tokenType'];
   const tokenVersion = payload['tv'];
 
-  if (typeof sub !== 'string' || !sub || typeof email !== 'string' || !isPlanTier(plan)) {
+  if (typeof sub !== 'string' || !sub || typeof email !== 'string') {
     return err(unauthorized('Token is missing required claims'));
   }
   // Required rather than defaulted to 0: a token minted before this claim
@@ -130,7 +123,7 @@ export async function verifyToken(
     return err(unauthorized(`Expected ${expectedType} token`));
   }
 
-  return ok({ sub, email, plan, tokenType: expectedType, tokenVersion: tokenVersion as number });
+  return ok({ sub, email, tokenType: expectedType, tokenVersion: tokenVersion as number });
 }
 
 /** Verify an access token (the `Authorization: Bearer` credential). */

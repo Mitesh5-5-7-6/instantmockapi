@@ -4,7 +4,6 @@ import {
   activityIcon,
   summariseRequests,
   toChartPoints,
-  toPlanUsage,
   toRecentProjectRows,
   toStatTiles,
 } from './dashboard-metrics';
@@ -41,11 +40,10 @@ function view(overrides: Partial<DashboardView> = {}): DashboardView {
       note: 'Counted from hosted-request logs, retained 30 days.',
     },
     hosted: { live: 9, total: 12, soonestExpiresAt: '2026-05-19T12:00:00.000Z' },
-    plan: {
-      tier: 'free',
+    limits: {
       projects: { used: 7, limit: 10 },
-      concurrentJobs: { used: 0, limit: 1 },
-      hostedApiLifetimeDays: 2,
+      concurrentJobs: { used: 0, limit: 3 },
+      hostedApiLifetimeDays: 30,
     },
     activity: [],
     ...overrides,
@@ -224,30 +222,6 @@ describe('toRecentProjectRows', () => {
     );
     expect(toRecentProjectRows(many, view(), NOW)).toHaveLength(4);
     expect(toRecentProjectRows(many, view(), NOW, 2)).toHaveLength(2);
-  });
-});
-
-describe('toPlanUsage', () => {
-  it('meters projects against the limit the API actually enforces', () => {
-    // The mockup's "12,450 / 50,000 requests per month" has no denominator
-    // anywhere in the system; maxProjects is enforced on create.
-    expect(toPlanUsage(7, 10)).toEqual({
-      label: 'Projects',
-      used: 7,
-      limit: 10,
-      percent: 70,
-      detail: '7 / 10',
-    });
-  });
-
-  it('reads a null limit as unlimited rather than as zero', () => {
-    // Enterprise carries two different "unlimited" sentinels server-side, both
-    // normalised to null — so a 0/0 meter must not appear here.
-    expect(toPlanUsage(40, null)).toMatchObject({ percent: 0, detail: '40 · unlimited' });
-  });
-
-  it('caps the bar at 100% rather than overflowing it', () => {
-    expect(toPlanUsage(15, 10).percent).toBe(100);
   });
 });
 

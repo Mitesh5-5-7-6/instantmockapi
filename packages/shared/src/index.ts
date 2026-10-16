@@ -40,9 +40,6 @@ export {
   // HTTP
   HTTP_METHODS,
   type HttpMethod,
-  // Plan
-  PLAN_TIERS,
-  type PlanTier,
 } from './constants.js';
 export {
   PUBLIC_ID_PREFIX,

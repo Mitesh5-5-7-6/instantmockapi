@@ -106,7 +106,6 @@ async function issueSession(
   const authUser: AuthUser = {
     id: String(user._id),
     email: user.email,
-    plan: user.plan,
     tokenVersion: user.tokenVersion,
   };
   const [accessToken, refreshToken] = await Promise.all([
@@ -254,7 +253,6 @@ export const authRoutes: FastifyPluginAsync<AuthRouteOptions> = async (app, opti
           {
             id: String(user._id),
             email: user.email,
-            plan: user.plan,
             tokenVersion: user.tokenVersion,
           },
           config,

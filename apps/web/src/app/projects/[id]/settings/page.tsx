@@ -462,7 +462,7 @@ export default function SettingsPage() {
          * Duplicating can genuinely fail, and silently failing here would be
          * the worst outcome: the user waits for a page that never arrives.
          *
-         * Two real cases. The plan limit — a duplicate is a create, so an
+         * Two real cases. The project limit — a duplicate is a create, so an
          * account at its ceiling is refused. And a definition that no longer
          * validates: the blueprint pathway re-checks the canonical rules, so a
          * project whose stored schema has drifted is refused with the field

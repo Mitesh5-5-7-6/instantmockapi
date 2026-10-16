@@ -148,7 +148,7 @@ export const blueprintRoutes: FastifyPluginAsync<BlueprintRouteOptions> = async 
        * A user at their project limit should be told that, not handed a
        * validation error about a blueprint that was fine.
        */
-      await assertProjectQuota(authUser?.sub, authUser?.plan);
+      await assertProjectQuota(authUser?.sub);
 
       const project = await createProjectRecord({
         ownerId: authUser?.sub,
@@ -273,7 +273,7 @@ export const blueprintRoutes: FastifyPluginAsync<BlueprintRouteOptions> = async 
       const body = (request.body ?? {}) as { name?: string; description?: string };
 
       const source = await loadOwnedProject(id, authUser?.sub ?? '');
-      await assertProjectQuota(authUser?.sub, authUser?.plan);
+      await assertProjectQuota(authUser?.sub);
 
       const project = await createProjectRecord({
         ownerId: authUser?.sub,
