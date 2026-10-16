@@ -209,7 +209,7 @@ export const projectRoutes: FastifyPluginAsync<ProjectRouteOptions> = async (app
         });
       }
 
-      await assertProjectQuota(authUser?.sub, authUser?.plan);
+      await assertProjectQuota(authUser?.sub);
 
       const rawString =
         typeof body.inputSource.raw === 'string'

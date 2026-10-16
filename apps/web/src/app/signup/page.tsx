@@ -79,7 +79,7 @@ export default function SignupPage() {
   return (
     <AuthCard
       title="Create your account"
-      subtitle="No credit card. Free plan includes 3 projects."
+      subtitle="No credit card needed. Create up to 10 projects."
       footer={
         <>
           Already have an account? <Link href="/login">Sign in</Link>

@@ -29,7 +29,6 @@ export interface IUser extends Document {
    * cannot — keying on email alone would silently split or merge accounts.
    */
   googleSub?: string | null;
-  plan: 'free' | 'pro' | 'enterprise';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -73,12 +72,6 @@ const userSchema = new Schema<IUser>(
     googleSub: {
       type: String,
       default: null,
-    },
-    plan: {
-      type: String,
-      required: true,
-      enum: ['free', 'pro', 'enterprise'],
-      default: 'free',
     },
   },
   {

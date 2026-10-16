@@ -87,8 +87,8 @@ describe('POST /v1/projects', () => {
     expect(res.json().error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('enforces the free-plan project cap with 403 PLAN_LIMIT_EXCEEDED', async () => {
-    // Free plan allows 10 projects — seed 10 directly, then hit the API
+  it('enforces the project limit with 403 LIMIT_EXCEEDED', async () => {
+    // The limit is 10 projects — seed 10 directly, then hit the API
     const seed = Array.from({ length: 10 }, (_, i) => ({
       ownerId: session.userId,
       name: `Seeded ${i}`,
@@ -101,7 +101,7 @@ describe('POST /v1/projects', () => {
 
     const res = await createProjectViaApi(app, session.accessToken, 'One Too Many');
     expect(res.statusCode).toBe(403);
-    expect(res.json().error.code).toBe('PLAN_LIMIT_EXCEEDED');
+    expect(res.json().error.code).toBe('LIMIT_EXCEEDED');
   });
 });
 
@@ -508,7 +508,7 @@ describe('project kinds and slugs (doc 19 §Phase 3)', () => {
       method: 'POST',
       url: '/v1/projects',
       headers: authHeader(session.accessToken),
-      payload: { name: 'Anything', slug: 'healthz', inputSource: { type: 'json', raw: sampleRaw } },
+      payload: { name: 'Anything', slug: 'health', inputSource: { type: 'json', raw: sampleRaw } },
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error.code).toBe('VALIDATION_ERROR');
@@ -930,7 +930,7 @@ describe('GET /v1/projects?include=counts', () => {
 });
 
 describe('GET and PATCH /v1/me', () => {
-  it('serves the plan limits rather than making the client hardcode them', async () => {
+  it('serves the limits rather than making the client hardcode them', async () => {
     // The settings page used to carry its own copy of this table, which drifts
     // from packages/config the moment a limit changes.
     const res = await app.inject({
@@ -940,8 +940,8 @@ describe('GET and PATCH /v1/me', () => {
     });
     expect(res.json().user.limits).toEqual({
       maxProjects: 10,
-      maxConcurrentJobs: 1,
-      hostedApiLifetimeDays: 2,
+      maxConcurrentJobs: 3,
+      hostedApiLifetimeDays: 30,
     });
   });
 

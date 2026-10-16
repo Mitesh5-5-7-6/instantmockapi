@@ -29,35 +29,20 @@
  * queued against a project that does not exist.
  */
 
-import { getPlanConfig } from '@instantmockapi/config';
-import {
-  AppError,
-  type InputSourceType,
-  type PlanTier,
-  type ProjectKind,
-} from '@instantmockapi/shared';
+import { LIMITS } from '@instantmockapi/config';
+import { AppError, type InputSourceType, type ProjectKind } from '@instantmockapi/shared';
 import { Project, ensurePublicIdentity, type IProject } from '@instantmockapi/db';
 import { ensureSchemaIds, type InternalProjectSchema } from '@instantmockapi/ips';
 
 /**
- * Refuse before creating anything, when the plan is already full.
- *
- * `0` means unlimited, which is the enterprise plan's encoding and the reason
- * this is a `> 0` test rather than a truthiness one.
+ * Refuse before creating anything, when the account already owns the maximum.
  */
-export async function assertProjectQuota(
-  ownerId: string | undefined,
-  plan: PlanTier | undefined,
-): Promise<void> {
-  const planConfig = getPlanConfig(plan ?? 'free');
-  if (planConfig.maxProjects <= 0) {
-    return;
-  }
+export async function assertProjectQuota(ownerId: string | undefined): Promise<void> {
   const count = await Project.countDocuments({ ownerId });
-  if (count >= planConfig.maxProjects) {
+  if (count >= LIMITS.maxProjects) {
     throw new AppError({
-      code: 'PLAN_LIMIT_EXCEEDED',
-      message: `Your ${plan ?? 'free'} plan allows at most ${planConfig.maxProjects} projects`,
+      code: 'LIMIT_EXCEEDED',
+      message: `You can have at most ${LIMITS.maxProjects} projects. Delete one to create another.`,
     });
   }
 }

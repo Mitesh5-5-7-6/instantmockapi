@@ -69,7 +69,6 @@ describe('models', () => {
   it('applies user defaults and lowercases email', async () => {
     const user = await User.create({ email: 'Dev@Example.COM', authProvider: 'email' });
     expect(user.email).toBe('dev@example.com');
-    expect(user.plan).toBe('free');
   });
 
   it('enforces unique user emails', async () => {

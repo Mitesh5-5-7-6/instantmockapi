@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * App shell (doc 11): sidebar nav + top bar with plan indicator and account.
+ * App shell (doc 11): sidebar nav + top bar with account.
  *
  * Gates on auth — an unauthenticated visitor is redirected to `/login`. The
  * sign-in form used to live *in here* as a card, which meant it had no URL;
@@ -15,7 +15,6 @@ import { Button, Icon, IconTile } from '@instantmockapi/ui';
 import { useMe, useRestoreSession } from '../lib/hooks';
 import { VISIBLE_NAV_ITEMS, isNavActive } from '../lib/nav-items';
 import { usesWideContent } from '../lib/project-tabs';
-import { SidebarPlanCard } from './sidebar-plan-card';
 import { SidebarProfile } from './sidebar-profile';
 import { TopSearch } from './top-search';
 import { AppFooter } from './app-footer';
@@ -169,7 +168,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         {/* Pinned to the bottom of the rail by one auto margin. */}
         <div className="ui-sidebar__footer">
-          <SidebarPlanCard />
           <SidebarProfile />
         </div>
       </aside>

@@ -37,11 +37,10 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRouteOptions> = async 
       const query = request.query as { days?: number; activityLimit?: number };
       // Owner comes from the token subject, never from a parameter — this is the
       // only thing scoping the whole payload to the caller.
-      const view = await buildDashboard(
-        request.authUser?.sub ?? '',
-        { days: query.days ?? 7, activityLimit: query.activityLimit ?? 6 },
-        request.authUser?.plan ?? 'free',
-      );
+      const view = await buildDashboard(request.authUser?.sub ?? '', {
+        days: query.days ?? 7,
+        activityLimit: query.activityLimit ?? 6,
+      });
       return reply.send(view);
     },
   );

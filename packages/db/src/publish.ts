@@ -27,7 +27,7 @@
  */
 
 import { calculateExpiresAt } from '@instantmockapi/config';
-import { hostedUrl, type PlanTier } from '@instantmockapi/shared';
+import { hostedUrl } from '@instantmockapi/shared';
 import type { IProject } from './models/project.js';
 
 /** Everything a publish writes. Dotted keys so it drops straight into `$set`. */
@@ -72,8 +72,8 @@ export function hasLiveDeployment(project: Pick<IProject, 'hosted'>): boolean {
  *
  * `expiresAt` is always recomputed, which is deliberate: it measures the life of
  * the hosted *deployment*, and publishing is the deployment. The tempting
- * `expiresAt ?? calculateExpiresAt(plan)` — start the clock only on the first
- * publish — is a regression, because the API would then die two days after that
+ * `expiresAt ?? calculateExpiresAt()` — start the clock only on the first
+ * publish — is a regression, because the API would then die a month after that
  * first publish however actively the user was iterating. The one case that must
  * NOT come through here is re-publishing the already-live version, or Publish
  * becomes a free renewal button; the route returns early instead.
@@ -81,7 +81,7 @@ export function hasLiveDeployment(project: Pick<IProject, 'hosted'>): boolean {
 export function publishFields(
   project: Pick<IProject, '_id' | 'publicId' | 'slug'>,
   version: number,
-  opts: { baseUrl: string; plan: PlanTier },
+  opts: { baseUrl: string },
 ): PublishFields {
   return {
     publishedVersion: version,
@@ -93,6 +93,6 @@ export function publishFields(
       ...(project.publicId ? { publicId: project.publicId } : {}),
       ...(project.slug ? { slug: project.slug } : {}),
     }),
-    'hosted.expiresAt': calculateExpiresAt(opts.plan),
+    'hosted.expiresAt': calculateExpiresAt(),
   };
 }

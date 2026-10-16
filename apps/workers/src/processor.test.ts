@@ -190,7 +190,7 @@ describe('full pipeline', () => {
     expect(job?.completedAt).toBeInstanceOf(Date);
     expect(job?.workers.every((w) => w.status === 'completed')).toBe(true);
 
-    // Project activated with hosted URL + plan-based expiry (free = 2 days).
+    // Project activated with hosted URL and a 30-day expiry.
     // Addressing is minted on settle, so the URL is the advertised pretty form
     // `{publicId}/{slug}` — the legacy `/p/{projectId}` form still resolves but is
     // no longer what gets stamped (doc 19 §Phase 3).
@@ -202,6 +202,9 @@ describe('full pipeline', () => {
       `https://api.instantmockapi.dev/p/${updated?.publicId}/${updated?.slug}`,
     );
     expect(updated?.hosted.expiresAt).toBeInstanceOf(Date);
+    const lifetimeDays = (updated!.hosted.expiresAt!.getTime() - Date.now()) / 86_400_000;
+    expect(lifetimeDays).toBeGreaterThan(29.9);
+    expect(lifetimeDays).toBeLessThanOrEqual(30);
 
     // Mock stores seeded from Worker D's records
     const store = await MockStore.findOne({ projectId: project._id, entity: 'customer' });

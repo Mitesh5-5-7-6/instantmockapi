@@ -3,7 +3,6 @@ import {
   averageDuration,
   dayKey,
   percentChange,
-  planLimit,
   rate,
   requestRates,
   resolveWindow,
@@ -155,21 +154,6 @@ describe('averageDuration', () => {
 
   it('reports the sample count so a thin average is legible as thin', () => {
     expect(averageDuration(300, 2).durationSampleCount).toBe(2);
-  });
-});
-
-describe('planLimit', () => {
-  it('normalises both "unlimited" sentinels to null', () => {
-    // PlanConfig carries maxConcurrentJobs: Infinity AND maxProjects: 0, both
-    // meaning unlimited. JSON.stringify(Infinity) is null, so without this the
-    // enterprise sidebar renders a "0 / 0" meter.
-    expect(planLimit(Infinity)).toBeNull();
-    expect(planLimit(0)).toBeNull();
-  });
-
-  it('passes a real limit through', () => {
-    expect(planLimit(10)).toBe(10);
-    expect(planLimit(1)).toBe(1);
   });
 });
 

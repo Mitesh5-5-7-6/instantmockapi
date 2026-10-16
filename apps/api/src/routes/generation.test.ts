@@ -12,6 +12,7 @@ vi.mock('@instantmockapi/queue', async (importOriginal) => {
 });
 
 import type { FastifyInstance } from 'fastify';
+import { LIMITS } from '@instantmockapi/config';
 import { Artifact, Job, Project, Version } from '@instantmockapi/db';
 import { enqueueGenerationJob } from '@instantmockapi/queue';
 import {
@@ -104,21 +105,26 @@ describe('POST /v1/projects/:id/generate', () => {
     expect(res.json().error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('free plan at its concurrency limit still gets 202 queued — never rejected', async () => {
+  it('at the concurrency limit a job still gets 202 queued — never rejected', async () => {
     await generate();
+    const generateNew = async (name: string) => {
+      const created = await createProjectViaApi(app, session.accessToken, name);
+      return app.inject({
+        method: 'POST',
+        url: `/v1/projects/${created.json().id}/generate`,
+        headers: authHeader(session.accessToken),
+        payload: {},
+      });
+    };
+    for (let index = 1; index < LIMITS.maxConcurrentJobs; index += 1) {
+      await generateNew(`Busy ${index}`);
+    }
 
-    const second = await createProjectViaApi(app, session.accessToken, 'Second Project');
-    const secondId = second.json().id;
-    const res = await app.inject({
-      method: 'POST',
-      url: `/v1/projects/${secondId}/generate`,
-      headers: authHeader(session.accessToken),
-      payload: {},
-    });
+    const res = await generateNew('One Over');
 
     expect(res.statusCode).toBe(202);
     expect(res.json().status).toBe('queued');
-    expect(await Job.countDocuments({})).toBe(2);
+    expect(await Job.countDocuments({})).toBe(LIMITS.maxConcurrentJobs + 1);
   });
 });
 

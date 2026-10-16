@@ -77,7 +77,8 @@ describe('auth contract', () => {
     const body = res.json();
     expect(body.accessToken).toEqual(expect.any(String));
     expect(body.refreshToken).toEqual(expect.any(String));
-    expect(body.user).toMatchObject({ email: 'dev@example.com', plan: 'free' });
+    expect(body.user).toMatchObject({ email: 'dev@example.com' });
+    expect(body.user).not.toHaveProperty('plan');
 
     // Second login with the same email returns the same user
     const again = await app.inject({
@@ -111,7 +112,6 @@ describe('auth contract', () => {
     expect(res.json().user).toMatchObject({
       id: session.userId,
       email: 'me@example.com',
-      plan: 'free',
     });
   });
 

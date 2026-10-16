@@ -7,14 +7,7 @@
  * existing job instead of creating a new one.
  */
 
-import {
-  AppError,
-  logger,
-  unwrap,
-  type ArtifactType,
-  type JobType,
-  type PlanTier,
-} from '@instantmockapi/shared';
+import { AppError, logger, unwrap, type ArtifactType, type JobType } from '@instantmockapi/shared';
 import { canCreateJob } from '@instantmockapi/config';
 import {
   Job,
@@ -41,7 +34,6 @@ export async function createGenerationJob(params: {
   type: JobType;
   requestedArtifacts: ArtifactType[];
   generationConfig: GenerationConfig;
-  plan: PlanTier;
   /** Recorded on the version snapshot (doc 03 §7): why this version exists. */
   note?: string;
   /**
@@ -58,7 +50,7 @@ export async function createGenerationJob(params: {
   parentVersion?: number | null;
   rollbackSourceVersion?: number | null;
 }): Promise<CreatedJobRef> {
-  const { project, type, requestedArtifacts, generationConfig, plan, note } = params;
+  const { project, type, requestedArtifacts, generationConfig, note } = params;
   const projectId = String(project._id);
 
   // The version is chosen by the caller. The routes that regenerate advance it
@@ -95,7 +87,7 @@ export async function createGenerationJob(params: {
     return { jobId: String(existing._id), status: existing.status, deduped: true };
   }
 
-  // Plan concurrency (Free 1 / Pro 3 / Enterprise ∞): at the limit the job is
+  // Concurrency limit (`LIMITS.maxConcurrentJobs`): at the limit the job is
   // still accepted and queued — never rejected. Workers enforce actual
   // execution concurrency when the pipeline lands in Phase 5.
   const ownedProjectIds = await Project.find({ ownerId: project.ownerId }).select('_id');
@@ -103,10 +95,9 @@ export async function createGenerationJob(params: {
     projectId: { $in: ownedProjectIds.map((p) => p._id) },
     status: { $in: ['queued', 'running'] },
   });
-  if (!canCreateJob(plan, activeJobs)) {
-    logger.info('Plan concurrency limit reached; job accepted and left queued', {
+  if (!canCreateJob(activeJobs)) {
+    logger.info('Concurrency limit reached; job accepted and left queued', {
       projectId,
-      plan,
       activeJobs,
     });
   }

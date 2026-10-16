@@ -97,3 +97,6 @@ export { hasLiveDeployment, publishFields, type PublishFields } from './publish.
  * the whole set — which is what makes affected-artifacts-only regeneration safe.
  */
 export { versionArtifactOutcomes } from './version-readiness.js';
+
+/** One-off: bring live hosted APIs up to the current hosting lifetime. */
+export { extendHostedExpiry, type ExtendHostedExpiryResult } from './extend-hosted-expiry.js';

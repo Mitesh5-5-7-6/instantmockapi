@@ -20,14 +20,13 @@
 // @instantmockapi/db), so a value import would resolve at build time and then
 // fail at runtime with "Cannot find package 'mongoose'".
 import type { Types } from 'mongoose';
-import { getPlanConfig } from '@instantmockapi/config';
+import { LIMITS } from '@instantmockapi/config';
 import { Job, Project, ApiLog, Version, type IProject } from '@instantmockapi/db';
-import { countEndpoints, type IpsEntity, type PlanTier } from '@instantmockapi/shared';
+import { countEndpoints, type IpsEntity } from '@instantmockapi/shared';
 import {
   averageDuration,
   dayKey,
   percentChange,
-  planLimit,
   requestRates,
   resolveWindow,
   zeroFillSeries,
@@ -71,10 +70,9 @@ export interface DashboardView {
     note: string;
   };
   hosted: { live: number; total: number; soonestExpiresAt: string | null };
-  plan: {
-    tier: PlanTier;
-    projects: { used: number; limit: number | null };
-    concurrentJobs: { used: number; limit: number | null };
+  limits: {
+    projects: { used: number; limit: number };
+    concurrentJobs: { used: number; limit: number };
     hostedApiLifetimeDays: number;
   };
   activity: ActivityEvent[];
@@ -111,7 +109,6 @@ interface RequestFacets {
 export async function buildDashboard(
   ownerId: string,
   query: DashboardQuery,
-  plan: PlanTier,
   /** Injected so tests can freeze the clock; today's bucket depends on it. */
   now: Date = new Date(),
 ): Promise<DashboardView> {
@@ -162,7 +159,6 @@ export async function buildDashboard(
     .filter((expiresAt): expiresAt is Date => expiresAt instanceof Date)
     .sort((a, b) => a.getTime() - b.getTime())[0];
 
-  const planConfig = getPlanConfig(plan);
   const activeJobs = await Job.countDocuments({
     projectId: { $in: projectIds },
     status: { $in: ['queued', 'running'] },
@@ -206,11 +202,10 @@ export async function buildDashboard(
       total: projects.length,
       soonestExpiresAt: soonestExpiry ? soonestExpiry.toISOString() : null,
     },
-    plan: {
-      tier: plan,
-      projects: { used: projects.length, limit: planLimit(planConfig.maxProjects) },
-      concurrentJobs: { used: activeJobs, limit: planLimit(planConfig.maxConcurrentJobs) },
-      hostedApiLifetimeDays: planConfig.hostedApiLifetimeDays,
+    limits: {
+      projects: { used: projects.length, limit: LIMITS.maxProjects },
+      concurrentJobs: { used: activeJobs, limit: LIMITS.maxConcurrentJobs },
+      hostedApiLifetimeDays: LIMITS.hostedApiLifetimeDays,
     },
     activity: await buildActivity(projects, nameById, query.activityLimit),
   };
