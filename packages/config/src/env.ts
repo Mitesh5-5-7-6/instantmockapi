@@ -111,6 +111,14 @@ export interface EnvConfig {
 
   /** Resend API key. Empty ⇒ email is printed to the log instead of sent. */
   readonly resendApiKey: string;
+  /**
+   * Brevo API key. Takes precedence over Resend when both are set.
+   *
+   * Brevo sends over HTTPS (free Render services cannot reach SMTP ports) and
+   * accepts a single verified sender address, so it works without owning a
+   * domain — EMAIL_FROM must then be that verified address.
+   */
+  readonly brevoApiKey: string;
 
   /** Gemini API key used by the AI project generator. Optional unless the AI workflow is enabled. */
   readonly geminiApiKey: string;
@@ -294,6 +302,7 @@ export function loadEnvConfig(): EnvConfig {
     webOrigin,
     appUrl: envStr('APP_URL', webOrigin),
     resendApiKey: envStr('RESEND_API_KEY', ''),
+    brevoApiKey: envPasted('BREVO_API_KEY') ?? '',
     geminiApiKey: envPasted('GEMINI_API_KEY', 'GOOGLE_API_KEY') ?? '',
     geminiModel: envPasted('GEMINI_MODEL') ?? 'gemini-2.5-flash',
     emailFrom: envStr('EMAIL_FROM', 'InstantMockAPI <no-reply@instantmockapi.dev>'),
@@ -340,10 +349,12 @@ export function productionConfigProblems(config: EnvConfig): string[] {
     );
   }
 
-  if (config.resendApiKey === '') {
+  if (config.resendApiKey === '' && (config.brevoApiKey ?? '') === '') {
     // Without a mail transport signup and password reset are both dead ends —
     // the link is only written to the log, where nobody will read it.
-    problems.push('RESEND_API_KEY is empty, so no verification or reset email can be delivered');
+    problems.push(
+      'Set BREVO_API_KEY or RESEND_API_KEY; with neither, no verification or reset email can be delivered',
+    );
   }
 
   if (config.googleClientId === '' || config.googleClientSecret === '') {
