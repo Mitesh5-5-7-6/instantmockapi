@@ -833,3 +833,16 @@ export interface AiProposalSummary {
   projectId: string | null;
   createdAt: string;
 }
+
+/* ── AI-written guide (GET /v1/projects/:id/guide) ── */
+
+export interface ProjectGuideView {
+  /** `unavailable`: no guide for this view (a draft, or AI not configured). */
+  status: 'generating' | 'ready' | 'failed' | 'unavailable';
+  markdown: string | null;
+  error: { code: string; message: string } | null;
+  /** The definition version the guide was written for. */
+  version?: number;
+  updatedAt?: string;
+  reason?: string;
+}

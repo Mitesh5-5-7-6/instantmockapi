@@ -21,6 +21,7 @@ import {
   type LLMProvider,
 } from '@instantmockapi/ai';
 import type { AiProposalJobPayload } from '@instantmockapi/queue';
+import { processAiGuideJob, settleExhaustedAiGuide } from './ai-guide-processor.js';
 
 export interface AiProposalDeps {
   config?: EnvConfig;
@@ -66,6 +67,10 @@ export async function processAiProposalJob(
   // kind (queued before SP2) is a propose job.
   if (payload.kind === 'translate') {
     await processTranslateJob(payload, deps);
+    return;
+  }
+  if (payload.kind === 'guide') {
+    await processAiGuideJob(payload, deps);
     return;
   }
   // `+images`: excluded by default so status polls stay light; only this run needs them.
@@ -319,6 +324,10 @@ export async function settleExhaustedAiProposal(
     error: error.message,
   });
   if (!mongoose.isValidObjectId(payload.proposalId)) {
+    return;
+  }
+  if (payload.kind === 'guide') {
+    await settleExhaustedAiGuide(payload);
     return;
   }
   if (payload.kind === 'translate') {

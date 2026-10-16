@@ -62,6 +62,7 @@ import {
   type DocsView,
 } from '../../../../lib/docs-version';
 import { NotesView } from '../../../../components/project/notes-view';
+import { GuideCard } from '../../../../components/project/guide-card';
 import { normalizeError } from '../../../../lib/errors';
 import { notifyFailure } from '../../../../lib/toast';
 
@@ -320,6 +321,9 @@ export default function DocsPage() {
       ) : tab === 'ai' ? (
         <TabPanel id="ai">
           <div className="flex flex-col gap-4">
+            <GuideCard projectId={id} view={view} />
+
+            <h2 className="m-0">Exact context</h2>
             <Note>
               Paste this into an assistant before asking it to write client code. It states every
               endpoint&rsquo;s access requirement, every field&rsquo;s type and validation, and the

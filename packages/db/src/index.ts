@@ -29,6 +29,11 @@ export {
  */
 export { ProjectDraft, type IProjectDraft } from './models/projectDraft.js';
 export {
+  ProjectGuide,
+  type IProjectGuide,
+  type ProjectGuideStatus,
+} from './models/projectGuide.js';
+export {
   Artifact,
   type IArtifact,
   type ArtifactType,

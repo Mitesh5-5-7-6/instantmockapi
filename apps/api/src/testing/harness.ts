@@ -12,6 +12,7 @@ import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 import { createMemoryStorage, type MemoryStorage } from '@instantmockapi/storage';
 import {
   AiProposal,
+  ProjectGuide,
   ApiLog,
   Artifact,
   AuthToken,
@@ -78,6 +79,7 @@ export async function clearDb(): Promise<void> {
       MockAuthSecret,
       ApiLog,
       AiProposal,
+      ProjectGuide,
     ].map((model) => model.deleteMany({})),
   );
 }
