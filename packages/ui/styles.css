@@ -278,6 +278,16 @@ h3 {
   height: 100dvh;
 }
 
+/* The emblem: dark artwork on black, so a hairline keeps its edge visible. */
+.ui-brand-mark {
+  display: block;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: #000;
+  object-fit: cover;
+}
+
 .ui-sidebar__brand {
   font-weight: 600;
   font-size: var(--text-lg);
@@ -912,7 +922,7 @@ h3 {
      collapsed rail then showed a full-width plan card and the user's email.
      A class the component asks for cannot fail that way silently. */
   .ui-nav__label,
-  .ui-sidebar__brand,
+  .ui-sidebar .ui-sidebar__brand,
   .ui-sidebar__collapsible {
     display: none;
   }
@@ -952,7 +962,7 @@ h3 {
   }
 
   .ui-nav__label,
-  .ui-sidebar__brand,
+  .ui-sidebar .ui-sidebar__brand,
   .ui-sidebar__collapsible {
     display: revert;
   }

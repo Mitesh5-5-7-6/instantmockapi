@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { BrandMark } from '../brand-mark';
 import { Button, Card, Icon, MethodBadge } from '@instantmockapi/ui';
 import {
   demoEndpoints,
@@ -266,9 +267,7 @@ export function EcommerceDemo() {
     <main className="demo-page">
       <nav className="demo-nav" aria-label="Demo navigation">
         <a className="demo-brand" href="/">
-          <span className="demo-brand-mark">
-            <Icon name="code" size={18} />
-          </span>
+          <BrandMark />
           Instant<span>Mock</span>API
         </a>
         <div className="demo-nav-links">

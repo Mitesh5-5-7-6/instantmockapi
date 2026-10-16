@@ -13,6 +13,7 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { Icon, IconTile } from '@instantmockapi/ui';
+import { BrandMark } from '../brand-mark';
 
 export function AuthCard({
   title,
@@ -31,7 +32,7 @@ export function AuthCard({
         {/* The same lockup as the sidebar, so signing in does not feel like a
             different product from the app behind it. */}
         <Link href="/login" className="auth-card__brand" aria-label="InstantMockAPI">
-          <IconTile icon="code" tone="accent" size="sm" />
+          <BrandMark size={36} />
           <span className="ui-sidebar__brand">
             Instant<span>Mock</span>API
           </span>
