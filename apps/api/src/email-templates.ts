@@ -54,32 +54,85 @@ function greeting(name: string | null | undefined): string {
 }
 
 /**
- * The shared wrapper.
- *
- * Inline styles only, and a table-free single column: email clients strip
- * `<style>` blocks, ignore most selectors, and Outlook renders through Word.
- * Anything cleverer than this degrades unpredictably.
+ * The app's palette, for inline styles. Mirrors the tokens in
+ * `packages/ui/styles.css` (black-first, one green accent) so an email looks
+ * like the product it came from.
  */
-function layout(heading: string, bodyHtml: string): string {
+const COLOR = {
+  page: '#000000',
+  card: '#0a0a0a',
+  border: '#282828',
+  text: '#fafafa',
+  body: '#d4d4d8',
+  muted: '#a1a1a1',
+  subtle: '#737373',
+  accent: '#3de07f',
+  button: '#086830',
+  buttonBorder: '#0a7b39',
+} as const;
+
+const FONT =
+  "'Geist','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+
+/** Paragraph styles, shared so every message sets text the same way. */
+const P = `margin:0;color:${COLOR.body}`;
+const NOTE = `margin:0 0 16px;font-size:13px;color:${COLOR.muted}`;
+
+/** The web app's origin, read off a link the message already carries. */
+function originOf(link: string): string {
+  try {
+    return new URL(link).origin;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The shared wrapper: black page, near-black card, logo and wordmark.
+ *
+ * Inline styles only: email clients strip `<style>` blocks and ignore most
+ * selectors. The page colour sits on a wrapping table with `bgcolor` too,
+ * because Gmail drops a background set only in CSS on the outer element.
+ *
+ * The logo is loaded from the web app (`/brand/logo-256.png`) at the origin
+ * of the message's own link, so it always matches the deployment that sent it.
+ * Clients that block images show the alt text, and the wordmark beside it
+ * still names the product.
+ */
+function layout(heading: string, bodyHtml: string, link: string): string {
+  const logo = `${originOf(link)}/brand/logo-256.png`;
   return [
-    '<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;',
-    'font-size:15px;line-height:1.6;color:#1a1d23;max-width:520px;margin:0 auto;padding:24px">',
-    `<h1 style="font-size:20px;margin:0 0 16px">${escapeHtml(heading)}</h1>`,
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${COLOR.page}" style="background:${COLOR.page};width:100%">`,
+    '<tr><td align="center" style="padding:32px 16px">',
+    `<div style="max-width:520px;margin:0 auto;text-align:left;font-family:${FONT};font-size:15px;line-height:1.6;color:${COLOR.body}">`,
+    // Lockup: emblem + wordmark, as in the app's sidebar.
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px"><tr>',
+    `<td style="padding:0 12px 0 0"><img src="${escapeHtml(logo)}" width="40" height="40" alt="InstantMockAPI" style="display:block;border-radius:8px;border:1px solid ${COLOR.border}"></td>`,
+    `<td style="font-family:${FONT};font-size:18px;font-weight:600;color:${COLOR.text};letter-spacing:-0.01em">`,
+    `Instant<span style="color:${COLOR.accent}">Mock</span>API</td>`,
+    '</tr></table>',
+    // Card.
+    `<div style="background:${COLOR.card};border:1px solid ${COLOR.border};border-radius:12px;padding:32px">`,
+    `<h1 style="font-size:22px;line-height:1.3;font-weight:700;letter-spacing:-0.02em;color:${COLOR.text};margin:0 0 16px">${escapeHtml(heading)}</h1>`,
     bodyHtml,
-    '<hr style="border:none;border-top:1px solid #e4e7ec;margin:28px 0 16px">',
-    '<p style="font-size:13px;color:#667085;margin:0">',
-    'InstantMockAPI — hosted mock APIs from your schema.',
+    '</div>',
+    // Footer.
+    `<p style="font-size:12px;line-height:1.5;color:${COLOR.subtle};margin:20px 0 0;text-align:center">`,
+    'InstantMockAPI — hosted mock APIs from your schema.<br>',
+    'You received this because of an action on your account.',
     '</p>',
     '</div>',
+    '</td></tr></table>',
   ].join('');
 }
 
-/** The one call to action, styled as a button but degrading to a plain link. */
+/** The one call to action, styled as the app's primary button but degrading to a plain link. */
 function button(href: string, label: string): string {
   return [
-    `<p style="margin:24px 0"><a href="${escapeHtml(href)}" `,
-    'style="display:inline-block;background:#5b8cff;color:#ffffff;text-decoration:none;',
-    `padding:11px 20px;border-radius:8px;font-weight:600">${escapeHtml(label)}</a></p>`,
+    `<p style="margin:28px 0"><a href="${escapeHtml(href)}" `,
+    `style="display:inline-block;background:${COLOR.button};border:1px solid ${COLOR.buttonBorder};`,
+    `color:${COLOR.text};text-decoration:none;padding:12px 22px;border-radius:8px;`,
+    `font-weight:600;font-size:15px">${escapeHtml(label)}</a></p>`,
   ].join('');
 }
 
@@ -92,9 +145,9 @@ function button(href: string, label: string): string {
  */
 function fallbackLink(url: string): string {
   return [
-    '<p style="font-size:13px;color:#667085;margin:0">',
+    `<p style="font-size:13px;color:${COLOR.muted};margin:0;padding-top:16px;border-top:1px solid ${COLOR.border}">`,
     'If the button does not work, paste this into your browser:<br>',
-    `<span style="color:#5b8cff;word-break:break-all">${escapeHtml(url)}</span>`,
+    `<span style="color:${COLOR.accent};word-break:break-all">${escapeHtml(url)}</span>`,
     '</p>',
   ].join('');
 }
@@ -121,13 +174,14 @@ export function verifyEmailMessage(input: LinkEmailInput): EmailMessage {
     html: layout(
       'Confirm your email address',
       [
-        `<p style="margin:0 0 8px">${escapeHtml(greeting(input.name))}</p>`,
-        '<p style="margin:0">Confirm this address to finish setting up your ',
+        `<p style="margin:0 0 8px;color:${COLOR.text}">${escapeHtml(greeting(input.name))}</p>`,
+        `<p style="${P}">` + 'Confirm this address to finish setting up your ',
         'InstantMockAPI account.</p>',
         button(input.url, 'Confirm email address'),
-        `<p style="margin:0 0 16px;font-size:13px;color:#667085">This link works once and expires in ${window}.</p>`,
+        `<p style="${NOTE}">This link works once and expires in ${window}.</p>`,
         fallbackLink(input.url),
       ].join(''),
+      input.url,
     ),
     text: [
       greeting(input.name),
@@ -150,14 +204,15 @@ export function resetPasswordMessage(input: LinkEmailInput): EmailMessage {
     html: layout(
       'Reset your password',
       [
-        `<p style="margin:0 0 8px">${escapeHtml(greeting(input.name))}</p>`,
-        '<p style="margin:0">Someone asked to reset the password for this ',
+        `<p style="margin:0 0 8px;color:${COLOR.text}">${escapeHtml(greeting(input.name))}</p>`,
+        `<p style="${P}">` + 'Someone asked to reset the password for this ',
         'account. If that was you, choose a new one:</p>',
         button(input.url, 'Choose a new password'),
-        `<p style="margin:0 0 16px;font-size:13px;color:#667085">This link works once and expires in ${window}. `,
+        `<p style="${NOTE}">This link works once and expires in ${window}. `,
         'Your current password keeps working until you use it.</p>',
         fallbackLink(input.url),
       ].join(''),
+      input.url,
     ),
     text: [
       greeting(input.name),
@@ -187,14 +242,15 @@ export function setPasswordMessage(input: LinkEmailInput): EmailMessage {
     html: layout(
       'Set a password for your account',
       [
-        `<p style="margin:0 0 8px">${escapeHtml(greeting(input.name))}</p>`,
-        '<p style="margin:0">This account does not have a password yet — it was ',
+        `<p style="margin:0 0 8px;color:${COLOR.text}">${escapeHtml(greeting(input.name))}</p>`,
+        `<p style="${P}">` + 'This account does not have a password yet — it was ',
         'created before passwords existed, or through Google. Set one to sign in ',
         'with your email address.</p>',
         button(input.url, 'Set a password'),
-        `<p style="margin:0 0 16px;font-size:13px;color:#667085">This link works once and expires in ${window}.</p>`,
+        `<p style="${NOTE}">This link works once and expires in ${window}.</p>`,
         fallbackLink(input.url),
       ].join(''),
+      input.url,
     ),
     text: [
       greeting(input.name),
@@ -230,15 +286,16 @@ export function accountExistsMessage(input: {
     html: layout(
       'You already have an account',
       [
-        `<p style="margin:0 0 8px">${escapeHtml(greeting(input.name))}</p>`,
-        '<p style="margin:0">Someone just tried to sign up with this address, ',
+        `<p style="margin:0 0 8px;color:${COLOR.text}">${escapeHtml(greeting(input.name))}</p>`,
+        `<p style="${P}">` + 'Someone just tried to sign up with this address, ',
         'and it already has an account. If that was you, sign in instead:</p>',
         button(input.signInUrl, 'Sign in'),
-        '<p style="margin:0 0 16px;font-size:13px;color:#667085">',
-        `Forgotten your password? <a href="${escapeHtml(input.resetUrl)}" style="color:#5b8cff">Reset it here</a>. `,
+        `<p style="${NOTE}">`,
+        `Forgotten your password? <a href="${escapeHtml(input.resetUrl)}" style="color:${COLOR.accent}">Reset it here</a>. `,
         'No account was created and nothing has changed.</p>',
         fallbackLink(input.signInUrl),
       ].join(''),
+      input.signInUrl,
     ),
     text: [
       greeting(input.name),

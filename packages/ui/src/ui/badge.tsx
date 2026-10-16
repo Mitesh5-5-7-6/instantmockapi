@@ -162,7 +162,7 @@ export function MethodBadge({ method, className }: { method: ApiMethod; classNam
         // A floor on the width, not a fixed one: the paths beside them line up
         // down the list instead of stepping in and out with the method's length,
         // and DELETE still fits without being clipped.
-        'inline-flex min-w-[58px] shrink-0 items-center justify-center',
+        'inline-flex min-w-[68px] shrink-0 items-center justify-center',
         'rounded-sm border px-2 py-0.5',
         'font-mono text-xs font-semibold tracking-[0.04em]',
         METHOD_STYLES[method],

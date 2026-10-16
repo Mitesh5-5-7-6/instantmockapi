@@ -17,6 +17,26 @@ import { normalizeError } from '../../lib/errors';
 import { notifyFailure } from '../../lib/toast';
 import { NotesView } from './notes-view';
 
+/** The shape of a guide, shimmering: a heading and a few lines per section. */
+function GuideSkeleton({ label }: { label: string }) {
+  const line = (width: string, height = 12) => (
+    <div className="ui-skeleton" style={{ minHeight: 0, height, width, borderRadius: 4 }} />
+  );
+  return (
+    <div className="ui-stack" role="status" aria-live="polite">
+      <span className="ui-meta">{label}</span>
+      {[0, 1, 2].map((section) => (
+        <div key={section} className="ui-stack" style={{ gap: 'var(--space-2)' }}>
+          {line('32%', 18)}
+          {line('96%')}
+          {line('88%')}
+          {line(section === 1 ? '64%' : '74%')}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function GuideCard({ projectId, view }: { projectId: string; view: string }) {
   const guide = useProjectGuide(projectId, true, view);
   const regenerate = useRegenerateGuide(projectId, view);
@@ -28,7 +48,11 @@ export function GuideCard({ projectId, view }: { projectId: string; view: string
     void regenerate.mutateAsync().catch((cause: unknown) => notifyFailure(normalizeError(cause)));
 
   if (guide.isLoading) {
-    return <div className="h-32 animate-pulse rounded-md bg-muted" />;
+    return (
+      <Card>
+        <GuideSkeleton label="Loading the guide…" />
+      </Card>
+    );
   }
   if (guide.isError) {
     return (
@@ -75,9 +99,7 @@ export function GuideCard({ projectId, view }: { projectId: string; view: string
       </div>
 
       {data.status === 'generating' ? (
-        <p className="ui-meta" role="status">
-          Writing the guide… this takes about 10–20 seconds and happens once per version.
-        </p>
+        <GuideSkeleton label="AI is writing the guide… about 10–20 seconds, once per version." />
       ) : data.status === 'failed' ? (
         <div className="ui-stack">
           <FormError title={data.error?.message ?? 'The guide could not be written.'} />

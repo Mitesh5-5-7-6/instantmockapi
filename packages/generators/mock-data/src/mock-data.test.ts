@@ -166,7 +166,10 @@ describe('Mock Data Generator — Golden-File Tests', () => {
         expect(typeof record.metadata).toBe('object');
         expect(record.metadata).not.toBeNull();
         expect(typeof record.metadata.seoTitle).toBe('string');
-        expect(Array.isArray(record.metadata.keywords)).toBe(true);
+        // Optional, so a seeded record may hold null; when present it is a list.
+        if (record.metadata.keywords !== null) {
+          expect(Array.isArray(record.metadata.keywords)).toBe(true);
+        }
       });
 
       it('should generate array for tags', () => {
@@ -252,8 +255,8 @@ describe('Mock Data Generator — relational seeding (doc 19 §Phase A)', () => 
     const outputs = generateMockData(goldenFixtureIPS, 42);
     expect(Object.keys(outputs)).toEqual(['blogpost.mock.json']);
     const records = JSON.parse(outputs['blogpost.mock.json']!) as Record<string, unknown>[];
-    expect(records[0]!.slug).toBe('cogo-alter-stella');
-    expect(records[0]!.viewCount).toBe(4401);
+    expect(records[0]!.slug).toBe('color-eius-incidunt');
+    expect(records[0]!.viewCount).toBe(1848);
   });
 
   const materialized = materializeRelations(goldenRelationsIPS);
@@ -551,15 +554,47 @@ describe('semantic field names', () => {
     expect(row.address).not.toBe(row.addressLine1);
   });
 
-  it('leaves genuinely free-text names as lorem', () => {
-    // The table's scope, stated as a test: inventing prose for a `description`
-    // would move the surprise rather than remove it.
+  it('fills title, description and note with text', () => {
     const row = records(['title', 'description', 'note'])[0]!;
     for (const key of ['title', 'description', 'note']) {
       expect(typeof row[key]).toBe('string');
       expect(String(row[key]).length).toBeGreaterThan(0);
     }
     expect(String(row.description)).not.toMatch(EMAIL);
+  });
+
+  it('gives identifier-like names a code built from the name, not prose', () => {
+    // The reported case: `employeeIdNumber` came out as "Accusamus tandem vov".
+    for (const row of records(['employeeIdNumber', 'orderNumber', 'ticketCode', 'studentId'])) {
+      expect(String(row.employeeIdNumber)).toMatch(/^EMP-\d{5}$/);
+      expect(String(row.orderNumber)).toMatch(/^ORD-\d{5}$/);
+      expect(String(row.ticketCode)).toMatch(/^TIC-\d{5}$/);
+      expect(String(row.studentId)).toMatch(/^STU-\d{5}$/);
+    }
+  });
+
+  it('writes readable English, in whole words, for free-text names', () => {
+    // The reported case: `descriptionOfIncident` was "Deprimo adnuo natus " —
+    // Latin, and cut mid-word at 20 characters.
+    const latin = /\b(deprimo|adnuo|accusamus|tandem|vicissitudo|subiungo|abbas)\b/i;
+    for (const row of records(['descriptionOfIncident', 'comment', 'reason', 'notes'])) {
+      for (const key of ['descriptionOfIncident', 'comment', 'reason', 'notes']) {
+        const text = String(row[key]);
+        expect(text).toMatch(/^[A-Z][a-z]+( [a-z]+)+\.$/);
+        expect(text).not.toMatch(latin);
+        expect(text.split(' ').length).toBeGreaterThanOrEqual(6);
+      }
+    }
+  });
+
+  it('never cuts an unrecognised string mid-word', () => {
+    for (const row of records(['flavour', 'nickname2'])) {
+      for (const key of ['flavour', 'nickname2']) {
+        const text = String(row[key]);
+        expect(text).not.toMatch(/\s$/);
+        expect(text.length).toBeLessThanOrEqual(24);
+      }
+    }
   });
 
   it('gives an avatar-named string field a picture URL, not a random domain', () => {

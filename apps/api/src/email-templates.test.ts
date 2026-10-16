@@ -122,8 +122,26 @@ describe('the link emails', () => {
       url,
       expiresInSeconds: HOUR,
     });
-    expect(message.html).not.toContain('<img');
+    // The brand logo is an <img>; the injected one must not become another.
+    expect(message.html).not.toContain('<img src=x');
     expect(message.html).toContain('&lt;img');
+  });
+
+  it('carries the brand: the logo from the app it links to, and the dark theme', () => {
+    const message = verifyEmailMessage({ to: 'a@example.com', url, expiresInSeconds: HOUR });
+    const origin = new URL(url).origin;
+    expect(message.html).toContain(`src="${origin}/brand/logo-256.png"`);
+    expect(message.html).toContain('alt="InstantMockAPI"');
+    // The app's colours: black page, near-black card, green action.
+    expect(message.html).toContain('#000000');
+    expect(message.html).toContain('#0a0a0a');
+    expect(message.html).toContain('#086830');
+    // The old light theme's blue is gone everywhere.
+    for (const build of [verifyEmailMessage, resetPasswordMessage, setPasswordMessage]) {
+      expect(build({ to: 'a@example.com', url, expiresInSeconds: HOUR }).html).not.toContain(
+        '#5b8cff',
+      );
+    }
   });
 
   it('states the expiry window it was given', () => {
@@ -174,4 +192,17 @@ describe('accountExistsMessage', () => {
     expect(message.text).toContain('No account was created');
     expect(message.html).toContain('No account was created');
   });
+});
+
+it('never sends an unfilled ${…} placeholder in any message', () => {
+  const link = 'https://app.example.com/x?token=t';
+  const messages = [
+    verifyEmailMessage({ to: 'a@example.com', url: link, expiresInSeconds: 3600 }),
+    resetPasswordMessage({ to: 'a@example.com', url: link, expiresInSeconds: 3600 }),
+    setPasswordMessage({ to: 'a@example.com', url: link, expiresInSeconds: 3600 }),
+    accountExistsMessage({ to: 'a@example.com', signInUrl: link, resetUrl: link }),
+  ];
+  for (const message of messages) {
+    expect(message.html).not.toContain('${');
+  }
 });
