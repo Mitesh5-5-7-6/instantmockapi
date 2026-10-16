@@ -1,6 +1,6 @@
 import { Schema, model, Document, Types } from 'mongoose';
 import type { ErrorCode, ErrorDetail } from '@instantmockapi/shared';
-import type { AiProposalOutput, ProposalKind } from '@instantmockapi/ai';
+import type { AiProposalOutput, PromptImage, ProposalKind } from '@instantmockapi/ai';
 import type { AuthConfig, Entity } from '@instantmockapi/ips';
 
 /**
@@ -133,6 +133,15 @@ export interface IAiProposal extends Omit<Document, 'model'> {
    * proposal *created*.
    */
   editsProjectId: Types.ObjectId | null;
+  /**
+   * Photos or screenshots sent with the prompt, kept so a retry does not need
+   * them again and deleted with the proposal by its TTL. **Not selected by
+   * default** (`select: false`): a status poll must not load megabytes. Only the
+   * worker reads them, with `.select('+images')`.
+   */
+  images?: PromptImage[];
+  /** How many images came with the prompt; readable without loading them. */
+  imageCount: number;
   committedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -169,6 +178,12 @@ const aiProposalSchema = new Schema<IAiProposal>(
     translations: { type: Number, default: 0 },
     projectId: { type: Schema.Types.ObjectId, ref: 'Project', default: null },
     editsProjectId: { type: Schema.Types.ObjectId, ref: 'Project', default: null },
+    images: {
+      type: [{ _id: false, mimeType: String, data: String }],
+      default: undefined,
+      select: false,
+    },
+    imageCount: { type: Number, default: 0 },
     committedAt: { type: Date, default: null },
   },
   { timestamps: true, minimize: false },

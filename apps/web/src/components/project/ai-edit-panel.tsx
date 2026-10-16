@@ -29,6 +29,8 @@ import {
 } from '../../lib/hooks';
 import { describeChange } from '../ai-review/changes-panel';
 import { ErDiagram } from '../er-diagram';
+import { ImageAttach } from '../image-attach';
+import type { PromptImageUpload } from '../../lib/prompt-images';
 
 const KIND_LABEL = { added: 'New', changed: 'Changed', removed: 'Removed by the AI' } as const;
 
@@ -51,6 +53,7 @@ export function AiEditPanel({
   onApply: (next: BuilderEntity[]) => void;
 }) {
   const [prompt, setPrompt] = useState('');
+  const [images, setImages] = useState<PromptImageUpload[]>([]);
   const [proposalId, setProposalId] = useState<string | null>(null);
   const [choices, setChoices] = useState<Record<string, MergeChoice> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -80,12 +83,17 @@ export function AiEditPanel({
 
   const generate = async () => {
     const text = prompt.trim();
-    if (!text) return;
+    if (!text && images.length === 0) return;
     setError(null);
     setApplied(false);
     if (!(await onBeforeStart())) return;
     try {
-      const view = await start.mutateAsync({ prompt: text });
+      const view = await start.mutateAsync({
+        ...(text ? { prompt: text } : {}),
+        ...(images.length > 0
+          ? { images: images.map(({ mimeType, data }) => ({ mimeType, data })) }
+          : {}),
+      });
       setChoices(null);
       setProposalId(view.id);
     } catch (cause) {
@@ -105,6 +113,7 @@ export function AiEditPanel({
     if (proposalId) void cancel.mutateAsync(proposalId).catch(() => undefined);
     reset();
     setPrompt('');
+    setImages([]);
     setApplied(true);
   };
 
@@ -130,11 +139,15 @@ export function AiEditPanel({
             }
             onChange={(event) => setPrompt(event.target.value)}
           />
+          <ImageAttach images={images} onChange={setImages} disabled={start.isPending} />
           <div className="ui-row ui-row--between">
             <span className="ui-meta">
               Unsaved edits are saved first. You review every change before it is applied.
             </span>
-            <Button disabled={!prompt.trim() || start.isPending} onClick={() => void generate()}>
+            <Button
+              disabled={(!prompt.trim() && images.length === 0) || start.isPending}
+              onClick={() => void generate()}
+            >
               {start.isPending ? 'Starting…' : 'Generate changes'}
             </Button>
           </div>
@@ -147,7 +160,8 @@ export function AiEditPanel({
       ) : status === 'generating' ? (
         <div className="ui-row ui-row--between">
           <span className="ui-meta">
-            {stageLabel(proposal?.stage ?? 'queued')} · “{prompt.trim()}”
+            {stageLabel(proposal?.stage ?? 'queued')} ·{' '}
+            {prompt.trim() ? `“${prompt.trim()}”` : `From ${images.length} photo(s)`}
           </span>
           <Button variant="secondary" onClick={stop}>
             Cancel
@@ -172,7 +186,9 @@ export function AiEditPanel({
         </div>
       ) : status === 'ready' ? (
         <div className="ui-stack">
-          <span className="ui-meta">“{prompt.trim()}”</span>
+          <span className="ui-meta">
+            {prompt.trim() ? `“${prompt.trim()}”` : `From ${images.length} photo(s)`}
+          </span>
           {visible.length === 0 ? (
             <Note>
               The AI suggested no changes to your model. Try wording the request differently.

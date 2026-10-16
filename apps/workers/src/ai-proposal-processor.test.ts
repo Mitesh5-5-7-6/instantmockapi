@@ -452,3 +452,11 @@ describe('editing an existing project', () => {
     expect(after!.error!.message).toMatch(/editor/i);
   });
 });
+
+it('sends the stored images with the request, on every run', async () => {
+  const images = [{ mimeType: 'image/png', data: 'iVBORw0KGgo=' }];
+  const doc = await generating({ images, imageCount: 1 });
+  const provider = createScriptedProvider(fakeOutputJson(['Alpha']));
+  await run(doc._id, provider);
+  expect(provider.calls[0]!.turns[0]!.images).toEqual(images);
+});

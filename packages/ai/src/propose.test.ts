@@ -160,3 +160,22 @@ it('strips authentication a model puts on entities', async () => {
     expect(entity).not.toHaveProperty('authentication');
   }
 });
+
+it('attaches images to the first turn, so the repair turn still has them', async () => {
+  const images = [{ mimeType: 'image/png' as const, data: 'AAAA' }];
+  const provider = createScriptedProvider('not json', fakeOutputJson(['Thing']));
+  const outcome = await proposeBlueprint({ ...input, images }, deps(provider));
+  expect(outcome.ok).toBe(true);
+  expect(provider.calls[0]!.turns[0]!.images).toEqual(images);
+  expect(provider.calls[0]!.turns[0]!.text).toContain('<attached_images>1</attached_images>');
+  // The repair resends the whole conversation, first turn included.
+  expect(provider.calls[1]!.turns[0]!.images).toEqual(images);
+  expect(provider.calls[1]!.turns.slice(1).every((turn) => turn.images === undefined)).toBe(true);
+});
+
+it('sends no image marker or images when none are attached', async () => {
+  const provider = createScriptedProvider(fakeOutputJson(['Thing']));
+  await proposeBlueprint(input, deps(provider));
+  expect(provider.calls[0]!.turns[0]!.images).toBeUndefined();
+  expect(provider.calls[0]!.turns[0]!.text).not.toContain('attached_images');
+});

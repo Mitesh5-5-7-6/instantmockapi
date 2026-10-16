@@ -478,7 +478,8 @@ export function useCreateAiProposal() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: {
-      prompt: string;
+      prompt?: string;
+      images?: { mimeType: string; data: string }[];
       name?: string;
       kind?: 'project' | 'single';
       description?: string;
@@ -498,7 +499,7 @@ export function useCreateAiProposal() {
 export function useStartAiEdit(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { prompt: string }) =>
+    mutationFn: (input: { prompt?: string; images?: { mimeType: string; data: string }[] }) =>
       apiFetch<AiProposalView>(`/v1/projects/${projectId}/draft/ai`, {
         method: 'POST',
         body: input,

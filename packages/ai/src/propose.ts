@@ -42,7 +42,15 @@ export async function proposeBlueprint(
   input: ProposeInput,
   deps: ProposeDeps,
 ): Promise<ProposeOutcome> {
-  const turns: LLMTurn[] = [{ role: 'user', text: buildUserTurn(input, deps.examples ?? []) }];
+  // Images ride on the first turn only. A repair resends the whole conversation,
+  // so the model still sees them without paying for them twice per call.
+  const turns: LLMTurn[] = [
+    {
+      role: 'user',
+      text: buildUserTurn(input, deps.examples ?? []),
+      ...(input.images && input.images.length > 0 ? { images: input.images } : {}),
+    },
+  ];
   let lastText: string | null = null;
   let lastDetails: ErrorDetail[] = [];
 

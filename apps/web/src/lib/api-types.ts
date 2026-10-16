@@ -814,6 +814,8 @@ export interface AiProposalView {
   projectId: string | null;
   /** Set when this proposal edits an existing project rather than creating one. */
   editsProjectId: string | null;
+  /** Photos sent with the prompt. Only the count comes back; the data stays server-side. */
+  imageCount: number;
   draft: AiDraftView | null;
   translation: { status: 'pending' | 'failed'; language: string; message?: string } | null;
   parentId: string | null;

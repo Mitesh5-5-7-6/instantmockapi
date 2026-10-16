@@ -31,9 +31,12 @@ import {
   conflict,
   enqueueProposalOrFail,
   expireIfStuck,
+  IMAGES_SCHEMA,
+  IMAGE_BODY_LIMIT,
   idParams,
   loadOwnedNewProjectProposal,
   loadOwnedProposal,
+  readPromptInput,
   type ProposalKindInput,
 } from '../ai-proposal-access.js';
 
@@ -42,7 +45,8 @@ export interface AiProposalRouteOptions {
 }
 
 interface CreateBody {
-  prompt: string;
+  prompt?: string;
+  images?: { mimeType: string; data: string }[];
   name?: string;
   kind?: ProposalKindInput;
   description?: string;
@@ -66,13 +70,14 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
     '/ai/proposals',
     {
       config: { rateLimit: AI_PROPOSAL_LIMIT },
+      bodyLimit: IMAGE_BODY_LIMIT,
       schema: {
         body: {
           type: 'object',
-          required: ['prompt'],
           additionalProperties: false,
           properties: {
-            prompt: { type: 'string', minLength: 1, maxLength: 1000 },
+            prompt: { type: 'string', maxLength: 1000 },
+            images: IMAGES_SCHEMA,
             name: { type: 'string', minLength: 1, maxLength: 120 },
             kind: { type: 'string', enum: [...KINDS] },
             description: { type: 'string', maxLength: 500 },
@@ -83,14 +88,10 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
     },
     async (request, reply) => {
       const body = request.body as CreateBody;
-      const prompt = body.prompt.trim();
-      if (!prompt) {
-        throw new AppError({
-          code: 'VALIDATION_ERROR',
-          message: 'Describe the API you want to build.',
-          details: [{ path: 'prompt', issue: 'must not be blank' }],
-        });
-      }
+      const { prompt, images } = readPromptInput(body, {
+        blank: 'Describe the API you want to build, or attach a photo of it.',
+        whenImageOnly: 'Design an API from the attached image.',
+      });
       if (!config.geminiApiKey) {
         throw new AppError({
           code: 'AI_NOT_CONFIGURED',
@@ -103,6 +104,7 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
       const doc = await AiProposal.create({
         ownerId: request.authUser?.sub,
         prompt,
+        ...(images.length > 0 ? { images, imageCount: images.length } : {}),
         hints: {
           ...(body.name?.trim() ? { name: body.name.trim() } : {}),
           ...(body.kind ? { kind: body.kind } : {}),

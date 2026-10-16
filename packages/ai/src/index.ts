@@ -42,6 +42,15 @@ export {
   type ProposeOutcome,
 } from './propose.js';
 export { editableBlueprint } from './edit.js';
+export {
+  MAX_IMAGES,
+  MAX_IMAGE_BYTES,
+  PROMPT_IMAGE_TYPES,
+  checkPromptImages,
+  type ImageCheck,
+  type PromptImage,
+  type PromptImageType,
+} from './images.js';
 export { createScriptedProvider, fakeOutputJson } from './testing.js';
 export {
   TRANSLATE_PROMPT,
