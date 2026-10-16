@@ -812,6 +812,8 @@ export interface AiProposalView {
   geminiCalls: number;
   durationMs: number | null;
   projectId: string | null;
+  /** Set when this proposal edits an existing project rather than creating one. */
+  editsProjectId: string | null;
   draft: AiDraftView | null;
   translation: { status: 'pending' | 'failed'; language: string; message?: string } | null;
   parentId: string | null;

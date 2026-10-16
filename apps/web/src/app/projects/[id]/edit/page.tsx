@@ -40,6 +40,7 @@ import {
 } from '@instantmockapi/ui';
 import { EntityCard } from '../../../../components/builder/entity-card';
 import { ReviewChanges } from '../../../../components/project/review-changes';
+import { AiEditPanel } from '../../../../components/project/ai-edit-panel';
 import { newEntity, type BuilderEntity } from '../../../../lib/builder';
 import { validateRelations } from '../../../../lib/relations';
 import { normalizeError } from '../../../../lib/errors';
@@ -312,6 +313,16 @@ export default function EditProjectPage() {
           </Button>
         </Note>
       )}
+
+      <AiEditPanel
+        projectId={id}
+        entities={entities}
+        relations={showRelations}
+        noun={noun}
+        // The worker revises the stored draft, so it must hold what is on screen.
+        onBeforeStart={async () => !dirty || (await save())}
+        onApply={setEntities}
+      />
 
       {/*
         The identity field and foreign keys are absent from these cards on

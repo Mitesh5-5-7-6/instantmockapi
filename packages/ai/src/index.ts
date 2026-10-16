@@ -41,6 +41,7 @@ export {
   type ProposeDeps,
   type ProposeOutcome,
 } from './propose.js';
+export { editableBlueprint } from './edit.js';
 export { createScriptedProvider, fakeOutputJson } from './testing.js';
 export {
   TRANSLATE_PROMPT,

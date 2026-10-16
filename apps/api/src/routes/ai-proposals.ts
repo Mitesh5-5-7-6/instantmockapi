@@ -16,8 +16,7 @@ import {
   logger,
 } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
-import { AiProposal, Project, type IAiProposal } from '@instantmockapi/db';
-import { enqueueAiProposalJob } from '@instantmockapi/queue';
+import { AiProposal, Project } from '@instantmockapi/db';
 import { PROMPT_VERSION, toBuilderShape } from '@instantmockapi/ai';
 import { newProjectGenerationConfig } from '@instantmockapi/ips';
 import { parseInputSource } from '../input-parsing.js';
@@ -30,8 +29,10 @@ import {
   KINDS,
   assertProposalBudget,
   conflict,
+  enqueueProposalOrFail,
   expireIfStuck,
   idParams,
+  loadOwnedNewProjectProposal,
   loadOwnedProposal,
   type ProposalKindInput,
 } from '../ai-proposal-access.js';
@@ -60,34 +61,6 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
   { config },
 ) => {
   app.addHook('onRequest', app.authenticate);
-
-  /**
-   * Queue the job, or settle the proposal as failed and answer 503. The prompt
-   * stays in history either way, so the user can retry without retyping. The
-   * cause (e.g. a Redis error) is logged, never sent to the client.
-   */
-  async function enqueueOrFail(doc: IAiProposal): Promise<void> {
-    try {
-      await enqueueAiProposalJob(String(doc._id), doc.runs);
-    } catch (cause) {
-      logger.error('Could not enqueue AI proposal job', {
-        proposalId: String(doc._id),
-        error: getErrorMessage(cause),
-      });
-      const message = 'Could not start generation. Please retry.';
-      await AiProposal.updateOne(
-        { _id: doc._id, status: 'generating' },
-        {
-          $set: {
-            status: 'failed',
-            stage: null,
-            error: { code: 'AI_GENERATION_FAILED', message, details: [] },
-          },
-        },
-      );
-      throw new AppError({ code: 'AI_GENERATION_FAILED', message, statusCode: 503 });
-    }
-  }
 
   app.post(
     '/ai/proposals',
@@ -139,7 +112,7 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
         model: config.geminiModel,
         promptVersion: PROMPT_VERSION,
       });
-      await enqueueOrFail(doc);
+      await enqueueProposalOrFail(doc);
       return reply.status(202).send(toAiProposalView(doc));
     },
   );
@@ -159,7 +132,9 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
       },
     },
     async (request, reply) => {
-      const filter = { ownerId: request.authUser?.sub };
+      // New-project history only: an edit proposal belongs to its project's editor.
+      // `null` also matches proposals stored before the field existed.
+      const filter = { ownerId: request.authUser?.sub, editsProjectId: null };
       const page = parsePagination(
         request.query as { page?: number; limit?: number },
         config.maxPaginationLimit,
@@ -205,7 +180,7 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
       if (!doc) {
         return conflict(reply, owned, 'Only a failed proposal can be retried.');
       }
-      await enqueueOrFail(doc);
+      await enqueueProposalOrFail(doc);
       return reply.status(202).send(toAiProposalView(doc));
     },
   );
@@ -275,7 +250,7 @@ export const aiProposalRoutes: FastifyPluginAsync<AiProposalRouteOptions> = asyn
       const { id } = request.params as { id: string };
       const body = request.body as CommitBody;
       const sub = request.authUser?.sub ?? '';
-      const owned = await loadOwnedProposal(id, sub);
+      const owned = await loadOwnedNewProjectProposal(id, sub);
 
       if (body.slug !== undefined && !isUsableSlug(body.slug)) {
         throw new AppError({

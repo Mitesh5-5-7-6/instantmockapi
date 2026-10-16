@@ -1,11 +1,18 @@
 import { logger } from '@instantmockapi/shared';
 import { loadEnvConfig, type EnvConfig } from '@instantmockapi/config';
 // `mongoose` is not a dependency of apps/workers; use the instance the db package re-exports.
-import { AI_PROPOSAL_RAW_OUTPUT_MAX, AiProposal, mongoose } from '@instantmockapi/db';
+import {
+  AI_PROPOSAL_RAW_OUTPUT_MAX,
+  AiProposal,
+  Project,
+  ProjectDraft,
+  mongoose,
+} from '@instantmockapi/db';
 import { newProjectGenerationConfig } from '@instantmockapi/ips';
 import {
   GeminiProvider,
   PROMPT_VERSION,
+  editableBlueprint,
   proposeBlueprint,
   proseOf,
   translateProse,
@@ -96,21 +103,43 @@ export async function processAiProposalJob(
     return;
   }
 
+  // Editing an existing project: revise its open draft rather than a parent
+  // proposal. The user's text is the instruction, and the project's own
+  // description stands in as the request being revised.
+  let request = { prompt: proposal.prompt, clarification: proposal.clarification ?? null };
+  let blueprint: readonly unknown[] | null = currentBlueprint;
+  if (proposal.editsProjectId) {
+    const edit = await loadEditTarget(proposal.editsProjectId, proposal.ownerId);
+    if (!edit.ok) {
+      await AiProposal.updateOne(pending, {
+        $set: failedUpdate(
+          { code: 'AI_GENERATION_FAILED', message: edit.message, details: [] },
+          null,
+          0,
+          Date.now() - started,
+        ),
+      });
+      return;
+    }
+    request = { prompt: edit.description, clarification: { instruction: proposal.prompt } };
+    blueprint = edit.blueprint;
+  }
+
   const provider =
     deps.provider ?? new GeminiProvider({ apiKey: config.geminiApiKey, model: config.geminiModel });
   let outcome: Awaited<ReturnType<typeof proposeBlueprint>>;
   try {
     outcome = await proposeBlueprint(
       {
-        prompt: proposal.prompt,
+        prompt: request.prompt,
         hints: {
           ...(proposal.hints?.name ? { name: proposal.hints.name } : {}),
           ...(proposal.hints?.description ? { description: proposal.hints.description } : {}),
           ...(proposal.hints?.kind ? { kind: proposal.hints.kind } : {}),
         },
         responseLanguage: proposal.responseLanguage,
-        clarification: proposal.clarification ?? null,
-        currentBlueprint,
+        clarification: request.clarification,
+        currentBlueprint: blueprint,
       },
       {
         provider,
@@ -226,6 +255,36 @@ async function processTranslateJob(
   await AiProposal.updateOne(pending, {
     $set: { translation: { status: 'failed', language, message: outcome.failure.message } },
   });
+}
+
+type EditTarget =
+  | { ok: true; description: string; blueprint: Record<string, unknown>[] }
+  | { ok: false; message: string };
+
+/**
+ * The project an edit proposal revises. Owner-scoped like every API read, so a
+ * forged id never sends another user's schema to the model. Reads the open
+ * draft, because that is what the editor applies the result to.
+ */
+async function loadEditTarget(
+  projectId: mongoose.Types.ObjectId,
+  ownerId: mongoose.Types.ObjectId,
+): Promise<EditTarget> {
+  const project = await Project.findOne({ _id: projectId, ownerId })
+    .select('name description')
+    .lean();
+  if (!project) {
+    return { ok: false, message: 'This project no longer exists.' };
+  }
+  const draft = await ProjectDraft.findOne({ projectId }).select('ips.entities').lean();
+  if (!draft) {
+    return { ok: false, message: 'The draft was closed. Open the editor and try again.' };
+  }
+  return {
+    ok: true,
+    description: project.description?.trim() || project.name,
+    blueprint: editableBlueprint((draft.ips?.entities as unknown[] | undefined) ?? []),
+  };
 }
 
 function failedUpdate(
