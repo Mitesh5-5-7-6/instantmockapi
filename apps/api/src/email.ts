@@ -1,8 +1,10 @@
 /**
  * Email transport (doc 13 §1).
  *
- * Two implementations behind one interface:
+ * Three implementations behind one interface, chosen in this order:
  *
+ * - **Brevo**, when `BREVO_API_KEY` is set: HTTPS, and sends from one verified
+ *   address, so it needs no domain.
  * - **Resend**, a plain HTTPS POST. No SDK and no SMTP connection to hold open,
  *   which matters because this API runs as serverless functions — a socket-based
  *   mailer would have to connect, hand-shake and tear down on every invocation.
@@ -29,7 +31,7 @@ export interface Mailer {
    */
   send(message: EmailMessage): Promise<void>;
   /** Which transport this is, for logging and for tests. */
-  readonly kind: 'resend' | 'log';
+  readonly kind: 'brevo' | 'resend' | 'log';
 }
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
@@ -94,10 +96,68 @@ function createLogMailer(): Mailer {
       // The text part, not the HTML: it is readable in a terminal and it carries
       // the same link. Logging the token is acceptable *here* precisely because
       // this transport cannot run in production.
-      logger.warn('Email not sent (no RESEND_API_KEY) — printing it instead', {
+      logger.warn('Email not sent (no mail API key) — printing it instead', {
         ...redactedSubject(message),
         body: message.text,
       });
+    },
+  };
+}
+
+const BREVO_ENDPOINT = 'https://api.brevo.com/v3/smtp/email';
+
+/** `Name <addr>` or a bare `addr`, as Brevo's `sender` object. */
+function brevoSender(from: string): { name: string; email: string } {
+  const named = /^\s*(.*?)\s*<\s*([^>\s]+)\s*>\s*$/.exec(from);
+  if (named) {
+    return { name: named[1] || 'InstantMockAPI', email: named[2]! };
+  }
+  return { name: 'InstantMockAPI', email: from.trim() };
+}
+
+/**
+ * Brevo, also a plain HTTPS POST.
+ *
+ * Here because free Render services cannot open SMTP ports, so Gmail's SMTP
+ * server is out of reach, and Resend sends only from a verified domain. Brevo
+ * accepts a single verified sender address instead, so a project without a
+ * domain can still email anyone.
+ */
+function createBrevoMailer(config: EnvConfig): Mailer {
+  const sender = brevoSender(config.emailFrom);
+  return {
+    kind: 'brevo',
+    async send(message) {
+      const response = await fetch(BREVO_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'api-key': config.brevoApiKey,
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        body: JSON.stringify({
+          sender,
+          to: [{ email: message.to }],
+          subject: message.subject,
+          htmlContent: message.html,
+          textContent: message.text,
+        }),
+        signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+      });
+
+      if (!response.ok) {
+        // Brevo explains rejections in the body ("sender not verified", "Key
+        // not found"), and the status alone does not say which.
+        const detail = await response.text().catch(() => '');
+        logger.error('Email send failed', {
+          ...redactedSubject(message),
+          status: response.status,
+          detail: detail.slice(0, 500),
+        });
+        throw new Error(`Email send failed with status ${response.status}`);
+      }
+
+      logger.info('Email sent', redactedSubject(message));
     },
   };
 }
@@ -109,11 +169,20 @@ function createLogMailer(): Mailer {
  * which transport is in use appears exactly once — where someone will see it.
  */
 export function createMailer(config: EnvConfig): Mailer {
+  const domain = /@([^>\s]+)>?\s*$/.exec(config.emailFrom)?.[1]?.toLowerCase();
+  if (config.brevoApiKey) {
+    if (domain === PLACEHOLDER_SENDER_DOMAIN || domain === 'resend.dev') {
+      logger.warn(
+        'EMAIL_FROM is not an address Brevo can send from; set it to the sender you verified in Brevo',
+        { domain },
+      );
+    }
+    return createBrevoMailer(config);
+  }
   if (config.resendApiKey === '') {
-    logger.warn('No RESEND_API_KEY configured; emails will be written to the log');
+    logger.warn('No BREVO_API_KEY or RESEND_API_KEY configured; emails will be written to the log');
     return createLogMailer();
   }
-  const domain = /@([^>\s]+)>?\s*$/.exec(config.emailFrom)?.[1]?.toLowerCase();
   if (domain === PLACEHOLDER_SENDER_DOMAIN) {
     // Not fatal: refusing to boot would take the whole API down over mail. But
     // Resend only sends from a domain verified in the account, so every email

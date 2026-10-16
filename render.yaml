@@ -82,6 +82,9 @@ services:
         sync: false
       - key: APP_URL
         sync: false
+      # Brevo is used when set (HTTPS, no domain needed); otherwise Resend.
+      - key: BREVO_API_KEY
+        sync: false
       - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_FROM
