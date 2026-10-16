@@ -37,7 +37,14 @@ describe('passwordProblems', () => {
 
   it('reports every problem at once', () => {
     // So the form shows them together instead of one rule per attempt.
-    expect(passwordProblems('password', 'password@example.com')).toHaveLength(3);
+    expect(passwordProblems('password', 'password@example.com')).toEqual([
+      'This password is too common — pick something less guessable',
+      'Do not use your email address as your password',
+    ]);
+    expect(passwordProblems('pass', 'pass@example.com')).toEqual([
+      'Use at least 8 characters',
+      'Do not use your email address as your password',
+    ]);
   });
 });
 
@@ -116,5 +123,21 @@ describe('strengthFraction', () => {
   it('orders the bands', () => {
     const bands = (['empty', 'weak', 'fair', 'good', 'strong'] as const).map(strengthFraction);
     expect(bands).toEqual([...bands].sort((a, b) => a - b));
+  });
+});
+
+describe('the eight-character minimum', () => {
+  it('accepts eight characters and refuses seven', () => {
+    expect(MIN_PASSWORD_LENGTH).toBe(8);
+    expect(passwordProblems('Tr4vel!x')).toEqual([]);
+    expect(passwordProblems('Tr4vel!')).toEqual(['Use at least 8 characters']);
+  });
+
+  it('refuses the common eight-character passwords that length now allows', () => {
+    for (const common of ['12345678', 'admin123', 'iloveyou']) {
+      expect(passwordProblems(common)).toContain(
+        'This password is too common — pick something less guessable',
+      );
+    }
   });
 });

@@ -12,7 +12,7 @@
  */
 
 /** Matches MIN_PASSWORD_LENGTH in the API. */
-export const MIN_PASSWORD_LENGTH = 10;
+export const MIN_PASSWORD_LENGTH = 8;
 
 /**
  * The same short deny-list the API carries.
@@ -23,6 +23,16 @@ export const MIN_PASSWORD_LENGTH = 10;
 const COMMON_PASSWORDS = new Set([
   'password',
   'password1',
+  // Eight-character favourites, now that eight is the minimum.
+  '12345678',
+  '11111111',
+  'qwerty12',
+  'qwerty123',
+  'abc12345',
+  'admin123',
+  'iloveyou',
+  'sunshine',
+  'welcome1',
   'password123',
   'passw0rd',
   'qwertyuiop',

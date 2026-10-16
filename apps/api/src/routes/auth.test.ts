@@ -171,6 +171,13 @@ describe('POST /v1/auth/signup', () => {
     expect(res.json().error.code).toBe('VALIDATION_ERROR');
   });
 
+  it('accepts a password of exactly eight characters and refuses seven', async () => {
+    const seven = await post('/auth/signup', { email: 'a@example.com', password: 'Tr4vel!' });
+    expect(seven.statusCode).toBe(400);
+    const eight = await post('/auth/signup', { email: 'a@example.com', password: 'Tr4vel!x' });
+    expect(eight.statusCode).toBe(202);
+  });
+
   it(
     'rejects a common password with a reason the form can show',
     async () => {
@@ -992,6 +999,15 @@ describe('passwordProblems', () => {
     expect(passwordProblems('correct-horse-battery', 'ada@example.com')).toEqual([]);
   });
 
+  it('sets the minimum at eight characters', () => {
+    expect(MIN_PASSWORD_LENGTH).toBe(8);
+    expect(passwordProblems('Tr4vel!x')).toEqual([]);
+    expect(passwordProblems('Tr4vel!')).toEqual(['Use at least 8 characters']);
+    expect(passwordProblems('admin123')).toEqual([
+      'This password is too common — pick something less guessable',
+    ]);
+  });
+
   it('requires length rather than symbol classes', () => {
     // NIST 800-63B: mandated composition rules mostly produce `Password1!`.
     expect(passwordProblems('short1!')).toEqual([`Use at least ${MIN_PASSWORD_LENGTH} characters`]);
@@ -1012,9 +1028,14 @@ describe('passwordProblems', () => {
   });
 
   it('reports every problem at once', () => {
-    // So the form shows them together instead of one per submission. 'password'
-    // against that address breaks all three rules: too short, too common, and
-    // equal to the local part.
-    expect(passwordProblems('password', 'password@example.com')).toHaveLength(3);
+    // So the form shows them together instead of one per submission.
+    expect(passwordProblems('password', 'password@example.com')).toEqual([
+      'This password is too common — pick something less guessable',
+      'Do not use your email address as your password',
+    ]);
+    expect(passwordProblems('pass', 'pass@example.com')).toEqual([
+      'Use at least 8 characters',
+      'Do not use your email address as your password',
+    ]);
   });
 });
