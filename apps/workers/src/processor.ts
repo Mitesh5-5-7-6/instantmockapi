@@ -21,7 +21,6 @@ import {
   Job,
   MockStore,
   Project,
-  User,
   Version,
   ensurePublicIdentity,
   hasLiveDeployment,
@@ -522,7 +521,6 @@ async function settle(
     //
     // The invariant this preserves either way: a failed generation can never
     // destroy or temporarily disable the currently live version.
-    const owner = await User.findById(project.ownerId);
 
     /*
      * Compare-and-swap on the pointer, mirroring the publish route.
@@ -545,7 +543,6 @@ async function settle(
       {
         $set: publishFields(project, payload.version, {
           baseUrl: HOSTED_BASE_URL,
-          plan: owner?.plan ?? 'free',
         }),
       },
       { new: true },

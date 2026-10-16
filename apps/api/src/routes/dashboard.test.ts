@@ -283,7 +283,7 @@ describe('GET /v1/dashboard — ownership isolation', () => {
   });
 });
 
-describe('GET /v1/dashboard — projects, endpoints and plan', () => {
+describe('GET /v1/dashboard — projects, endpoints and limits', () => {
   it('counts endpoints with the shared counter, so it matches the Ready screen', async () => {
     // One entity from sampleRaw, all five methods → 6 rows + 1 discovery doc.
     await ownedProjectId();
@@ -292,14 +292,12 @@ describe('GET /v1/dashboard — projects, endpoints and plan', () => {
     expect(body.projects.total).toBe(1);
   });
 
-  it('reports the plan limits that are actually enforced', async () => {
+  it('reports the limits that are actually enforced', async () => {
     const body = await fetchDashboard();
-    expect(body.plan).toMatchObject({
-      tier: 'free',
-      hostedApiLifetimeDays: 2,
-    });
-    expect(body.plan.projects).toMatchObject({ used: 0, limit: 10 });
-    expect(body.plan.concurrentJobs).toMatchObject({ used: 0, limit: 1 });
+    expect(body.limits).toMatchObject({ hostedApiLifetimeDays: 30 });
+    expect(body.limits).not.toHaveProperty('tier');
+    expect(body.limits.projects).toMatchObject({ used: 0, limit: 10 });
+    expect(body.limits.concurrentJobs).toMatchObject({ used: 0, limit: 3 });
   });
 
   it('groups projects by status and counts only live hosted APIs', async () => {

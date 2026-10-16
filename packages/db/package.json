@@ -3,6 +3,7 @@
     "test": "vitest run --passWithNoTests",
     "clean": "rimraf dist",
     "build": "tsc --project tsconfig.json",
+    "migrate:hosted-expiry": "node scripts/extend-hosted-expiry.mjs",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "lint": "echo \"lint placeholder\""
   },

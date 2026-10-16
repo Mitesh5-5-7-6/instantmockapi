@@ -13,7 +13,6 @@ import type { EnvConfig } from '@instantmockapi/config';
 import {
   Job,
   Project,
-  User,
   Version,
   publishFields,
   publishedVersionOf,
@@ -341,7 +340,6 @@ export const versionRoutes: FastifyPluginAsync<VersionRouteOptions> = async (app
         });
       }
 
-      const owner = await User.findById(project.ownerId);
       // Compare-and-swap on the pointer: two tabs publishing different versions
       // must not interleave into a pointer neither of them validated against the
       // artifact rows.
@@ -350,7 +348,6 @@ export const versionRoutes: FastifyPluginAsync<VersionRouteOptions> = async (app
         {
           $set: publishFields(project, version, {
             baseUrl: config.hostedBaseUrl,
-            plan: owner?.plan ?? 'free',
           }),
         },
         { new: true },

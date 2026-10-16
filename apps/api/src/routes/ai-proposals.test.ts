@@ -19,7 +19,7 @@ import { AiProposal, Project, mongoose } from '@instantmockapi/db';
 
 const { Types } = mongoose;
 import { fakeOutputJson } from '@instantmockapi/ai';
-import { getPlanConfig } from '@instantmockapi/config';
+import { LIMITS } from '@instantmockapi/config';
 import {
   authHeader,
   buildTestServer,
@@ -524,8 +524,8 @@ describe('commit', () => {
     expect(stored!.description!.length).toBeLessThanOrEqual(500);
   });
 
-  it('refuses to commit when the plan quota is full, leaving the proposal ready', async () => {
-    const max = getPlanConfig('free').maxProjects;
+  it('refuses to commit when the project limit is reached, leaving the proposal ready', async () => {
+    const max = LIMITS.maxProjects;
     const ownerId = new Types.ObjectId(alice.userId);
     for (let index = 0; index < max; index++) {
       await Project.create({
@@ -541,7 +541,7 @@ describe('commit', () => {
     const doc = await seed(alice.userId);
     const res = await post(`/v1/ai/proposals/${doc._id}/commit`, alice.accessToken);
     expect(res.statusCode).toBe(403);
-    expect(res.json().error.code).toBe('PLAN_LIMIT_EXCEEDED');
+    expect(res.json().error.code).toBe('LIMIT_EXCEEDED');
     expect((await AiProposal.findById(doc._id))!.status).toBe('ready');
     expect(await Project.countDocuments()).toBe(max);
   });

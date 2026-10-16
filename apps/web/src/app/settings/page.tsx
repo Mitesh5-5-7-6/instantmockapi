@@ -1,17 +1,16 @@
 'use client';
 
 /**
- * S8 · Settings (doc 11): account, display name, plan overview, theme.
+ * S8 · Settings (doc 11): account, display name, limits, theme.
  *
- * The plan limits are **served**, not hardcoded here. This page used to carry its
+ * The limits are **served**, not hardcoded here. This page used to carry its
  * own copy of the table, which drifts from `packages/config` the first time a
  * limit changes — and `apps/web` cannot import that package, so a local copy was
  * the only alternative until `/v1/me` started returning them.
- * Billing/plan changes arrive with the billing integration (post-V1 wiring).
  */
 
 import { useEffect, useId, useState } from 'react';
-import { Button, Card, Field, FormError, Input, Select, StatusChip } from '@instantmockapi/ui';
+import { Button, Card, Field, FormError, Input, Select } from '@instantmockapi/ui';
 import { useChangePassword, useMe, useUpdateMe } from '../../lib/hooks';
 import { passwordProblems } from '../../lib/password';
 import { useAction } from '../../lib/use-action';
@@ -27,11 +26,6 @@ import { notifyInfo } from '../../lib/toast';
 import { PasswordField } from '../../components/auth/password-field';
 
 const THEME_KEY = 'instantmockapi.theme';
-
-/** `null` means unlimited on the wire — both server-side sentinels normalise to it. */
-function limitText(limit: number | null, noun: string): string {
-  return limit === null ? `Unlimited ${noun}` : `${limit} ${noun}`;
-}
 
 /**
  * Change the password.
@@ -177,7 +171,6 @@ export default function SettingsPage() {
         <h2>Account</h2>
         <div className="ui-row ui-row--between">
           <span className="ui-mono">{me.data?.email ?? '…'}</span>
-          {me.data ? <StatusChip status="active" label={`${me.data.plan} plan`} /> : null}
         </div>
 
         <Field label="Display name">
@@ -200,11 +193,18 @@ export default function SettingsPage() {
         </div>
 
         {limits ? (
-          <ul className="ui-meta" style={{ margin: 0, paddingLeft: 'var(--space-4)' }}>
-            <li>Hosted API lifetime: {limits.hostedApiLifetimeDays} days</li>
-            <li>{limitText(limits.maxConcurrentJobs, 'concurrent jobs')}</li>
-            <li>{limitText(limits.maxProjects, 'projects')}</li>
-          </ul>
+          <div className="ui-stack" style={{ gap: 'var(--space-1)' }}>
+            <h3 className="ui-meta" style={{ margin: 0 }}>
+              Limits
+            </h3>
+            <ul className="ui-meta" style={{ margin: 0, paddingLeft: 'var(--space-4)' }}>
+              <li>
+                Hosted APIs stay live for {limits.hostedApiLifetimeDays} days after publishing
+              </li>
+              <li>Up to {limits.maxProjects} projects</li>
+              <li>Up to {limits.maxConcurrentJobs} generation jobs at once</li>
+            </ul>
+          </div>
         ) : null}
       </Card>
 

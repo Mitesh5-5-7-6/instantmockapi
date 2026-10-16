@@ -69,12 +69,6 @@ export const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 export type HttpMethod = (typeof HTTP_METHODS)[number];
 
 // ---------------------------------------------------------------------------
-// Plan tiers (doc 01 §7, doc 02 §7)
-// ---------------------------------------------------------------------------
-export const PLAN_TIERS = ['free', 'pro', 'enterprise'] as const;
-export type PlanTier = (typeof PLAN_TIERS)[number];
-
-// ---------------------------------------------------------------------------
 // Job types (doc 07 §2 `jobs.type`)
 // ---------------------------------------------------------------------------
 export const JOB_TYPES = ['full', 'partial'] as const;

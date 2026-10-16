@@ -244,7 +244,6 @@ describe('the guard in createGenerationJob', () => {
         type: 'full',
         requestedArtifacts: ['hosted_api'],
         generationConfig: project.generationConfig,
-        plan: 'free',
       }),
     ).rejects.toThrow(/currently serving traffic/i);
   });
@@ -261,7 +260,6 @@ describe('the guard in createGenerationJob', () => {
         type: 'full',
         requestedArtifacts: ['hosted_api'],
         generationConfig: project.generationConfig,
-        plan: 'free',
       }),
     ).rejects.toThrow();
 
@@ -279,7 +277,6 @@ describe('the guard in createGenerationJob', () => {
       type: 'full',
       requestedArtifacts: ['hosted_api'],
       generationConfig: (await reload()).generationConfig,
-      plan: 'free',
     });
 
     expect(job.jobId).toEqual(expect.any(String));

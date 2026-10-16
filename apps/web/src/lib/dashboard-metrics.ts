@@ -205,32 +205,6 @@ export function toRecentProjectRows(
   });
 }
 
-export interface PlanUsage {
-  label: string;
-  used: number;
-  limit: number | null;
-  percent: number;
-  detail: string;
-}
-
-/**
- * The sidebar meter.
- *
- * Shows **projects against the plan's project limit** — the one limit the API
- * actually enforces. The mockup's "12,450 / 50,000 requests per month" has no
- * denominator anywhere in the system, and shipping an unenforced quota is worse
- * than shipping none: people plan around a number nothing honours.
- */
-export function toPlanUsage(used: number, limit: number | null): PlanUsage {
-  return {
-    label: 'Projects',
-    used,
-    limit,
-    percent: limit === null || limit === 0 ? 0 : Math.min(100, Math.round((used / limit) * 100)),
-    detail: limit === null ? `${used} · unlimited` : `${used} / ${limit}`,
-  };
-}
-
 /** Chart input: the series, labelled by day-of-month. */
 export function toChartPoints(view: DashboardView): { label: string; value: number }[] {
   return view.requests.series.map((bucket) => ({

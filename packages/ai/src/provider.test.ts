@@ -32,6 +32,31 @@ describe('GeminiProvider', () => {
     expect(body.generationConfig).toMatchObject({ responseMimeType: 'application/json' });
   });
 
+  describe('generation settings per model family', () => {
+    const configFor = async (model: string) => {
+      const fetchImpl = respond(200, { candidates: [] });
+      await new GeminiProvider({ apiKey: 'k', model, fetchImpl }).generate(request);
+      return JSON.parse(String((fetchImpl.mock.calls[0]![1] as RequestInit).body)).generationConfig;
+    };
+
+    it('lets Gemini 3 keep its default temperature and thinks at the low level', async () => {
+      // Google: below 1.0 a Gemini 3 model may loop or degrade, and "low"
+      // thinking is the recommended setting when deep reasoning is not needed.
+      for (const model of ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3-pro-preview']) {
+        const config = await configFor(model);
+        expect(config).not.toHaveProperty('temperature');
+        expect(config.thinkingConfig).toEqual({ thinkingLevel: 'low' });
+      }
+    });
+
+    it('keeps the low temperature and no thinking level for older models', async () => {
+      // Gemini 2.5 rejects thinkingLevel, and a low temperature suits it.
+      const config = await configFor('gemini-2.5-flash');
+      expect(config).toMatchObject({ temperature: 0.2 });
+      expect(config).not.toHaveProperty('thinkingConfig');
+    });
+  });
+
   it('applies a timeout signal to the request', async () => {
     const fetchImpl = respond(200, { candidates: [] });
     await provider(fetchImpl).generate(request);

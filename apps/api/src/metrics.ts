@@ -146,19 +146,3 @@ export function averageDuration(
     durationSampleCount: sampleCount,
   };
 }
-
-/**
- * Normalize a plan limit for the wire.
- *
- * `PlanConfig` carries two different sentinels for "unlimited" —
- * `maxConcurrentJobs: Infinity` and `maxProjects: 0`. `JSON.stringify(Infinity)`
- * is `null`, so the two would arrive at the client meaning the same thing by
- * accident while `0` arrived meaning a limit of zero. Both become an explicit
- * `null`, or the enterprise sidebar renders a `0 / 0` meter.
- */
-export function planLimit(value: number): number | null {
-  if (!Number.isFinite(value) || value <= 0) {
-    return null;
-  }
-  return value;
-}
