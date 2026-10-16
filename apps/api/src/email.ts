@@ -37,6 +37,9 @@ const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 /** Beyond this a mail API call is hung; better to fail the request than hold it. */
 const SEND_TIMEOUT_MS = 10_000;
 
+/** The default sender's domain. It belongs to nobody's Resend account. */
+const PLACEHOLDER_SENDER_DOMAIN = 'instantmockapi.dev';
+
 /**
  * Never log a whole email — the body contains a working verification or reset
  * token, and application logs are not a place to keep credentials.
@@ -109,6 +112,16 @@ export function createMailer(config: EnvConfig): Mailer {
   if (config.resendApiKey === '') {
     logger.warn('No RESEND_API_KEY configured; emails will be written to the log');
     return createLogMailer();
+  }
+  const domain = /@([^>\s]+)>?\s*$/.exec(config.emailFrom)?.[1]?.toLowerCase();
+  if (domain === PLACEHOLDER_SENDER_DOMAIN) {
+    // Not fatal: refusing to boot would take the whole API down over mail. But
+    // Resend only sends from a domain verified in the account, so every email
+    // will be refused until EMAIL_FROM names one.
+    logger.warn(
+      'EMAIL_FROM still uses the placeholder domain; Resend will refuse every email until it is a domain verified in your Resend account',
+      { domain },
+    );
   }
   return createResendMailer(config);
 }

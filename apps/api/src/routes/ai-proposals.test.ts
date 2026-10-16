@@ -557,3 +557,53 @@ describe('commit', () => {
 it('no longer serves the old one-step endpoint', async () => {
   expect((await post('/v1/projects/ai', alice.accessToken, { prompt: 'x' })).statusCode).toBe(404);
 });
+
+describe('images on a new proposal', () => {
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const png = (padding = 0) => ({
+    mimeType: 'image/png',
+    data: Buffer.concat([PNG, Buffer.alloc(padding)]).toString('base64'),
+  });
+
+  it('stores the images for the worker but never returns their data', async () => {
+    const res = await post('/v1/ai/proposals', alice.accessToken, {
+      prompt: 'like this sketch',
+      images: [png(), png()],
+    });
+    expect(res.statusCode).toBe(202);
+    expect(res.json().imageCount).toBe(2);
+    expect(JSON.stringify(res.json())).not.toContain(png().data);
+    const stored = await AiProposal.findById(res.json().id).select('+images');
+    expect(stored!.images).toHaveLength(2);
+    expect(stored!.images![0]).toMatchObject({ mimeType: 'image/png', data: png().data });
+  });
+
+  it('accepts a photo with no text, and says what it is for', async () => {
+    const res = await post('/v1/ai/proposals', alice.accessToken, { images: [png()] });
+    expect(res.statusCode).toBe(202);
+    expect(res.json().prompt).toMatch(/attached image/i);
+  });
+
+  it('still needs text or a photo', async () => {
+    const res = await post('/v1/ai/proposals', alice.accessToken, { prompt: '  ' });
+    expect(res.statusCode).toBe(422);
+  });
+
+  it('accepts images above the general 1 MB request limit', async () => {
+    const res = await post('/v1/ai/proposals', alice.accessToken, {
+      prompt: 'big photo',
+      images: [png(1_200_000)],
+    });
+    expect(res.statusCode).toBe(202);
+  });
+
+  it('refuses a file that is not really an image, storing nothing', async () => {
+    const res = await post('/v1/ai/proposals', alice.accessToken, {
+      prompt: 'x',
+      images: [{ mimeType: 'image/png', data: Buffer.from('<svg/>').toString('base64') }],
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details[0].path).toBe('images[0]');
+    expect(await AiProposal.countDocuments()).toBe(0);
+  });
+});

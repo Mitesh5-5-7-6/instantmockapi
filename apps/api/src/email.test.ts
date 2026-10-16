@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { logger } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
 import { createMailer, sendQuietly } from './email.js';
 import type { EmailMessage } from './email-templates.js';
@@ -40,6 +41,26 @@ describe('createMailer', () => {
 
   it('uses Resend once a key is configured', () => {
     expect(createMailer(configWith({ resendApiKey: 're_123' })).kind).toBe('resend');
+  });
+
+  it('warns at startup when the sender is still the placeholder domain', () => {
+    // Resend only sends from a domain verified in the account, and nobody owns
+    // the placeholder; every signup email would fail with a 403.
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    createMailer(
+      configWith({
+        resendApiKey: 're_123',
+        emailFrom: 'InstantMockAPI <no-reply@instantmockapi.dev>',
+      }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/EMAIL_FROM/),
+      expect.objectContaining({ domain: 'instantmockapi.dev' }),
+    );
+    warn.mockClear();
+    createMailer(configWith({ resendApiKey: 're_123' }));
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('never touches the network on the log transport', async () => {

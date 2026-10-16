@@ -24,6 +24,7 @@ import type {
   AiDraftView,
   AiProposalSummary,
   AiProposalView,
+  ProjectGuideView,
   ApiUser,
   ArtifactContent,
   ArtifactListMeta,
@@ -369,6 +370,8 @@ function projectScopedKeys(projectId: string): unknown[][] {
     ['artifact-content', projectId],
     ['technical-notes', projectId],
     ['ai-context', projectId],
+    // Keyed by definition server-side; a changed definition must be read again.
+    ['project-guide', projectId],
     ['blueprint', projectId],
     ['open-draft', projectId],
   ];
@@ -478,7 +481,8 @@ export function useCreateAiProposal() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: {
-      prompt: string;
+      prompt?: string;
+      images?: { mimeType: string; data: string }[];
       name?: string;
       kind?: 'project' | 'single';
       description?: string;
@@ -498,7 +502,7 @@ export function useCreateAiProposal() {
 export function useStartAiEdit(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { prompt: string }) =>
+    mutationFn: (input: { prompt?: string; images?: { mimeType: string; data: string }[] }) =>
       apiFetch<AiProposalView>(`/v1/projects/${projectId}/draft/ai`, {
         method: 'POST',
         body: input,
@@ -1220,6 +1224,34 @@ export function useAiContext(projectId: string | null, wanted: boolean, view = '
     enabled: projectId !== null && wanted,
     retry: false,
     staleTime: DEFINITION_STALE_MS,
+  });
+}
+
+/**
+ * The AI-written guide for one definition. Stored server-side, so this is a
+ * plain read once it exists; it polls only while the guide is being written.
+ */
+export function useProjectGuide(projectId: string | null, wanted: boolean, view = 'current') {
+  return useQuery({
+    queryKey: ['project-guide', projectId, view],
+    queryFn: () => apiFetch<ProjectGuideView>(`/v1/projects/${projectId}/guide?version=${view}`),
+    enabled: projectId !== null && wanted,
+    retry: false,
+    refetchInterval: (query) => (query.state.data?.status === 'generating' ? 3000 : false),
+  });
+}
+
+export function useRegenerateGuide(projectId: string, view = 'current') {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<ProjectGuideView>(`/v1/projects/${projectId}/guide/regenerate?version=${view}`, {
+        method: 'POST',
+        body: {},
+      }),
+    onSuccess: (guide) => {
+      queryClient.setQueryData(['project-guide', projectId, view], guide);
+    },
   });
 }
 

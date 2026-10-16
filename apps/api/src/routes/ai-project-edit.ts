@@ -24,8 +24,11 @@ import { loadDraft } from '../draft-service.js';
 import { toAiProposalView } from '../ai-proposal-serializers.js';
 import {
   AI_PROPOSAL_LIMIT,
+  IMAGES_SCHEMA,
+  IMAGE_BODY_LIMIT,
   assertProposalBudget,
   enqueueProposalOrFail,
+  readPromptInput,
 } from '../ai-proposal-access.js';
 
 export interface AiProjectEditRouteOptions {
@@ -42,6 +45,7 @@ export const aiProjectEditRoutes: FastifyPluginAsync<AiProjectEditRouteOptions> 
     '/projects/:id/draft/ai',
     {
       config: { rateLimit: AI_PROPOSAL_LIMIT },
+      bodyLimit: IMAGE_BODY_LIMIT,
       schema: {
         params: {
           type: 'object',
@@ -50,10 +54,10 @@ export const aiProjectEditRoutes: FastifyPluginAsync<AiProjectEditRouteOptions> 
         },
         body: {
           type: 'object',
-          required: ['prompt'],
           additionalProperties: false,
           properties: {
-            prompt: { type: 'string', minLength: 1, maxLength: 1000 },
+            prompt: { type: 'string', maxLength: 1000 },
+            images: IMAGES_SCHEMA,
             responseLanguage: { type: 'string', pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$' },
           },
         },
@@ -61,15 +65,15 @@ export const aiProjectEditRoutes: FastifyPluginAsync<AiProjectEditRouteOptions> 
     },
     async (request, reply) => {
       const sub = request.authUser?.sub ?? '';
-      const body = request.body as { prompt: string; responseLanguage?: string };
-      const prompt = body.prompt.trim();
-      if (!prompt) {
-        throw new AppError({
-          code: 'VALIDATION_ERROR',
-          message: 'Describe the change you want to make.',
-          details: [{ path: 'prompt', issue: 'must not be blank' }],
-        });
-      }
+      const body = request.body as {
+        prompt?: string;
+        images?: { mimeType: string; data: string }[];
+        responseLanguage?: string;
+      };
+      const { prompt, images } = readPromptInput(body, {
+        blank: 'Describe the change you want to make, or attach a photo of it.',
+        whenImageOnly: 'Apply the changes shown in the attached image.',
+      });
       // Owner check first, so another user's project is a 404 and not a 503.
       const project = await loadOwnedProject((request.params as { id: string }).id, sub);
       // The result is applied to the open draft, so there has to be one.
@@ -88,6 +92,7 @@ export const aiProjectEditRoutes: FastifyPluginAsync<AiProjectEditRouteOptions> 
       const doc = await AiProposal.create({
         ownerId: sub,
         prompt,
+        ...(images.length > 0 ? { images, imageCount: images.length } : {}),
         // The project's own name and kind, so the model keeps both.
         hints: { name: project.name, ...(kind ? { kind } : {}) },
         responseLanguage: body.responseLanguage ?? null,

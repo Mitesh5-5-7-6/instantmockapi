@@ -33,10 +33,11 @@ export const AI_QUEUE_NAME = 'ai-proposal-jobs';
  * overwrite the active run.
  */
 export interface AiProposalJobPayload {
+  /** The AiProposal's id; for a `guide` job, the ProjectGuide's id. */
   proposalId: string;
   run: number;
   /** A missing kind means propose, so jobs queued before SP2 still run. */
-  kind?: 'propose' | 'translate';
+  kind?: 'propose' | 'translate' | 'guide';
   /** Target language of a translate job. */
   language?: string;
 }
@@ -123,6 +124,22 @@ export async function enqueueAiProposalJob(
     AI_QUEUE_NAME,
     { proposalId, run },
     { jobId: `${proposalId}-${run}` },
+  )) as Job<AiProposalJobPayload>;
+}
+
+/**
+ * Write a project's Docs guide. Same queue as proposals, so the AI worker's
+ * concurrency and retry policy cover it; `guide-` keeps its ids apart.
+ */
+export async function enqueueAiGuideJob(
+  guideId: string,
+  run: number,
+): Promise<Job<AiProposalJobPayload>> {
+  logger.info('Enqueuing AI guide job', { guideId, run });
+  return (await getAiProposalQueue().add(
+    AI_QUEUE_NAME,
+    { proposalId: guideId, run, kind: 'guide' },
+    { jobId: `guide-${guideId}-${run}` },
   )) as Job<AiProposalJobPayload>;
 }
 

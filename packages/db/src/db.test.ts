@@ -11,6 +11,7 @@ import {
 } from './published-version.js';
 import { Project, type IProject } from './models/project.js';
 import { ProjectDraft } from './models/projectDraft.js';
+import { ProjectGuide } from './models/projectGuide.js';
 import { Version } from './models/version.js';
 import { Artifact } from './models/artifact.js';
 import { Job } from './models/job.js';
@@ -374,6 +375,7 @@ describe('hardDeleteProject', () => {
     });
     await MockStore.create({ projectId: pid, entity: 'customer', records: [] });
     await ApiLog.create({ projectId: pid, method: 'GET', path: '/x', status: 200, at: new Date() });
+    await ProjectGuide.create({ projectId: pid, contextHash: 'h', context: 'c', version: 1 });
 
     await hardDeleteProject(String(pid));
 
@@ -383,6 +385,7 @@ describe('hardDeleteProject', () => {
     expect(await Job.countDocuments({ projectId: pid })).toBe(0);
     expect(await MockStore.countDocuments({ projectId: pid })).toBe(0);
     expect(await ApiLog.countDocuments({ projectId: pid })).toBe(0);
+    expect(await ProjectGuide.countDocuments({ projectId: pid })).toBe(0);
   });
 
   it('leaves other projects untouched', async () => {

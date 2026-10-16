@@ -23,6 +23,7 @@ export function toAiProposalView(doc: IAiProposal) {
     durationMs: doc.durationMs,
     projectId: doc.projectId ? String(doc.projectId) : null,
     editsProjectId: doc.editsProjectId ? String(doc.editsProjectId) : null,
+    imageCount: doc.imageCount ?? 0,
     draft: doc.draft,
     translation: doc.translation,
     parentId: doc.parentId ? String(doc.parentId) : null,

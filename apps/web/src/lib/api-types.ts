@@ -814,6 +814,8 @@ export interface AiProposalView {
   projectId: string | null;
   /** Set when this proposal edits an existing project rather than creating one. */
   editsProjectId: string | null;
+  /** Photos sent with the prompt. Only the count comes back; the data stays server-side. */
+  imageCount: number;
   draft: AiDraftView | null;
   translation: { status: 'pending' | 'failed'; language: string; message?: string } | null;
   parentId: string | null;
@@ -830,4 +832,17 @@ export interface AiProposalSummary {
   name: string | null;
   projectId: string | null;
   createdAt: string;
+}
+
+/* ── AI-written guide (GET /v1/projects/:id/guide) ── */
+
+export interface ProjectGuideView {
+  /** `unavailable`: no guide for this view (a draft, or AI not configured). */
+  status: 'generating' | 'ready' | 'failed' | 'unavailable';
+  markdown: string | null;
+  error: { code: string; message: string } | null;
+  /** The definition version the guide was written for. */
+  version?: number;
+  updatedAt?: string;
+  reason?: string;
 }

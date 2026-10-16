@@ -10,6 +10,7 @@ export {
   createGenerationWorker,
   AI_QUEUE_NAME,
   getAiProposalQueue,
+  enqueueAiGuideJob,
   enqueueAiProposalJob,
   enqueueAiTranslateJob,
   createAiProposalWorker,

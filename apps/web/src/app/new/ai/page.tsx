@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, Card, Field, FormError, Input, Select, Textarea } from '@instantmockapi/ui';
+import { ImageAttach } from '../../../components/image-attach';
+import type { PromptImageUpload } from '../../../lib/prompt-images';
 import {
   useAiProposal,
   useAiProposals,
@@ -33,6 +35,7 @@ function NewAi() {
   const searchParams = useSearchParams();
   // Read once: the review page of a cancelled proposal sends its prompt back here (spec §7).
   const [prompt, setPrompt] = useState(() => searchParams.get('prompt') ?? '');
+  const [images, setImages] = useState<PromptImageUpload[]>([]);
   const [name, setName] = useState('');
   const [language, setLanguage] = useState(defaultResponseLanguage());
   const [proposalId, setProposalId] = useState<string | null>(null);
@@ -60,7 +63,10 @@ function NewAi() {
   const generate = () =>
     run(async () => {
       const view = await create.mutateAsync({
-        prompt: prompt.trim(),
+        ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
+        ...(images.length > 0
+          ? { images: images.map(({ mimeType, data }) => ({ mimeType, data })) }
+          : {}),
         name: name.trim() || undefined,
         responseLanguage: responseLanguageFor(language),
       });
@@ -186,6 +192,7 @@ function NewAi() {
             placeholder="Describe the API you want to build…"
           />
         </Field>
+        <ImageAttach images={images} onChange={setImages} disabled={create.isPending} />
         <div className="ui-row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
           {examples.map((example) => (
             <Button key={example} variant="secondary" size="sm" onClick={() => setPrompt(example)}>
@@ -209,7 +216,10 @@ function NewAi() {
           <Button variant="secondary" onClick={() => router.back()}>
             Back
           </Button>
-          <Button onClick={generate} disabled={create.isPending || !prompt.trim()}>
+          <Button
+            onClick={generate}
+            disabled={create.isPending || (!prompt.trim() && images.length === 0)}
+          >
             {create.isPending ? 'Starting…' : 'Generate API'}
           </Button>
         </div>

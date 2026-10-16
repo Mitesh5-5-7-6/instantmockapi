@@ -32,6 +32,21 @@ describe('GeminiProvider', () => {
     expect(body.generationConfig).toMatchObject({ responseMimeType: 'application/json' });
   });
 
+  it('sends attached images as inline data ahead of the text', async () => {
+    const fetchImpl = respond(200, { candidates: [] });
+    await provider(fetchImpl).generate({
+      system: 'SYS',
+      turns: [{ role: 'user', text: 'hello', images: [{ mimeType: 'image/png', data: 'AAAA' }] }],
+    });
+    const body = JSON.parse(String((fetchImpl.mock.calls[0]![1] as RequestInit).body));
+    expect(body.contents).toEqual([
+      {
+        role: 'user',
+        parts: [{ inlineData: { mimeType: 'image/png', data: 'AAAA' } }, { text: 'hello' }],
+      },
+    ]);
+  });
+
   describe('generation settings per model family', () => {
     const configFor = async (model: string) => {
       const fetchImpl = respond(200, { candidates: [] });

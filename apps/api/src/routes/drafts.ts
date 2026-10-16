@@ -18,6 +18,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { ArtifactType } from '@instantmockapi/shared';
 import type { EnvConfig } from '@instantmockapi/config';
 import { loadOwnedProject } from '../access.js';
+import { startGuideInBackground } from '../project-guide.js';
 import { REGENERATABLE_ARTIFACTS } from '../generation-config.js';
 import {
   analyseDraft,
@@ -166,6 +167,12 @@ export const draftRoutes: FastifyPluginAsync<DraftRouteOptions> = async (app, { 
           : {}),
         ...(body.note !== undefined ? { note: body.note } : {}),
       });
+
+      // The definition changed, so its Docs guide is new too. Started now so it is
+      // usually ready by the time anyone opens the tab.
+      if (result.committed && config.geminiApiKey) {
+        startGuideInBackground(String(project._id));
+      }
 
       const payload = {
         committed: result.committed,
